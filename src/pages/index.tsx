@@ -1,42 +1,17 @@
-import { Link as ChakraLink, Text, Code, List, ListIcon, ListItem } from '@chakra-ui/react';
-import { FaCheckCircle } from 'react-icons/fa';
+import { Flex } from '@chakra-ui/react';
 
-import { CTA } from '../components/CTA';
-import { DarkModeSwitch } from '../components/DarkModeSwitch';
-import { Footer } from '../components/Footer';
-import { Main } from '../components/Main';
 import { Container } from '@/components/Container';
-import { Hero } from '@/components/Hero';
+import { DarkModeSwitch } from '@/components/DarkModeSwitch';
+import { Main } from '@/components/Main';
+import { NavOrAside } from '@/components/NavOrAside';
 
 const Index: React.FC = () => (
-  <Container height="100vh">
-    <Hero />
-    <Main>
-      <Text>
-        Example repository of <Code>Next.js</Code> + <Code>chakra-ui</Code> + <Code>typescript</Code>.
-      </Text>
-
-      <List spacing={3} my={0}>
-        <ListItem>
-          <ListIcon as={FaCheckCircle} color="green.500" />
-          <ChakraLink isExternal href="https://chakra-ui.com" flexGrow={1} mr={2}>
-            Chakra UI
-          </ChakraLink>
-        </ListItem>
-        <ListItem>
-          <ListIcon as={FaCheckCircle} color="green.500" />
-          <ChakraLink isExternal href="https://nextjs.org" flexGrow={1} mr={2}>
-            Next.js
-          </ChakraLink>
-        </ListItem>
-      </List>
-    </Main>
-
+  <Container height="100%">
+    <Flex direction={['column', 'row']} padding="16px" maxWidth="1200px" margin="auto">
+      <NavOrAside />
+      <Main></Main>
+    </Flex>
     <DarkModeSwitch />
-    <Footer>
-      <Text>Next ❤️ Chakra</Text>
-    </Footer>
-    <CTA />
   </Container>
 );
 
