@@ -43,5 +43,5 @@ ref: [here](https://github.com/conventional-changelog/commitlint/tree/master/@co
 - [x] ESLint
 - [x] Prettier
 - [x] Commitlint
+- [x] github-actions
 - [ ] Dockerize
-- [ ] github-actions

@@ -1,5 +1,6 @@
+const isProd = process.env.NODE_ENV === 'production';
+
 module.exports = {
-  future: {
-    webpack5: true,
-  },
+  assetPrefix: isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '',
+  basePath: isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '',
 };
