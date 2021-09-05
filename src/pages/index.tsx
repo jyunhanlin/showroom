@@ -1,16 +1,24 @@
-import { Flex } from '@chakra-ui/react';
+import { Heading, Link as ChakraLink, UnorderedList, ListItem } from '@chakra-ui/react';
+import Link from 'next/link';
 
 import { Container } from '@/components/layout/Container';
 import { DarkModeSwitch } from '@/components/layout/DarkModeSwitch';
 import { Main } from '@/components/layout/Main';
-import { NavOrAside } from '@/components/layout/NavOrAside';
 
-const Index: React.FC = () => (
+const Index = () => (
   <Container height="100%">
-    <Flex direction={['column', 'row']} padding="16px" maxWidth="1200px" margin="auto">
-      <NavOrAside />
-      <Main></Main>
-    </Flex>
+    <Main padding="1rem">
+      <Heading as="h3" size="md">
+        React Three Fiber playground
+      </Heading>
+      <UnorderedList spacing="4px" paddingTop="1rem">
+        <ListItem>
+          <ChakraLink as={Link} href="/particles">
+            Particles
+          </ChakraLink>
+        </ListItem>
+      </UnorderedList>
+    </Main>
     <DarkModeSwitch />
   </Container>
 );

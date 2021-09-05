@@ -14,11 +14,8 @@ function MyApp({ Component, pageProps }: AppProps) {
       <Global
         styles={css`
           html,
-          body {
-            height: 100%;
-          }
-
-          body div#__next {
+          body,
+          div#__next {
             height: 100%;
           }
         `}
