@@ -1,4 +1,4 @@
-import { Container } from '@/components/Container';
+import { Container } from '@/components/layout/Container';
 import { Particles } from '@/components/r3f/Particles';
 
 const ParticlesPage = () => {
