@@ -1,9 +1,9 @@
 import { Flex } from '@chakra-ui/react';
 
-import { Container } from '@/components/Container';
-import { DarkModeSwitch } from '@/components/DarkModeSwitch';
-import { Main } from '@/components/Main';
-import { NavOrAside } from '@/components/NavOrAside';
+import { Container } from '@/components/layout/Container';
+import { DarkModeSwitch } from '@/components/layout/DarkModeSwitch';
+import { Main } from '@/components/layout/Main';
+import { NavOrAside } from '@/components/layout/NavOrAside';
 
 const Index: React.FC = () => (
   <Container height="100%">
