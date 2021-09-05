@@ -17,6 +17,11 @@ const Index = () => (
             Particles
           </ChakraLink>
         </ListItem>
+        <ListItem>
+          <ChakraLink as={Link} href="/ripple-blend">
+            Ripple Blend
+          </ChakraLink>
+        </ListItem>
       </UnorderedList>
     </Main>
     <DarkModeSwitch />
