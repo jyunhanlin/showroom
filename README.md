@@ -1,3 +1,9 @@
+# Showroom
+
+Generate GitHub Pages from branch
+
+- [r3f-playground](https://jyunhanlin.github.io/showroom/r3f-playground/)
+
 ## Setup and use
 
 ### Install
@@ -14,34 +20,20 @@ npm run dev
 
 ## Tech stack
 
-- next.js
-- react
-- chakra-ui
+- Next.js
+- React.js
+- Chakra-ui
 
 ## Code style
 
 - Use eslint and prettier to lint and format the source code.
 
-- Use commitlint to check and format the commit message.
-
-> Setup the settings for vscode which format the file on save.
-
-> When `git commit`, use husky and lint-staged to check the type, lint and format the source code, and also check the format for git commit message
-
-### recommend vscode extensions
-
-- [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint)
-- [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
-- [stylelint](https://marketplace.visualstudio.com/items?itemName=stylelint.vscode-stylelint)
+- Use commitlint to check the format the commit message.
 
 ### Git commit message conventions
 
 ref: [here](https://github.com/conventional-changelog/commitlint/tree/master/@commitlint/config-conventional)
 
-## Road map
+## Road map of project
 
-- [x] ESLint
-- [x] Prettier
-- [x] Commitlint
-- [x] github-actions
 - [ ] Dockerize
