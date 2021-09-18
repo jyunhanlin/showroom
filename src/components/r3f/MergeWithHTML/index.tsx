@@ -174,7 +174,7 @@ const Main = styled.main`
   .item img {
     width: 100%;
     display: block;
-    /* opacity: 0; */
+    opacity: 0;
   }
   .item__image {
     position: relative;
