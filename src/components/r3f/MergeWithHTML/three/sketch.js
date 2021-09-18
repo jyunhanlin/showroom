@@ -11,10 +11,8 @@ import fragment from './shaders/fragment.glsl.js';
 import noise from './shaders/noise.glsl.js';
 import vertex from './shaders/vertex.glsl.js';
 
-const isProd = process.env.NODE_ENV === 'production';
-const assetPath = isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '';
-
-const ocean = `${assetPath}/img/ocean.jpg`;
+// const isProd = process.env.NODE_ENV === 'production';
+// const assetPath = isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '';
 
 export default class Sketch {
   constructor(options) {
@@ -61,7 +59,6 @@ export default class Sketch {
       this.mouseMovement();
       this.resize();
       this.setupResize();
-      // this.addObjects();
       this.composerPass();
       this.render();
       // window.addEventListener('scroll',()=>{
@@ -134,7 +131,6 @@ export default class Sketch {
         const intersects = this.raycaster.intersectObjects(this.scene.children);
 
         if (intersects.length > 0) {
-          // console.log(intersects[0]);
           let obj = intersects[0].object;
           obj.material.uniforms.hover.value = intersects[0].uv;
         }
@@ -162,12 +158,10 @@ export default class Sketch {
         uImage: { value: 0 },
         hover: { value: new THREE.Vector2(0.5, 0.5) },
         hoverState: { value: 0 },
-        oceanTexture: { value: new THREE.TextureLoader().load(ocean) },
       },
       side: THREE.DoubleSide,
       fragmentShader: fragment,
       vertexShader: vertex,
-      // wireframe: true,
     });
 
     this.materials = [];
@@ -178,10 +172,6 @@ export default class Sketch {
       let geometry = new THREE.PlaneBufferGeometry(bounds.width, bounds.height, 10, 10);
       let texture = new THREE.Texture(img);
       texture.needsUpdate = true;
-      // let material = new THREE.MeshBasicMaterial({
-      //     // color: 0xff0000,
-      //     map: texture
-      // })
 
       let material = this.material.clone();
 
@@ -224,26 +214,6 @@ export default class Sketch {
       o.mesh.position.y = this.currentScroll - o.top + this.height / 2 - o.height / 2;
       o.mesh.position.x = o.left - this.width / 2 + o.width / 2;
     });
-  }
-
-  addObjects() {
-    this.geometry = new THREE.PlaneBufferGeometry(200, 400, 10, 10);
-    // this.geometry = new THREE.SphereBufferGeometry( 0.4, 40,40 );
-    this.material = new THREE.MeshNormalMaterial();
-
-    this.material = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0 },
-        oceanTexture: { value: new THREE.TextureLoader().load(ocean) },
-      },
-      side: THREE.DoubleSide,
-      fragmentShader: fragment,
-      vertexShader: vertex,
-      // wireframe: true,
-    });
-
-    this.mesh = new THREE.Mesh(this.geometry, this.material);
-    this.scene.add(this.mesh);
   }
 
   render() {
