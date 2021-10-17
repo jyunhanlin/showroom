@@ -26,6 +26,11 @@ const Index = () => (
             Ripple Blend 2
           </ChakraLink>
         </ListItem>
+        <ListItem>
+          <ChakraLink as={Link} href="/merge-with-html">
+            Merge with HTML
+          </ChakraLink>
+        </ListItem>
       </UnorderedList>
     </Main>
     <DarkModeSwitch />

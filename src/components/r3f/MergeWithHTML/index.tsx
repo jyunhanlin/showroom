@@ -1,3 +1,5 @@
+// practice with https://www.awwwards.com/academy/course/merging-webgl-and-html-worlds
+
 import styled from '@emotion/styled';
 import { useEffect } from 'react';
 
