@@ -30,6 +30,10 @@ const Index = () => (
           <ChakraLink as={Link} href="/merge-with-html">
             Merge with HTML
           </ChakraLink>
+          ,{' '}
+          <ChakraLink as={Link} href="/scroll-effect">
+            Scroll Effect
+          </ChakraLink>
         </ListItem>
       </UnorderedList>
     </Main>
