@@ -21,13 +21,13 @@ export const MergeWithHTML = () => {
         <div className="page">
           <header>
             <h1>Oceans</h1>
-            <img src={`${assetPath}/img/header.jpg`} alt="" />
+            <img src={`${assetPath}/img/merge-with-html/header.jpg`} alt="" />
           </header>
 
           <div className="grid">
             <div className="item item_v">
               <div className="item__image">
-                <img src={`${assetPath}/img/1.jpg`} alt="" />
+                <img src={`${assetPath}/img/merge-with-html/1.jpg`} alt="" />
                 <div className="item__meta">December 23, 2020</div>
               </div>
 
@@ -40,7 +40,7 @@ export const MergeWithHTML = () => {
 
             <div className="item item_h">
               <div className="item__image">
-                <img src={`${assetPath}/img/2.jpg`} alt="" />
+                <img src={`${assetPath}/img/merge-with-html/2.jpg`} alt="" />
                 <div className="item__meta">December 01, 2020</div>
               </div>
 
@@ -52,7 +52,7 @@ export const MergeWithHTML = () => {
 
             <div className="item item_h">
               <div className="item__image">
-                <img src={`${assetPath}/img/4.jpg`} alt="" />
+                <img src={`${assetPath}/img/merge-with-html/4.jpg`} alt="" />
                 <div className="item__meta">November 26, 2020</div>
               </div>
 
@@ -65,7 +65,7 @@ export const MergeWithHTML = () => {
 
             <div className="item item_v">
               <div className="item__image">
-                <img src={`${assetPath}/img/3.jpg`} alt="" />
+                <img src={`${assetPath}/img/merge-with-html/3.jpg`} alt="" />
                 <div className="item__meta">November 03, 2020</div>
               </div>
 
@@ -75,7 +75,7 @@ export const MergeWithHTML = () => {
 
             <div className="item item_v">
               <div className="item__image">
-                <img src={`${assetPath}/img/1.jpg`} alt="" />
+                <img src={`${assetPath}/img/merge-with-html/1.jpg`} alt="" />
                 <div className="item__meta">October 05, 2020</div>
               </div>
 
@@ -85,7 +85,7 @@ export const MergeWithHTML = () => {
 
             <div className="item item_h">
               <div className="item__image">
-                <img src={`${assetPath}/img/2.jpg`} alt="" />
+                <img src={`${assetPath}/img/merge-with-html/2.jpg`} alt="" />
                 <div className="item__meta">July 27, 2020</div>
               </div>
 
@@ -95,7 +95,7 @@ export const MergeWithHTML = () => {
 
             <div className="item item_h">
               <div className="item__image">
-                <img src={`${assetPath}/img/4.jpg`} alt="" />
+                <img src={`${assetPath}/img/merge-with-html/4.jpg`} alt="" />
                 <div className="item__meta">August 18, 2020</div>
               </div>
 
@@ -105,7 +105,7 @@ export const MergeWithHTML = () => {
 
             <div className="item item_v">
               <div className="item__image">
-                <img src={`${assetPath}/img/3.jpg`} alt="" />
+                <img src={`${assetPath}/img/merge-with-html/3.jpg`} alt="" />
                 <div className="item__meta">June 01, 2020</div>
               </div>
 
