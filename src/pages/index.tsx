@@ -28,6 +28,11 @@ const Index = () => (
               Scroll Effect
             </ChakraLink>
           </ListItem>
+          <ListItem>
+            <ChakraLink as={Link} href="/scroll-effect-horizontal">
+              Scroll Effect Horizontal
+            </ChakraLink>
+          </ListItem>
         </UnorderedList>
       </Box>
       <Box width="50%" height="100%" overflow="auto">
