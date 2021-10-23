@@ -7,8 +7,8 @@ import { Main } from '@/components/layout/Main';
 
 const Index = () => (
   <Container height="100%">
-    <Main display="flex" padding="1rem" height="100%">
-      <Box width="50%" height="100%" overflow="auto">
+    <Main display={['box', 'flex']} padding={['3rem 1rem', '1rem']} height="100%">
+      <Box width={['100%', '50%']} height={['auto', '100%']} overflow="auto" marginBottom="2rem">
         <Heading as="h3" size="md">
           React Three Fiber playground
         </Heading>
@@ -35,7 +35,7 @@ const Index = () => (
           </ListItem>
         </UnorderedList>
       </Box>
-      <Box width="50%" height="100%" overflow="auto">
+      <Box width={['100%', '50%']} height={['auto', '100%']} overflow="auto">
         <Heading as="h3" size="md">
           Three.js playground
         </Heading>
