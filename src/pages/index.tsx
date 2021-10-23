@@ -21,10 +21,6 @@ const Index = () => (
           <ChakraLink as={Link} href="/ripple-blend">
             Ripple Blend
           </ChakraLink>
-          ,{' '}
-          <ChakraLink as={Link} href="/ripple-blend2">
-            Ripple Blend 2
-          </ChakraLink>
         </ListItem>
         <ListItem>
           <ChakraLink as={Link} href="/merge-with-html">
