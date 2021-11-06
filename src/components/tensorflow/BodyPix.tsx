@@ -64,7 +64,7 @@ export const BodyPix = () => {
   };
   return (
     <Flex flexWrap="wrap">
-      <Box position="relative" width="50vw" minWidth="400px" minHeight="300px" margin="20px auto">
+      <Box position="relative" width="50vw" minWidth="400px" minHeight="300px" margin="20px auto" overflow="hidden">
         <Webcam
           audio={false}
           ref={webcamRef}
