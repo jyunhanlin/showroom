@@ -1,5 +1,5 @@
 import { Container } from '@/components/layout/Container';
-import { BodyPix } from '@/components/tensorflow/BodyPix';
+import { BodyPix } from '@/components/tf-playground/BodyPix';
 
 const BodyPixPage = () => {
   return (
