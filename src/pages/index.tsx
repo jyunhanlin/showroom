@@ -18,6 +18,11 @@ const Index = () => (
               BodyPix
             </ChakraLink>
           </ListItem>
+          <ListItem>
+            <ChakraLink as={Link} href="/face-mask">
+              FaceMask
+            </ChakraLink>
+          </ListItem>
         </UnorderedList>
       </Box>
     </Main>
