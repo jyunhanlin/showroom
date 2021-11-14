@@ -33,6 +33,20 @@ const Index = () => (
               Scroll Effect Horizontal
             </ChakraLink>
           </ListItem>
+          <ListItem>
+            <ChakraLink as={Link} href="/littlest-tokyo">
+              Littlest Tokyo
+            </ChakraLink>{' '}
+            (
+            <ChakraLink
+              href="https://twitter.com/0xca0a/status/1459521570934771713"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              copy from here
+            </ChakraLink>
+            )
+          </ListItem>
         </UnorderedList>
       </Box>
       <Box width={['100%', '50%']} height={['auto', '100%']} overflow="auto">
