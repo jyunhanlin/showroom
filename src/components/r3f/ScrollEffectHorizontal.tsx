@@ -5,9 +5,9 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Suspense, useState, useRef } from 'react';
 import * as THREE from 'three';
 
+import { assetPath } from '@/utils/assetPath';
+
 const damp = THREE.MathUtils.damp;
-const isProd = process.env.NODE_ENV === 'production';
-const assetPath = isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '';
 
 const urls = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 5, 7, 8, 2, 4, 9, 6].map(
   (u) => `${assetPath}/img/scroll-effect-horizontal/${u}.jpg`,

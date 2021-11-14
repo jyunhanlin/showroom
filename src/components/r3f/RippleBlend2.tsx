@@ -2,6 +2,8 @@ import { Canvas, useLoader, useFrame } from '@react-three/fiber';
 import { Suspense, useRef, useMemo, useEffect } from 'react';
 import * as THREE from 'three';
 
+import { assetPath } from '@/utils/assetPath';
+
 const vshader = /* glsl */ `
 varying vec2 vUv;
 void main() {
@@ -37,9 +39,6 @@ void main (void)
   gl_FragColor = vec4(color, 1.0);
 }
 `;
-
-const isProd = process.env.NODE_ENV === 'production';
-const assetPath = isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '';
 
 function RippleImages() {
   const currentIdx = useRef(1);

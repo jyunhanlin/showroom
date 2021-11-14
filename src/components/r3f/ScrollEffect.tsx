@@ -6,8 +6,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Suspense, useRef } from 'react';
 import * as THREE from 'three';
 
-const isProd = process.env.NODE_ENV === 'production';
-const assetPath = isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '';
+import { assetPath } from '@/utils/assetPath';
 
 const Images = () => {
   const { width, height } = useThree((state) => state.viewport);

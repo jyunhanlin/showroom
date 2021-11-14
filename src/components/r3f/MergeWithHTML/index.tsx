@@ -4,9 +4,7 @@ import styled from '@emotion/styled';
 import { useEffect } from 'react';
 
 import Sketch from './three/sketch';
-
-const isProd = process.env.NODE_ENV === 'production';
-const assetPath = isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '';
+import { assetPath } from '@/utils/assetPath';
 
 export const MergeWithHTML = () => {
   useEffect(() => {

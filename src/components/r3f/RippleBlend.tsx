@@ -3,6 +3,8 @@ import { Canvas, useLoader, useFrame, extend, ReactThreeFiber } from '@react-thr
 import { Suspense, useRef, useEffect } from 'react';
 import * as THREE from 'three';
 
+import { assetPath } from '@/utils/assetPath';
+
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
@@ -56,9 +58,6 @@ const RippleImageMaterial = shaderMaterial(
 );
 
 extend({ RippleImageMaterial });
-
-const isProd = process.env.NODE_ENV === 'production';
-const assetPath = isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '';
 
 function RippleImages() {
   const currentIdx = useRef(1);
