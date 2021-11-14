@@ -1,6 +1,7 @@
 # Showroom
 
-- [react three fiber playground](https://jyunhanlin.github.io/showroom/r3f-playground/)
+- [React Three Fiber playground](https://jyunhanlin.github.io/showroom/r3f-playground/)
+- [TensorFlow playground](https://jyunhanlin.github.io/showroom/tf-playground/)
 
 ## Setup and use
 
