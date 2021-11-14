@@ -64,8 +64,8 @@ function RippleImages() {
   const currentIdx = useRef(1);
   const matRef = useRef<THREE.shaderMaterial>();
 
-  const img1 = useLoader(THREE.TextureLoader, `${assetPath}/ripple1.jpeg`);
-  const img2 = useLoader(THREE.TextureLoader, `${assetPath}/ripple2.jpeg`);
+  const img1 = useLoader(THREE.TextureLoader, `${assetPath}/img/ripple-blend/ripple1.jpeg`);
+  const img2 = useLoader(THREE.TextureLoader, `${assetPath}/img/ripple-blend/ripple2.jpeg`);
 
   const handleClick = () => {
     matRef.current.u_time = 0;

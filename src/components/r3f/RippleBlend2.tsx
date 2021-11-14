@@ -45,8 +45,8 @@ function RippleImages() {
   const currentIdx = useRef(1);
   const matRef = useRef();
 
-  const img1 = useLoader(THREE.TextureLoader, `${assetPath}/ripple1.jpeg`);
-  const img2 = useLoader(THREE.TextureLoader, `${assetPath}/ripple2.jpeg`);
+  const img1 = useLoader(THREE.TextureLoader, `${assetPath}/img/ripple-blend/ripple1.jpeg`);
+  const img2 = useLoader(THREE.TextureLoader, `${assetPath}/img/ripple-blend/ripple2.jpeg`);
 
   const uniforms = useMemo(
     () => ({
