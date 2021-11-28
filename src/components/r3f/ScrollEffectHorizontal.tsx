@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck
 import { ScrollControls, Scroll, useScroll, Image } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';

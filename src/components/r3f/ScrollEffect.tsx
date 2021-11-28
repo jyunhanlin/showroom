@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck
 import { Text } from '@chakra-ui/react';
 import { Preload, ScrollControls, Scroll, useScroll, Image } from '@react-three/drei';

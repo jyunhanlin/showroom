@@ -8,11 +8,9 @@ import { assetPath } from '@/utils/assetPath';
 function LittlestTokyoModel({ ...props }) {
   // This hook gives you offets, ranges and other useful things
   const scroll = useScroll();
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   const { scene, nodes, animations } = useGLTF(`${assetPath}/3d-model/LittlestTokyo-transformed.glb`);
   const { actions } = useAnimations(animations, scene);
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   useLayoutEffect(() => Object.values(nodes).forEach((node) => (node.receiveShadow = node.castShadow = true)));
   useEffect(() => void (actions['Take 001'].play().paused = true), [actions]);
