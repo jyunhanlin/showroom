@@ -32,13 +32,14 @@ jobs:
         run: |
           echo "base_path=/${{ env.GITHUB_REPOSITORY_NAME_PART }}/${{ env.GITHUB_REF_SLUG }}" >> $GITHUB_ENV
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Use Node.js
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
         with:
           node-version: '16'
           cache: 'npm'
-      - run: npm install
+      - name: Install dependencies
+        run: npm install
       - name: Next export
         env:
           NEXT_PUBLIC_BASE_PATH: ${{ env.base_path }}
