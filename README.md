@@ -20,4 +20,4 @@ npm run dev
 ## Road map of project
 
 - [ ] Dockerize
-- [ ] Enhanced github actions
+- [ ] GitHub Actions enhancement
