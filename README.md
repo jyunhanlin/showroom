@@ -17,7 +17,7 @@ npm install
 npm run dev
 ```
 
-## Road map of project
+## TODO
 
-- [ ] Dockerize
-- [ ] GitHub Actions enhancement
+- [ ] ESLint
+- [ ] CI/CD for monorepo

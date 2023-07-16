@@ -1,7 +1,9 @@
 const isProd = process.env.NODE_ENV === 'production';
 
-module.exports = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   assetPrefix: isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '',
   basePath: isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '',
-  swcMinify: true,
 };
+
+module.exports = nextConfig;
