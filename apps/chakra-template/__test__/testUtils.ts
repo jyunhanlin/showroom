@@ -4,7 +4,7 @@ import { render } from '@testing-library/react';
 // import { TranslationProvider } from "my-i18n-lib"
 // import defaultStrings from "i18n/en-x-default"
 
-const Providers = ({ children }) => {
+const Providers = ({ children }: { children: React.ReactNode }) => {
   return children;
   // return (
   //   <ThemeProvider theme="light">
