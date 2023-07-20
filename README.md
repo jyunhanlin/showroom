@@ -7,6 +7,6 @@ monorepo for different playground
 
 - TODO
 
-  - [] migrate old playground
-  - [] github actions
-  - [] build system?
+  - [ ] migrate old playground
+  - [ ] github actions
+  - [ ] build system?
