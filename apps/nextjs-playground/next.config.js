@@ -1,9 +1,12 @@
 const isProd = process.env.NODE_ENV === 'production';
 
+const PATH_PREFIX = 'nextjs-playground';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  assetPrefix: isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '',
-  basePath: isProd ? process.env.NEXT_PUBLIC_BASE_PATH : '',
+  assetPrefix: isProd ? PATH_PREFIX : '',
+  basePath: isProd ? PATH_PREFIX : '',
+  output: 'export',
 };
 
 module.exports = nextConfig;
