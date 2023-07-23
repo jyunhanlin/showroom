@@ -1,5 +1,11 @@
-import Index from '.';
+import { Metadata } from 'next';
 
-export default function IndexPage() {
-  return <Index />;
+import Home from './home';
+
+export const metadata: Metadata = {
+  title: 'Showroom | Hank Lin',
+};
+
+export default function HomePage() {
+  return <Home />;
 }
