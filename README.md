@@ -2,11 +2,9 @@
 
 monorepo for different playground
 
-- [React Three Fiber playground](https://jyunhanlin.github.io/showroom/r3f-playground/)
+- [Next.js playground](https://jyunhanlin.github.io/showroom/nextjs-playground/)
 - [TensorFlow playground](https://jyunhanlin.github.io/showroom/tf-playground/)
 
 TODO
 
-- [ ] migrate old playground
-- [ ] github actions
 - [ ] build system?
