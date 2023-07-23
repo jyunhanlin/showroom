@@ -1,6 +1,6 @@
 const isProd = process.env.NODE_ENV === 'production';
 
-const PATH_PREFIX = 'nextjs-playground';
+const PATH_PREFIX = '/nextjs-playground';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
