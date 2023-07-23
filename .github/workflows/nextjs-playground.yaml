@@ -42,7 +42,7 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm -F nextjs-playground install
 
       - name: Next export
         run: pnpm run next:build
