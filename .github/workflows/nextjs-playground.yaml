@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - nextjs-playground/**
+      - apps/nextjs-playground/**
 
 jobs:
   # testing:
