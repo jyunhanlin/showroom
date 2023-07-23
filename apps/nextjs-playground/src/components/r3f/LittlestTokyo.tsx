@@ -4,13 +4,11 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { Suspense, useEffect, useLayoutEffect } from 'react';
 import * as THREE from 'three';
 
-import { assetPath } from '@/utils/assetPath';
-
 function LittlestTokyoModel({ ...props }) {
   // This hook gives you offets, ranges and other useful things
   const scroll = useScroll();
   // @ts-ignore
-  const { scene, nodes, animations } = useGLTF(`${assetPath}/3d-model/LittlestTokyo-transformed.glb`);
+  const { scene, nodes, animations } = useGLTF('/3d-model/LittlestTokyo-transformed.glb');
   const { actions } = useAnimations(animations, scene);
   // @ts-ignore
   useLayoutEffect(() => Object.values(nodes).forEach((node) => (node.receiveShadow = node.castShadow = true)));
@@ -39,7 +37,7 @@ author: glenatron (https://sketchfab.com/glenatron)
 license: CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
 source: https://sketchfab.com/models/94b24a60dc1b48248de50bf087c0f042
 title: Littlest Tokyo */
-useGLTF.preload(`${assetPath}/3d-model/LittlestTokyo-transformed.glb`);
+// useGLTF.preload('/3d-model/LittlestTokyo-transformed.glb');
 
 export const LittlestTokyo = () => {
   return (

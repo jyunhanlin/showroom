@@ -4,7 +4,7 @@ const PATH_PREFIX = '/showroom/nextjs-playground';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // assetPrefix: isProd ? PATH_PREFIX : '',
+  // assetPrefix: 'http://localhost:5500/', //isProd ? PATH_PREFIX : '',
   basePath: isProd ? PATH_PREFIX : '',
   output: 'export',
 };
