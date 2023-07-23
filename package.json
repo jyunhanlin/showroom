@@ -4,6 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "next:dev": "pnpm --filter nextjs-playground run dev",
+    "next:start": "pnpm --filter nextjs-playground run start",
+    "next:build": "pnpm --filter nextjs-playground run build",
     "preinstall": "npx -y only-allow pnpm",
     "prepare": "husky install"
   },
