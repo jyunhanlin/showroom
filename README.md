@@ -6,4 +6,4 @@ monorepo for different playground
 
 TODO
 
-- [ ] build system?
+- [ ] build system (Nx, turborepo, ...)
