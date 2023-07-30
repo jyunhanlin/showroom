@@ -1,8 +1,6 @@
 import { Metadata } from 'next';
 import { Fira_Mono } from 'next/font/google';
 
-import { Providers } from './providers';
-
 export const metadata: Metadata = {
   title: {
     template: '%s | Hank Lin',
@@ -30,9 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body>
-        <Providers>{children}</Providers>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
