@@ -190,71 +190,17 @@ function NuPhyKeyboard({ position }: DeskItemProps) {
 }
 
 function MxMasterMouse({ position }: DeskItemProps) {
-  const W = 0.088;
-  const L = 0.128;
-  const BASE_H = 0.018;
-  const HUMP_H = 0.032;
-  const BLACK = '#1a1a1c';
-  const RUBBER = '#232325';
-  const METAL = '#8d9096';
-  const ACCENT = '#3a3a3c';
+  const W = 0.064;
+  const L = 0.108;
+  const H = 0.032;
   return (
     <group position={position}>
-      <RoundedBox
-        args={[W, BASE_H, L]}
-        radius={0.018}
-        smoothness={6}
-        position={[0, BASE_H / 2, 0]}
-        castShadow
-        receiveShadow
-      >
-        <meshStandardMaterial color={BLACK} roughness={0.75} metalness={0.05} />
+      <RoundedBox args={[W, H, L]} radius={0.024} smoothness={6} position={[0, H / 2, 0]} castShadow receiveShadow>
+        <meshStandardMaterial color="#1c1c1e" roughness={0.6} metalness={0.1} />
       </RoundedBox>
-      <RoundedBox
-        args={[W * 0.86, HUMP_H, L * 0.78]}
-        radius={0.02}
-        smoothness={6}
-        position={[0.003, BASE_H + HUMP_H / 2 - 0.003, -L * 0.1]}
-        castShadow
-      >
-        <meshStandardMaterial color={BLACK} roughness={0.75} metalness={0.05} />
-      </RoundedBox>
-      <mesh position={[0.003, BASE_H + HUMP_H - 0.004, L * 0.2]} castShadow>
-        <boxGeometry args={[0.0018, 0.012, L * 0.5]} />
-        <meshStandardMaterial color="#050506" roughness={0.95} />
-      </mesh>
-      <mesh position={[0.006, BASE_H + HUMP_H + 0.003, L * 0.05]} rotation={[0, 0, Math.PI / 2]} castShadow>
-        <cylinderGeometry args={[0.011, 0.011, 0.02, 32]} />
-        <meshStandardMaterial color={METAL} roughness={0.28} metalness={0.95} />
-      </mesh>
-      <RoundedBox
-        args={[0.018, 0.02, 0.064]}
-        radius={0.008}
-        smoothness={4}
-        position={[-(W / 2 + 0.002), 0.014, 0.008]}
-        castShadow
-      >
-        <meshStandardMaterial color={RUBBER} roughness={0.9} metalness={0.03} />
-      </RoundedBox>
-      <mesh position={[-(W / 2 + 0.007), 0.028, 0.008]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-        <cylinderGeometry args={[0.0055, 0.0055, 0.006, 24]} />
-        <meshStandardMaterial color={METAL} roughness={0.32} metalness={0.85} />
-      </mesh>
-      <mesh position={[-(W / 2 + 0.004), 0.028, 0.032]} castShadow>
-        <boxGeometry args={[0.004, 0.005, 0.011]} />
-        <meshStandardMaterial color={ACCENT} roughness={0.8} />
-      </mesh>
-      <mesh position={[-(W / 2 + 0.004), 0.028, 0.045]} castShadow>
-        <boxGeometry args={[0.004, 0.005, 0.009]} />
-        <meshStandardMaterial color={ACCENT} roughness={0.8} />
-      </mesh>
-      <mesh position={[-(W / 2 + 0.004), 0.022, -0.024]} castShadow>
-        <boxGeometry args={[0.004, 0.006, 0.014]} />
-        <meshStandardMaterial color={ACCENT} roughness={0.8} />
-      </mesh>
-      <mesh position={[0.004, BASE_H + HUMP_H + 0.001, -L * 0.4]}>
-        <cylinderGeometry args={[0.0032, 0.0032, 0.0006, 16]} />
-        <meshStandardMaterial color="#5a5d62" roughness={0.4} metalness={0.5} />
+      <mesh position={[0, H - 0.001, L * 0.1]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.004, 0.004, 0.008, 20]} />
+        <meshStandardMaterial color="#3a3a3c" roughness={0.5} metalness={0.3} />
       </mesh>
     </group>
   );
@@ -279,11 +225,11 @@ function MonitorScreen() {
 function DisplayCable() {
   const geometry = useMemo(() => {
     const curve = new CatmullRomCurve3([
-      new Vector3(0.5, 0.014, -0.118),
-      new Vector3(0.42, 0.012, -0.16),
-      new Vector3(0.28, 0.012, -0.2),
-      new Vector3(0.12, 0.012, -0.23),
-      new Vector3(0.02, 0.016, -0.228),
+      new Vector3(0.348, 0.008, -0.02),
+      new Vector3(0.33, 0.012, -0.09),
+      new Vector3(0.26, 0.012, -0.17),
+      new Vector3(0.12, 0.012, -0.22),
+      new Vector3(0.02, 0.016, -0.226),
       new Vector3(0, 0.08, -0.222),
     ]);
     return new TubeGeometry(curve, 80, 0.0035, 8, false);
