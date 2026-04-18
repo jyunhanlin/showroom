@@ -64,6 +64,11 @@ const Index = () => (
             </a>
             )
           </li>
+          <li>
+            <Link className={linkCls} href="/standing-desk">
+              Standing Desk
+            </Link>
+          </li>
         </ul>
       </div>
       <div className="h-auto w-full overflow-auto sm:h-full sm:w-1/2">
