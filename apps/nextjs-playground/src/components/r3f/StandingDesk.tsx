@@ -81,7 +81,7 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
 
         <MacBookAir position={[0.5, 0, 0]} />
         <NuPhyKeyboard position={[0, 0, 0.18]} />
-        <MxMasterMouse position={[-0.27, 0, 0.2]} />
+        <MxMasterMouse position={[0.25, 0, 0.22]} />
         <DisplayCable />
       </group>
 
@@ -190,50 +190,71 @@ function NuPhyKeyboard({ position }: DeskItemProps) {
 }
 
 function MxMasterMouse({ position }: DeskItemProps) {
-  const W = 0.07;
-  const L = 0.126;
-  const H = 0.042;
-  const BLACK = '#121214';
-  const DARK = '#2a2a2c';
-  const ACCENT = '#4a4a4c';
+  const W = 0.088;
+  const L = 0.128;
+  const BASE_H = 0.018;
+  const HUMP_H = 0.032;
+  const BLACK = '#1a1a1c';
+  const RUBBER = '#232325';
+  const METAL = '#8d9096';
+  const ACCENT = '#3a3a3c';
   return (
     <group position={position}>
-      <RoundedBox args={[W, H, L]} radius={0.022} smoothness={5} position={[0, H / 2, 0]} castShadow receiveShadow>
-        <meshStandardMaterial color={BLACK} roughness={0.7} metalness={0.1} />
+      <RoundedBox
+        args={[W, BASE_H, L]}
+        radius={0.018}
+        smoothness={6}
+        position={[0, BASE_H / 2, 0]}
+        castShadow
+        receiveShadow
+      >
+        <meshStandardMaterial color={BLACK} roughness={0.75} metalness={0.05} />
       </RoundedBox>
       <RoundedBox
-        args={[W * 0.78, 0.014, L * 0.38]}
-        radius={0.012}
-        smoothness={4}
-        position={[0.002, H + 0.005, -L * 0.22]}
+        args={[W * 0.86, HUMP_H, L * 0.78]}
+        radius={0.02}
+        smoothness={6}
+        position={[0.003, BASE_H + HUMP_H / 2 - 0.003, -L * 0.1]}
         castShadow
       >
-        <meshStandardMaterial color={BLACK} roughness={0.7} metalness={0.1} />
+        <meshStandardMaterial color={BLACK} roughness={0.75} metalness={0.05} />
       </RoundedBox>
+      <mesh position={[0.003, BASE_H + HUMP_H - 0.004, L * 0.2]} castShadow>
+        <boxGeometry args={[0.0018, 0.012, L * 0.5]} />
+        <meshStandardMaterial color="#050506" roughness={0.95} />
+      </mesh>
+      <mesh position={[0.006, BASE_H + HUMP_H + 0.003, L * 0.05]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.011, 0.011, 0.02, 32]} />
+        <meshStandardMaterial color={METAL} roughness={0.28} metalness={0.95} />
+      </mesh>
       <RoundedBox
-        args={[0.02, 0.018, 0.052]}
+        args={[0.018, 0.02, 0.064]}
         radius={0.008}
-        smoothness={3}
-        position={[-(W / 2 + 0.003), 0.014, 0.018]}
+        smoothness={4}
+        position={[-(W / 2 + 0.002), 0.014, 0.008]}
         castShadow
       >
-        <meshStandardMaterial color={DARK} roughness={0.8} metalness={0.05} />
+        <meshStandardMaterial color={RUBBER} roughness={0.9} metalness={0.03} />
       </RoundedBox>
-      <mesh position={[0.013, H + 0.008, -L * 0.1]} rotation={[0, 0, Math.PI / 2]} castShadow>
-        <cylinderGeometry args={[0.009, 0.009, 0.016, 24]} />
-        <meshStandardMaterial color={ACCENT} roughness={0.35} metalness={0.6} />
+      <mesh position={[-(W / 2 + 0.007), 0.028, 0.008]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.0055, 0.0055, 0.006, 24]} />
+        <meshStandardMaterial color={METAL} roughness={0.32} metalness={0.85} />
       </mesh>
-      <mesh position={[-(W / 2 + 0.006), 0.02, 0.0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-        <cylinderGeometry args={[0.005, 0.005, 0.004, 20]} />
-        <meshStandardMaterial color={ACCENT} roughness={0.35} metalness={0.6} />
+      <mesh position={[-(W / 2 + 0.004), 0.028, 0.032]} castShadow>
+        <boxGeometry args={[0.004, 0.005, 0.011]} />
+        <meshStandardMaterial color={ACCENT} roughness={0.8} />
       </mesh>
-      <mesh position={[0.013, H + 0.002, L * 0.22]} castShadow>
-        <boxGeometry args={[0.024, 0.002, 0.03]} />
-        <meshStandardMaterial color={DARK} roughness={0.8} />
+      <mesh position={[-(W / 2 + 0.004), 0.028, 0.045]} castShadow>
+        <boxGeometry args={[0.004, 0.005, 0.009]} />
+        <meshStandardMaterial color={ACCENT} roughness={0.8} />
       </mesh>
-      <mesh position={[-0.013, H + 0.002, L * 0.22]} castShadow>
-        <boxGeometry args={[0.024, 0.002, 0.03]} />
-        <meshStandardMaterial color={DARK} roughness={0.8} />
+      <mesh position={[-(W / 2 + 0.004), 0.022, -0.024]} castShadow>
+        <boxGeometry args={[0.004, 0.006, 0.014]} />
+        <meshStandardMaterial color={ACCENT} roughness={0.8} />
+      </mesh>
+      <mesh position={[0.004, BASE_H + HUMP_H + 0.001, -L * 0.4]}>
+        <cylinderGeometry args={[0.0032, 0.0032, 0.0006, 16]} />
+        <meshStandardMaterial color="#5a5d62" roughness={0.4} metalness={0.5} />
       </mesh>
     </group>
   );
