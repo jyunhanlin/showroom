@@ -16,7 +16,7 @@ const DESKTOP_HALF = DESKTOP_THICKNESS / 2;
 const OUTER_LEG_HEIGHT = 0.55;
 const INNER_LEG_HEIGHT = 1.25;
 
-const YOUTUBE_VIDEO_ID = 'dQw4w9WgXcQ';
+const YOUTUBE_VIDEO_ID = 'M7lc1UVf-VE';
 
 type Direction = -1 | 0 | 1;
 
@@ -75,15 +75,13 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
           <boxGeometry args={[0.5, 0.32, 0.03]} />
           <meshStandardMaterial color="#1f1f22" roughness={0.4} metalness={0.2} />
         </mesh>
-        <Html transform position={[0, 0.27, -0.184]} scale={0.0014} distanceFactor={1} zIndexRange={[1, 0]}>
+        <Html transform position={[0, 0.27, -0.184]} scale={0.0014}>
           <iframe
-            width="320"
-            height="180"
-            src={`https://www.youtube.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&mute=1&playsinline=1&loop=1&playlist=${YOUTUBE_VIDEO_ID}`}
+            src={`https://www.youtube-nocookie.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&mute=1&playsinline=1&loop=1&controls=0&playlist=${YOUTUBE_VIDEO_ID}`}
             title="YouTube video"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allow="autoplay; encrypted-media; picture-in-picture"
             allowFullScreen
-            style={{ border: 0, display: 'block', background: '#000' }}
+            style={{ width: 320, height: 180, border: 0, display: 'block', background: '#000' }}
           />
         </Html>
 
