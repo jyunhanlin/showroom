@@ -2,8 +2,8 @@
 
 import { ContactShadows, Environment, OrbitControls, RoundedBox } from '@react-three/drei';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Suspense, useRef, useState } from 'react';
-import { Group, Mesh, MathUtils } from 'three';
+import { Suspense, useMemo, useRef, useState } from 'react';
+import { CatmullRomCurve3, Group, MathUtils, Mesh, TubeGeometry, Vector3 } from 'three';
 
 const MIN_HEIGHT = 0.65;
 const MAX_HEIGHT = 1.25;
@@ -77,6 +77,7 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
         <MacBookAir position={[-0.5, 0, 0]} />
         <NuPhyKeyboard position={[0, 0, 0.18]} />
         <MxMasterMouse position={[0.27, 0, 0.2]} />
+        <DisplayCable />
       </group>
 
       <Leg x={-0.65} innerRef={innerLegLeftRef} />
@@ -197,6 +198,26 @@ function MxMasterMouse({ position }: DeskItemProps) {
         <meshStandardMaterial color="#3a3a3c" roughness={0.4} metalness={0.3} />
       </mesh>
     </group>
+  );
+}
+
+function DisplayCable() {
+  const geometry = useMemo(() => {
+    const curve = new CatmullRomCurve3([
+      new Vector3(-0.65, 0.005, 0.0),
+      new Vector3(-0.62, 0.004, -0.08),
+      new Vector3(-0.45, 0.004, -0.16),
+      new Vector3(-0.22, 0.004, -0.215),
+      new Vector3(-0.05, 0.005, -0.225),
+      new Vector3(0, 0.1, -0.225),
+    ]);
+    return new TubeGeometry(curve, 80, 0.0035, 8, false);
+  }, []);
+
+  return (
+    <mesh geometry={geometry} castShadow>
+      <meshStandardMaterial color="#1a1a1c" roughness={0.7} metalness={0.1} />
+    </mesh>
   );
 }
 
