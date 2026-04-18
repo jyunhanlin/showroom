@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 const RippleBlendPage = () => {
   return (
-    <Container height="100%">
+    <Container className="h-full">
       <RippleBlend />
     </Container>
   );

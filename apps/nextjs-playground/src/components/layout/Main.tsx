@@ -1,3 +1,7 @@
-import { Box, BoxProps } from '@chakra-ui/react';
+import * as React from 'react';
 
-export const Main = (props: BoxProps) => <Box as="main" {...props} />;
+import { cn } from '@/lib/utils';
+
+export const Main = ({ className, ...props }: React.HTMLAttributes<HTMLElement>) => (
+  <main className={cn('h-full', className)} {...props} />
+);

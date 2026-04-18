@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 const ScrollEffectHorizontalPage = () => {
   return (
-    <Container height="100%">
+    <Container className="h-full">
       <ScrollEffectHorizontal />
     </Container>
   );

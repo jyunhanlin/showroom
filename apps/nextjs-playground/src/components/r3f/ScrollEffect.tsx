@@ -1,7 +1,6 @@
 /* eslint-disable jsx-a11y/alt-text */
 // @ts-nocheck
 'use client';
-import { Text } from '@chakra-ui/react';
 import { Preload, ScrollControls, Scroll, useScroll, Image } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Suspense, useRef } from 'react';
@@ -50,15 +49,9 @@ export const ScrollEffect = () => (
           <Images />
         </Scroll>
         <Scroll html>
-          <Text as="h1" position="absolute" top="60vh" left="1em">
-            First
-          </Text>
-          <Text position="absolute" top="120vh" left="60vw">
-            Second
-          </Text>
-          <Text as="h1" position="absolute" top="220vh" left="10vw" fontSize="25vw">
-            TITLE
-          </Text>
+          <h1 style={{ position: 'absolute', top: '60vh', left: '1em' }}>First</h1>
+          <p style={{ position: 'absolute', top: '120vh', left: '60vw' }}>Second</p>
+          <h1 style={{ position: 'absolute', top: '220vh', left: '10vw', fontSize: '25vw' }}>TITLE</h1>
         </Scroll>
       </ScrollControls>
       <Preload />

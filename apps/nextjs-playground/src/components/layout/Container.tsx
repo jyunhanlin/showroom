@@ -1,10 +1,9 @@
 'use client';
-import { Box, useColorMode, BoxProps } from '@chakra-ui/react';
 
-export const Container = (props: BoxProps) => {
-  const { colorMode } = useColorMode();
-  const bgColor = { light: 'gray.50', dark: 'gray.700' };
-  const color = { light: 'black', dark: 'white' };
+import * as React from 'react';
 
-  return <Box bg={bgColor[colorMode]} color={color[colorMode]} {...props} />;
-};
+import { cn } from '@/lib/utils';
+
+export const Container = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn('bg-gray-50 text-black dark:bg-gray-700 dark:text-white', className)} {...props} />
+);

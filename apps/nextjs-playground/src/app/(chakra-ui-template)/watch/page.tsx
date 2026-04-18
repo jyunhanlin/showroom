@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 const WatchPage = () => {
   return (
-    <Container height="100%">
+    <Container className="h-full">
       <Watch />
     </Container>
   );
