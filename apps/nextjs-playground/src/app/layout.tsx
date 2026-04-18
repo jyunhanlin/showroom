@@ -1,10 +1,12 @@
 import { Metadata } from 'next';
 import { Fira_Mono } from 'next/font/google';
 
+import './globals.css';
+
 export const metadata: Metadata = {
   title: {
     template: '%s | Hank Lin',
-    default: 'Showroom | Hank Lin', // a default is required when creating a template
+    default: 'Showroom | Hank Lin',
   },
 };
 
