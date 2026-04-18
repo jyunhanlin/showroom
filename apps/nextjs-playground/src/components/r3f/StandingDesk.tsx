@@ -79,7 +79,7 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
           <iframe
             width="320"
             height="180"
-            src={`https://www.youtube.com/embed/${YOUTUBE_VIDEO_ID}`}
+            src={`https://www.youtube.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&mute=1&playsinline=1&loop=1&playlist=${YOUTUBE_VIDEO_ID}`}
             title="YouTube video"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
