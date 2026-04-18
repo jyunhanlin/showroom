@@ -79,9 +79,9 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
           <MonitorScreen />
         </Suspense>
 
-        <MacBookAir position={[-0.5, 0, 0]} />
+        <MacBookAir position={[0.5, 0, 0]} />
         <NuPhyKeyboard position={[0, 0, 0.18]} />
-        <MxMasterMouse position={[0.27, 0, 0.2]} />
+        <MxMasterMouse position={[-0.27, 0, 0.2]} />
         <DisplayCable />
       </group>
 
@@ -258,11 +258,11 @@ function MonitorScreen() {
 function DisplayCable() {
   const geometry = useMemo(() => {
     const curve = new CatmullRomCurve3([
-      new Vector3(-0.5, 0.014, -0.118),
-      new Vector3(-0.42, 0.012, -0.16),
-      new Vector3(-0.28, 0.012, -0.2),
-      new Vector3(-0.12, 0.012, -0.23),
-      new Vector3(-0.02, 0.016, -0.228),
+      new Vector3(0.5, 0.014, -0.118),
+      new Vector3(0.42, 0.012, -0.16),
+      new Vector3(0.28, 0.012, -0.2),
+      new Vector3(0.12, 0.012, -0.23),
+      new Vector3(0.02, 0.016, -0.228),
       new Vector3(0, 0.08, -0.222),
     ]);
     return new TubeGeometry(curve, 80, 0.0035, 8, false);
