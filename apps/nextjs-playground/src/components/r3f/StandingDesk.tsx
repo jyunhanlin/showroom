@@ -1,6 +1,6 @@
 'use client';
 
-import { ContactShadows, Environment, OrbitControls } from '@react-three/drei';
+import { ContactShadows, Environment, OrbitControls, RoundedBox } from '@react-three/drei';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Suspense, useRef, useState } from 'react';
 import { Group, Mesh, MathUtils } from 'three';
@@ -51,10 +51,16 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
   return (
     <group>
       <group ref={topRef} position={[0, START_HEIGHT + DESKTOP_THICKNESS, 0]}>
-        <mesh position={[0, -DESKTOP_HALF, 0]} castShadow receiveShadow>
-          <boxGeometry args={[1.6, DESKTOP_THICKNESS, 0.8]} />
+        <RoundedBox
+          args={[1.6, DESKTOP_THICKNESS, 0.8]}
+          radius={0.018}
+          smoothness={4}
+          position={[0, -DESKTOP_HALF, 0]}
+          castShadow
+          receiveShadow
+        >
           <meshStandardMaterial color="#c9a37a" roughness={0.55} metalness={0.05} />
-        </mesh>
+        </RoundedBox>
         <mesh position={[0, 0.005, -0.15]} castShadow receiveShadow>
           <boxGeometry args={[0.22, 0.01, 0.12]} />
           <meshStandardMaterial color="#2a2a2e" roughness={0.6} metalness={0.1} />
@@ -85,7 +91,7 @@ function Leg({ x, innerRef }: LegProps) {
   return (
     <group position={[x, 0, 0]}>
       <mesh position={[0, 0.01, 0]} receiveShadow castShadow>
-        <boxGeometry args={[0.5, 0.02, 0.25]} />
+        <boxGeometry args={[0.25, 0.02, 0.5]} />
         <meshStandardMaterial color="#2a2a2e" roughness={0.6} metalness={0.2} />
       </mesh>
       <mesh position={[0, OUTER_LEG_HEIGHT / 2 + 0.02, 0]} castShadow receiveShadow>
