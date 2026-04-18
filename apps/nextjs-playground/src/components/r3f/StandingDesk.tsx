@@ -75,13 +75,13 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
           <boxGeometry args={[0.5, 0.32, 0.03]} />
           <meshStandardMaterial color="#1f1f22" roughness={0.4} metalness={0.2} />
         </mesh>
-        <Html transform position={[0, 0.27, -0.184]} scale={0.001}>
+        <Html transform position={[0, 0.27, -0.184]} scale={0.00052}>
           <iframe
-            src={`https://www.youtube-nocookie.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&mute=1&playsinline=1&loop=1&controls=0&playlist=${YOUTUBE_VIDEO_ID}`}
+            src={`https://www.youtube-nocookie.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&mute=1&playsinline=1&loop=1&controls=0&modestbranding=1&playlist=${YOUTUBE_VIDEO_ID}`}
             title="YouTube video"
             allow="autoplay; encrypted-media; picture-in-picture"
             allowFullScreen
-            style={{ width: 480, height: 270, border: 0, display: 'block', background: '#000' }}
+            style={{ width: 960, height: 540, border: 0, display: 'block', background: '#000' }}
           />
         </Html>
 
