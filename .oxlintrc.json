@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["import", "react", "typescript", "unicorn", "jsx-a11y", "nextjs"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2024": true
+  },
+  "rules": {
+    "import/no-default-export": "off",
+    "import/no-named-as-default": "off",
+    "react/react-in-jsx-scope": "off",
+    "jsx-a11y/alt-text": "warn",
+    "nextjs/no-img-element": "off"
+  },
+  "ignorePatterns": [
+    "**/node_modules",
+    "**/.next",
+    "**/out",
+    "**/dist",
+    "**/build",
+    "**/coverage",
+    "**/.husky",
+    "pnpm-lock.yaml"
+  ]
+}

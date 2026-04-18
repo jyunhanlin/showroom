@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 const LittlestTokyoPage = () => {
   return (
-    <Container height="100%">
+    <Container className="h-full">
       <LittlestTokyo />
     </Container>
   );

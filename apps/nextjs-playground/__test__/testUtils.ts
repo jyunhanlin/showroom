@@ -15,7 +15,8 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
   // )
 };
 
-const customRender = (ui: JSX.Element, options = {}): RenderResult => render(ui, { wrapper: Providers, ...options });
+const customRender = (ui: React.JSX.Element, options = {}): RenderResult =>
+  render(ui, { wrapper: Providers, ...options });
 
 // re-export everything
 export * from '@testing-library/react';

@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 const MergeWithHTMLPage = () => {
   return (
-    <Container height="100%">
+    <Container className="h-full">
       <MergeWithHTML />
     </Container>
   );

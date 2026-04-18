@@ -1,46 +1,47 @@
-import { Box, Heading, Link as ChakraLink, Text, Flex } from '@chakra-ui/react';
 import Link from 'next/link';
-import { FiGithub, FiTwitter, FiLinkedin } from 'react-icons/fi';
+import { FiGithub, FiLinkedin, FiTwitter } from 'react-icons/fi';
 
 export const NavOrAside = () => {
   return (
-    <Box display={['flex', 'block']} justifyContent={['space-between', 'normal']} alignItems="baseline">
+    <div className="flex items-baseline justify-between md:block md:justify-normal">
       <Link href="/">
-        <Heading flexShrink={0} cursor="pointer">
-          Hank Lin
-        </Heading>
+        <h1 className="shrink-0 cursor-pointer text-2xl font-bold">Hank Lin</h1>
       </Link>
-      <Flex direction={['row', 'column']}>
-        <ChakraLink href="https://github.com/jyunhanlin" target="_blank" rel="noreferrer noopener" padding="8px">
-          <Flex alignItems="center">
+      <div className="flex flex-row md:flex-col">
+        <a
+          href="https://github.com/jyunhanlin"
+          target="_blank"
+          rel="noreferrer noopener"
+          className="p-2 hover:underline"
+        >
+          <span className="flex items-center">
             <FiGithub />
-            <Text display={['none', 'revert']} paddingLeft="8px">
-              GitHub
-            </Text>
-          </Flex>
-        </ChakraLink>
-        <ChakraLink href="https://twitter.com/jhlin1986" target="_blank" rel="noreferrer noopener" padding="8px">
-          <Flex alignItems="center">
+            <span className="hidden pl-2 md:inline">GitHub</span>
+          </span>
+        </a>
+        <a
+          href="https://twitter.com/jhlin1986"
+          target="_blank"
+          rel="noreferrer noopener"
+          className="p-2 hover:underline"
+        >
+          <span className="flex items-center">
             <FiTwitter />
-            <Text display={['none', 'revert']} paddingLeft="8px">
-              Twitter
-            </Text>
-          </Flex>
-        </ChakraLink>
-        <ChakraLink
+            <span className="hidden pl-2 md:inline">Twitter</span>
+          </span>
+        </a>
+        <a
           href="https://www.linkedin.com/in/jyunhanlin/"
           target="_blank"
           rel="noreferrer noopener"
-          padding="8px"
+          className="p-2 hover:underline"
         >
-          <Flex alignItems="center">
+          <span className="flex items-center">
             <FiLinkedin />
-            <Text display={['none', 'revert']} paddingLeft="8px">
-              Linkedin
-            </Text>
-          </Flex>
-        </ChakraLink>
-      </Flex>
-    </Box>
+            <span className="hidden pl-2 md:inline">Linkedin</span>
+          </span>
+        </a>
+      </div>
+    </div>
   );
 };

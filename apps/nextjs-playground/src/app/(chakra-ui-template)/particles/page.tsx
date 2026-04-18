@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function HomePage() {
   return (
-    <Container height="100%">
+    <Container className="h-full">
       <Particles />
     </Container>
   );

@@ -1,81 +1,81 @@
 'use client';
-import { Box, Heading, Link as ChakraLink, UnorderedList, ListItem } from '@chakra-ui/react';
+
 import Link from 'next/link';
 
 import { Container } from '@/components/layout/Container';
 import { DarkModeSwitch } from '@/components/layout/DarkModeSwitch';
 import { Main } from '@/components/layout/Main';
 
+const linkCls = 'text-blue-600 hover:underline dark:text-blue-400';
+
 const Index = () => (
-  <Container height="100%">
-    <Main display={['box', 'flex']} padding={['3rem 1rem', '1rem']} height="100%">
-      <Box width={['100%', '50%']} height={['auto', '100%']} overflow="auto" marginBottom="2rem">
-        <Heading as="h3" size="md">
-          React Three Fiber playground
-        </Heading>
-        <UnorderedList spacing="4px" paddingTop="1rem">
-          <ListItem>
-            <ChakraLink as={Link} href="/particles">
+  <Container className="h-full">
+    <Main className="block h-full p-12 md:flex md:p-4">
+      <div className="mb-8 h-auto w-full overflow-auto md:h-full md:w-1/2">
+        <h3 className="text-lg font-semibold">React Three Fiber playground</h3>
+        <ul className="list-disc space-y-1 pt-4 pl-5">
+          <li>
+            <Link className={linkCls} href="/particles">
               Particles
-            </ChakraLink>
-          </ListItem>
-          <ListItem>
-            <ChakraLink as={Link} href="/ripple-blend">
+            </Link>
+          </li>
+          <li>
+            <Link className={linkCls} href="/ripple-blend">
               Ripple Blend
-            </ChakraLink>
-          </ListItem>
-          <ListItem>
-            <ChakraLink as={Link} href="/scroll-effect">
+            </Link>
+          </li>
+          <li>
+            <Link className={linkCls} href="/scroll-effect">
               Scroll Effect
-            </ChakraLink>
-          </ListItem>
-          <ListItem>
-            <ChakraLink as={Link} href="/scroll-effect-horizontal">
+            </Link>
+          </li>
+          <li>
+            <Link className={linkCls} href="/scroll-effect-horizontal">
               Scroll Effect Horizontal
-            </ChakraLink>
-          </ListItem>
-          <ListItem>
-            <ChakraLink as={Link} href="/littlest-tokyo">
+            </Link>
+          </li>
+          <li>
+            <Link className={linkCls} href="/littlest-tokyo">
               Littlest Tokyo
-            </ChakraLink>{' '}
+            </Link>{' '}
             (
-            <ChakraLink
+            <a
+              className={linkCls}
               href="https://twitter.com/0xca0a/status/1459521570934771713"
               target="_blank"
               rel="noopener noreferrer"
             >
               copy from here
-            </ChakraLink>
+            </a>
             )
-          </ListItem>
-          <ListItem>
-            <ChakraLink as={Link} href="/watch">
+          </li>
+          <li>
+            <Link className={linkCls} href="/watch">
               Watch
-            </ChakraLink>{' '}
+            </Link>{' '}
             (
-            <ChakraLink
+            <a
+              className={linkCls}
               href="https://twitter.com/0xca0a/status/1464545129893617666"
               target="_blank"
               rel="noopener noreferrer"
             >
               copy from here
-            </ChakraLink>
+            </a>
             )
-          </ListItem>
-        </UnorderedList>
-      </Box>
-      <Box width={['100%', '50%']} height={['auto', '100%']} overflow="auto">
-        <Heading as="h3" size="md">
-          Three.js playground
-        </Heading>
-        <UnorderedList spacing="4px" paddingTop="1rem">
-          <ListItem>
-            <ChakraLink as={Link} href="/merge-with-html">
+          </li>
+        </ul>
+      </div>
+      <div className="h-auto w-full overflow-auto md:h-full md:w-1/2">
+        <h3 className="text-lg font-semibold">Three.js playground</h3>
+        <ul className="list-disc space-y-1 pt-4 pl-5">
+          <li>
+            <Link className={linkCls} href="/merge-with-html">
               Merge with HTML
-            </ChakraLink>
-          </ListItem>
-        </UnorderedList>
-      </Box>
+            </Link>
+          </li>
+        </ul>
+      </div>
     </Main>
     <DarkModeSwitch />
   </Container>
