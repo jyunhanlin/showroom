@@ -10,8 +10,8 @@ const linkCls = 'text-blue-600 hover:underline dark:text-blue-400';
 
 const Index = () => (
   <Container className="h-full">
-    <Main className="block h-full p-12 md:flex md:p-4">
-      <div className="mb-8 h-auto w-full overflow-auto md:h-full md:w-1/2">
+    <Main className="block h-full px-4 py-12 sm:flex sm:p-4">
+      <div className="mb-8 h-auto w-full overflow-auto sm:h-full sm:w-1/2">
         <h3 className="text-lg font-semibold">React Three Fiber playground</h3>
         <ul className="list-disc space-y-1 pt-4 pl-5">
           <li>
@@ -66,7 +66,7 @@ const Index = () => (
           </li>
         </ul>
       </div>
-      <div className="h-auto w-full overflow-auto md:h-full md:w-1/2">
+      <div className="h-auto w-full overflow-auto sm:h-full sm:w-1/2">
         <h3 className="text-lg font-semibold">Three.js playground</h3>
         <ul className="list-disc space-y-1 pt-4 pl-5">
           <li>

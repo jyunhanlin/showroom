@@ -3,11 +3,11 @@ import { FiGithub, FiLinkedin, FiTwitter } from 'react-icons/fi';
 
 export const NavOrAside = () => {
   return (
-    <div className="flex items-baseline justify-between md:block md:justify-normal">
+    <div className="flex items-baseline justify-between sm:block sm:justify-normal">
       <Link href="/">
         <h1 className="shrink-0 cursor-pointer text-2xl font-bold">Hank Lin</h1>
       </Link>
-      <div className="flex flex-row md:flex-col">
+      <div className="flex flex-row sm:flex-col">
         <a
           href="https://github.com/jyunhanlin"
           target="_blank"
@@ -16,7 +16,7 @@ export const NavOrAside = () => {
         >
           <span className="flex items-center">
             <FiGithub />
-            <span className="hidden pl-2 md:inline">GitHub</span>
+            <span className="hidden pl-2 sm:inline">GitHub</span>
           </span>
         </a>
         <a
@@ -27,7 +27,7 @@ export const NavOrAside = () => {
         >
           <span className="flex items-center">
             <FiTwitter />
-            <span className="hidden pl-2 md:inline">Twitter</span>
+            <span className="hidden pl-2 sm:inline">Twitter</span>
           </span>
         </a>
         <a
@@ -38,7 +38,7 @@ export const NavOrAside = () => {
         >
           <span className="flex items-center">
             <FiLinkedin />
-            <span className="hidden pl-2 md:inline">Linkedin</span>
+            <span className="hidden pl-2 sm:inline">Linkedin</span>
           </span>
         </a>
       </div>
