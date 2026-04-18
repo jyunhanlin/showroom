@@ -39,7 +39,7 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
     if (topRef.current) {
       topRef.current.position.y = next + DESKTOP_THICKNESS;
     }
-    const innerY = next - INNER_LEG_HEIGHT / 2 - DESKTOP_HALF;
+    const innerY = next - INNER_LEG_HEIGHT / 2;
     if (innerLegLeftRef.current) innerLegLeftRef.current.position.y = innerY;
     if (innerLegRightRef.current) innerLegRightRef.current.position.y = innerY;
 
@@ -75,13 +75,13 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
           <boxGeometry args={[0.5, 0.32, 0.03]} />
           <meshStandardMaterial color="#1f1f22" roughness={0.4} metalness={0.2} />
         </mesh>
-        <Html transform position={[0, 0.27, -0.184]} scale={0.0014}>
+        <Html transform position={[0, 0.27, -0.184]} scale={0.001}>
           <iframe
             src={`https://www.youtube-nocookie.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&mute=1&playsinline=1&loop=1&controls=0&playlist=${YOUTUBE_VIDEO_ID}`}
             title="YouTube video"
             allow="autoplay; encrypted-media; picture-in-picture"
             allowFullScreen
-            style={{ width: 320, height: 180, border: 0, display: 'block', background: '#000' }}
+            style={{ width: 480, height: 270, border: 0, display: 'block', background: '#000' }}
           />
         </Html>
 
@@ -103,7 +103,7 @@ type LegProps = {
 };
 
 function Leg({ x, innerRef }: LegProps) {
-  const innerY = START_HEIGHT - INNER_LEG_HEIGHT / 2 - DESKTOP_HALF;
+  const innerY = START_HEIGHT - INNER_LEG_HEIGHT / 2;
   return (
     <group position={[x, 0, 0]}>
       <mesh position={[0, 0.01, 0]} receiveShadow castShadow>
@@ -146,11 +146,11 @@ function MacBookAir({ position }: DeskItemProps) {
       >
         <meshStandardMaterial color={SILVER} roughness={0.35} metalness={0.85} />
       </RoundedBox>
-      <mesh position={[0, baseH + 0.0005, 0.012]} receiveShadow>
+      <mesh position={[0, baseH + 0.0005, -0.025]} receiveShadow>
         <boxGeometry args={[0.255, 0.0008, 0.105]} />
         <meshStandardMaterial color="#2a2a2c" roughness={0.85} />
       </mesh>
-      <mesh position={[0, baseH + 0.0005, -0.075]} receiveShadow>
+      <mesh position={[0, baseH + 0.0005, 0.06]} receiveShadow>
         <boxGeometry args={[0.07, 0.0008, 0.045]} />
         <meshStandardMaterial color="#3a3a3c" roughness={0.7} />
       </mesh>
@@ -196,17 +196,50 @@ function NuPhyKeyboard({ position }: DeskItemProps) {
 }
 
 function MxMasterMouse({ position }: DeskItemProps) {
-  const W = 0.084;
+  const W = 0.07;
   const L = 0.126;
-  const H = 0.05;
+  const H = 0.042;
+  const BLACK = '#121214';
+  const DARK = '#2a2a2c';
+  const ACCENT = '#4a4a4c';
   return (
     <group position={position}>
-      <RoundedBox args={[W, H, L]} radius={0.024} smoothness={4} position={[0, H / 2, 0]} castShadow receiveShadow>
-        <meshStandardMaterial color="#1c1c1e" roughness={0.7} metalness={0.1} />
+      <RoundedBox args={[W, H, L]} radius={0.022} smoothness={5} position={[0, H / 2, 0]} castShadow receiveShadow>
+        <meshStandardMaterial color={BLACK} roughness={0.7} metalness={0.1} />
       </RoundedBox>
-      <mesh position={[0, H * 0.95, -L * 0.28]} rotation={[0, 0, Math.PI / 2]} castShadow>
-        <cylinderGeometry args={[0.008, 0.008, 0.014, 16]} />
-        <meshStandardMaterial color="#3a3a3c" roughness={0.4} metalness={0.3} />
+      <RoundedBox
+        args={[W * 0.78, 0.014, L * 0.38]}
+        radius={0.012}
+        smoothness={4}
+        position={[0.002, H + 0.005, -L * 0.22]}
+        castShadow
+      >
+        <meshStandardMaterial color={BLACK} roughness={0.7} metalness={0.1} />
+      </RoundedBox>
+      <RoundedBox
+        args={[0.02, 0.018, 0.052]}
+        radius={0.008}
+        smoothness={3}
+        position={[-(W / 2 + 0.003), 0.014, 0.018]}
+        castShadow
+      >
+        <meshStandardMaterial color={DARK} roughness={0.8} metalness={0.05} />
+      </RoundedBox>
+      <mesh position={[0.013, H + 0.008, -L * 0.1]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.009, 0.009, 0.016, 24]} />
+        <meshStandardMaterial color={ACCENT} roughness={0.35} metalness={0.6} />
+      </mesh>
+      <mesh position={[-(W / 2 + 0.006), 0.02, 0.0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.005, 0.005, 0.004, 20]} />
+        <meshStandardMaterial color={ACCENT} roughness={0.35} metalness={0.6} />
+      </mesh>
+      <mesh position={[0.013, H + 0.002, L * 0.22]} castShadow>
+        <boxGeometry args={[0.024, 0.002, 0.03]} />
+        <meshStandardMaterial color={DARK} roughness={0.8} />
+      </mesh>
+      <mesh position={[-0.013, H + 0.002, L * 0.22]} castShadow>
+        <boxGeometry args={[0.024, 0.002, 0.03]} />
+        <meshStandardMaterial color={DARK} roughness={0.8} />
       </mesh>
     </group>
   );
@@ -215,12 +248,12 @@ function MxMasterMouse({ position }: DeskItemProps) {
 function DisplayCable() {
   const geometry = useMemo(() => {
     const curve = new CatmullRomCurve3([
-      new Vector3(-0.65, 0.005, 0.0),
-      new Vector3(-0.62, 0.004, -0.08),
-      new Vector3(-0.45, 0.004, -0.16),
-      new Vector3(-0.22, 0.004, -0.215),
-      new Vector3(-0.05, 0.005, -0.225),
-      new Vector3(0, 0.1, -0.225),
+      new Vector3(-0.5, 0.014, -0.118),
+      new Vector3(-0.42, 0.012, -0.16),
+      new Vector3(-0.28, 0.012, -0.2),
+      new Vector3(-0.12, 0.012, -0.23),
+      new Vector3(-0.02, 0.016, -0.228),
+      new Vector3(0, 0.08, -0.222),
     ]);
     return new TubeGeometry(curve, 80, 0.0035, 8, false);
   }, []);
