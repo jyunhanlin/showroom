@@ -73,6 +73,10 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
           <boxGeometry args={[0.5, 0.32, 0.03]} />
           <meshStandardMaterial color="#1f1f22" roughness={0.4} metalness={0.2} />
         </mesh>
+
+        <MacBookAir position={[-0.5, 0, 0]} />
+        <NuPhyKeyboard position={[0, 0, 0.18]} />
+        <MxMasterMouse position={[0.27, 0, 0.2]} />
       </group>
 
       <Leg x={-0.65} innerRef={innerLegLeftRef} />
@@ -101,6 +105,96 @@ function Leg({ x, innerRef }: LegProps) {
       <mesh ref={innerRef} position={[0, innerY, 0]} castShadow>
         <boxGeometry args={[0.05, INNER_LEG_HEIGHT, 0.05]} />
         <meshStandardMaterial color="#9ea3ab" roughness={0.3} metalness={0.8} />
+      </mesh>
+    </group>
+  );
+}
+
+type DeskItemProps = { position: [number, number, number] };
+
+function MacBookAir({ position }: DeskItemProps) {
+  const SILVER = '#c8cacd';
+  const baseW = 0.3;
+  const baseD = 0.21;
+  const baseH = 0.01;
+  const screenW = 0.3;
+  const screenH = 0.21;
+  const screenT = 0.006;
+  const tilt = 0.28;
+
+  return (
+    <group position={position}>
+      <RoundedBox
+        args={[baseW, baseH, baseD]}
+        radius={0.005}
+        smoothness={3}
+        position={[0, baseH / 2, 0]}
+        castShadow
+        receiveShadow
+      >
+        <meshStandardMaterial color={SILVER} roughness={0.35} metalness={0.85} />
+      </RoundedBox>
+      <mesh position={[0, baseH + 0.0005, 0.012]} receiveShadow>
+        <boxGeometry args={[0.255, 0.0008, 0.105]} />
+        <meshStandardMaterial color="#2a2a2c" roughness={0.85} />
+      </mesh>
+      <mesh position={[0, baseH + 0.0005, -0.075]} receiveShadow>
+        <boxGeometry args={[0.07, 0.0008, 0.045]} />
+        <meshStandardMaterial color="#3a3a3c" roughness={0.7} />
+      </mesh>
+      <group position={[0, baseH, -baseD / 2]} rotation={[-tilt, 0, 0]}>
+        <RoundedBox
+          args={[screenW, screenH, screenT]}
+          radius={0.006}
+          smoothness={3}
+          position={[0, screenH / 2, -screenT / 2]}
+          castShadow
+        >
+          <meshStandardMaterial color={SILVER} roughness={0.35} metalness={0.85} />
+        </RoundedBox>
+        <mesh position={[0, screenH / 2, 0.0005]}>
+          <planeGeometry args={[screenW - 0.012, screenH - 0.014]} />
+          <meshStandardMaterial color="#0a0a0c" roughness={0.5} metalness={0.05} />
+        </mesh>
+      </group>
+    </group>
+  );
+}
+
+function NuPhyKeyboard({ position }: DeskItemProps) {
+  const W = 0.318;
+  const D = 0.134;
+  const H = 0.022;
+  return (
+    <group position={position}>
+      <RoundedBox args={[W, H, D]} radius={0.006} smoothness={3} position={[0, H / 2, 0]} castShadow receiveShadow>
+        <meshStandardMaterial color="#f3f1ec" roughness={0.6} metalness={0.05} />
+      </RoundedBox>
+      <RoundedBox
+        args={[W - 0.018, 0.004, D - 0.018]}
+        radius={0.002}
+        smoothness={2}
+        position={[0, H + 0.001, 0]}
+        castShadow
+      >
+        <meshStandardMaterial color="#e7e4dc" roughness={0.7} />
+      </RoundedBox>
+    </group>
+  );
+}
+
+function MxMasterMouse({ position }: DeskItemProps) {
+  const W = 0.084;
+  const L = 0.126;
+  const H = 0.05;
+  return (
+    <group position={position}>
+      <RoundedBox args={[W, H, L]} radius={0.024} smoothness={4} position={[0, H / 2, 0]} castShadow receiveShadow>
+        <meshStandardMaterial color="#1c1c1e" roughness={0.7} metalness={0.1} />
+      </RoundedBox>
+      <mesh position={[0, H * 0.95, -L * 0.28]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.008, 0.008, 0.014, 16]} />
+        <meshStandardMaterial color="#3a3a3c" roughness={0.4} metalness={0.3} />
       </mesh>
     </group>
   );
