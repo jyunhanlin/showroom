@@ -3,7 +3,7 @@
 import { ContactShadows, Environment, OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Suspense, useRef, useState } from 'react';
-import { Mesh, MathUtils } from 'three';
+import { Group, Mesh, MathUtils } from 'three';
 
 const MIN_HEIGHT = 0.65;
 const MAX_HEIGHT = 1.25;
@@ -25,7 +25,7 @@ type DeskRigProps = {
 };
 
 function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
-  const desktopRef = useRef<Mesh>(null);
+  const topRef = useRef<Group>(null);
   const innerLegLeftRef = useRef<Mesh>(null);
   const innerLegRightRef = useRef<Mesh>(null);
   const lastUiUpdate = useRef(0);
@@ -34,8 +34,8 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
     const next = MathUtils.clamp(heightRef.current + dirRef.current * SPEED * delta, MIN_HEIGHT, MAX_HEIGHT);
     heightRef.current = next;
 
-    if (desktopRef.current) {
-      desktopRef.current.position.y = next + DESKTOP_HALF;
+    if (topRef.current) {
+      topRef.current.position.y = next + DESKTOP_THICKNESS;
     }
     const innerY = next - INNER_LEG_HEIGHT / 2 - DESKTOP_HALF;
     if (innerLegLeftRef.current) innerLegLeftRef.current.position.y = innerY;
@@ -50,26 +50,27 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
 
   return (
     <group>
-      <mesh ref={desktopRef} position={[0, START_HEIGHT + DESKTOP_HALF, 0]} castShadow receiveShadow>
-        <boxGeometry args={[1.6, DESKTOP_THICKNESS, 0.8]} />
-        <meshStandardMaterial color="#c9a37a" roughness={0.55} metalness={0.05} />
-      </mesh>
+      <group ref={topRef} position={[0, START_HEIGHT + DESKTOP_THICKNESS, 0]}>
+        <mesh position={[0, -DESKTOP_HALF, 0]} castShadow receiveShadow>
+          <boxGeometry args={[1.6, DESKTOP_THICKNESS, 0.8]} />
+          <meshStandardMaterial color="#c9a37a" roughness={0.55} metalness={0.05} />
+        </mesh>
+        <mesh position={[0, 0.005, -0.15]} castShadow receiveShadow>
+          <boxGeometry args={[0.22, 0.01, 0.12]} />
+          <meshStandardMaterial color="#2a2a2e" roughness={0.6} metalness={0.1} />
+        </mesh>
+        <mesh position={[0, 0.06, -0.2]} castShadow>
+          <boxGeometry args={[0.12, 0.1, 0.05]} />
+          <meshStandardMaterial color="#2a2a2e" roughness={0.5} metalness={0.15} />
+        </mesh>
+        <mesh position={[0, 0.27, -0.2]} castShadow>
+          <boxGeometry args={[0.5, 0.32, 0.03]} />
+          <meshStandardMaterial color="#1f1f22" roughness={0.4} metalness={0.2} />
+        </mesh>
+      </group>
 
       <Leg x={-0.65} innerRef={innerLegLeftRef} />
       <Leg x={0.65} innerRef={innerLegRightRef} />
-
-      <mesh position={[0, 1.15, -0.2]} castShadow>
-        <boxGeometry args={[0.5, 0.32, 0.03]} />
-        <meshStandardMaterial color="#1f1f22" roughness={0.4} metalness={0.2} />
-      </mesh>
-      <mesh position={[0, 0.95, -0.2]} castShadow>
-        <boxGeometry args={[0.12, 0.1, 0.05]} />
-        <meshStandardMaterial color="#2a2a2e" roughness={0.5} metalness={0.15} />
-      </mesh>
-      <mesh position={[0, 0.895, -0.15]} receiveShadow>
-        <boxGeometry args={[0.22, 0.01, 0.12]} />
-        <meshStandardMaterial color="#2a2a2e" roughness={0.6} metalness={0.1} />
-      </mesh>
     </group>
   );
 }
