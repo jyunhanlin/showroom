@@ -1,6 +1,6 @@
 'use client';
 
-import { ContactShadows, Environment, Html, OrbitControls, RoundedBox } from '@react-three/drei';
+import { ContactShadows, Environment, OrbitControls, RoundedBox, useVideoTexture } from '@react-three/drei';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Suspense, useMemo, useRef, useState } from 'react';
 import { CatmullRomCurve3, Group, MathUtils, Mesh, TubeGeometry, Vector3 } from 'three';
@@ -16,7 +16,7 @@ const DESKTOP_HALF = DESKTOP_THICKNESS / 2;
 const OUTER_LEG_HEIGHT = 0.55;
 const INNER_LEG_HEIGHT = 1.25;
 
-const YOUTUBE_VIDEO_ID = 'M7lc1UVf-VE';
+const SCREEN_VIDEO_URL = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
 
 type Direction = -1 | 0 | 1;
 
@@ -75,15 +75,9 @@ function DeskRig({ heightRef, dirRef, onDisplayUpdate }: DeskRigProps) {
           <boxGeometry args={[0.5, 0.32, 0.03]} />
           <meshStandardMaterial color="#1f1f22" roughness={0.4} metalness={0.2} />
         </mesh>
-        <Html transform position={[0, 0.27, -0.184]} scale={0.00052}>
-          <iframe
-            src={`https://www.youtube-nocookie.com/embed/${YOUTUBE_VIDEO_ID}?autoplay=1&mute=1&playsinline=1&loop=1&controls=0&modestbranding=1&playlist=${YOUTUBE_VIDEO_ID}`}
-            title="YouTube video"
-            allow="autoplay; encrypted-media; picture-in-picture"
-            allowFullScreen
-            style={{ width: 960, height: 540, border: 0, display: 'block', background: '#000' }}
-          />
-        </Html>
+        <Suspense fallback={null}>
+          <MonitorScreen />
+        </Suspense>
 
         <MacBookAir position={[-0.5, 0, 0]} />
         <NuPhyKeyboard position={[0, 0, 0.18]} />
@@ -242,6 +236,22 @@ function MxMasterMouse({ position }: DeskItemProps) {
         <meshStandardMaterial color={DARK} roughness={0.8} />
       </mesh>
     </group>
+  );
+}
+
+function MonitorScreen() {
+  const texture = useVideoTexture(SCREEN_VIDEO_URL, {
+    muted: true,
+    loop: true,
+    start: true,
+    crossOrigin: 'anonymous',
+    playsInline: true,
+  });
+  return (
+    <mesh position={[0, 0.27, -0.184]}>
+      <planeGeometry args={[0.48, 0.3]} />
+      <meshBasicMaterial map={texture} toneMapped={false} />
+    </mesh>
   );
 }
 
