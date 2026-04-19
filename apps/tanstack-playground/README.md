@@ -20,15 +20,22 @@ pnpm tanstack:preview
 
 ## SPA mode notes
 
-SPA mode is enabled in `vite.config.ts`:
+SPA mode is enabled in `vite.config.ts`. The prerender step writes the shell
+straight to `.output/public/index.html`, and the build script copies it to
+`404.html` so GitHub Pages can serve it as the SPA fallback for unknown paths.
 
-```ts
-tanstackStart({ spa: { enabled: true } });
+## GitHub Pages deploy
+
+Configured via `.github/workflows/tanstack-playground.yaml`. The workflow sets
+`BASE_PATH=/showroom/tanstack-playground/` so Vite rewrites asset URLs and the
+TanStack Router `basepath` (read from `import.meta.env.BASE_URL` in
+`src/router.tsx`) lines up with the published path.
+
+Local production build with the same base path:
+
+```bash
+BASE_PATH=/showroom/tanstack-playground/ pnpm tanstack:build
 ```
-
-The build produces a prerendered shell at `.output/public/_shell.html`. To
-deploy, ship `.output/public/` and point all 404s to that shell (e.g. Netlify
-`_redirects`: `/* /_shell.html 200`).
 
 ## Migrating to full SSR later
 
