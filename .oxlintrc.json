@@ -17,6 +17,15 @@
     "jsx-a11y/alt-text": "warn",
     "nextjs/no-img-element": "off"
   },
+  "overrides": [
+    {
+      "files": ["apps/tanstack-playground/**"],
+      "rules": {
+        "nextjs/no-head-element": "off",
+        "nextjs/no-html-link-for-pages": "off"
+      }
+    }
+  ],
   "ignorePatterns": [
     "**/node_modules",
     "**/.next",
