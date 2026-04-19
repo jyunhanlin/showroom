@@ -190,17 +190,11 @@ function NuPhyKeyboard({ position }: DeskItemProps) {
 }
 
 function MxMasterMouse({ position }: DeskItemProps) {
-  const W = 0.064;
-  const L = 0.108;
-  const H = 0.032;
   return (
     <group position={position}>
-      <RoundedBox args={[W, H, L]} radius={0.024} smoothness={6} position={[0, H / 2, 0]} castShadow receiveShadow>
-        <meshStandardMaterial color="#1c1c1e" roughness={0.6} metalness={0.1} />
-      </RoundedBox>
-      <mesh position={[0, H - 0.001, L * 0.1]} rotation={[0, 0, Math.PI / 2]} castShadow>
-        <cylinderGeometry args={[0.004, 0.004, 0.008, 20]} />
-        <meshStandardMaterial color="#3a3a3c" roughness={0.5} metalness={0.3} />
+      <mesh scale={[0.036, 0.022, 0.056]} position={[0, 0.008, 0]} castShadow receiveShadow>
+        <sphereGeometry args={[1, 48, 32]} />
+        <meshStandardMaterial color="#2a2a2e" roughness={0.65} metalness={0.1} />
       </mesh>
     </group>
   );
