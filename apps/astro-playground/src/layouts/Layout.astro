@@ -1,39 +1,51 @@
---- 
+---
 interface Props {
-	title: string;
+  title: string;
 }
 
 const { title } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const path = (p: string) => `${base.replace(/\/$/, '')}/${p.replace(/^\//, '')}`;
+const isActive = (p: string) => Astro.url.pathname === path(p) || Astro.url.pathname === `${path(p)}/`;
 ---
 
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<meta name="description" content="Astro description">
-		<meta name="viewport" content="width=device-width" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<meta name="generator" content={Astro.generator} />
-		<title>{title}</title>
-	</head>
-	<body>
-		<slot />
-	</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href={path('favicon.svg')} />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <nav>
+      <a href={path('/')} class:list={[{ active: isActive('/') }]}>Home</a>
+      <a href={path('/about')} class:list={[{ active: isActive('/about') }]}>About</a>
+    </nav>
+    <main>
+      <slot />
+    </main>
+    <style is:global>
+      :root {
+        font-family: system-ui, sans-serif;
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+      }
+      nav {
+        display: flex;
+        gap: 12px;
+        padding: 12px;
+        border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+      }
+      nav a.active {
+        font-weight: 700;
+      }
+      main {
+        padding: 16px;
+      }
+    </style>
+  </body>
 </html>
-<style is:global>
-	:root {
-		--accent: 136, 58, 234;
-		--accent-light: 224, 204, 250;
-		--accent-dark: 49, 10, 101;
-		--accent-gradient: linear-gradient(45deg, rgb(var(--accent)), rgb(var(--accent-light)) 30%, white 60%);
-	}
-	html {
-		font-family: system-ui, sans-serif;
-		background: #13151A;
-		background-size: 224px;
-	}
-	code {
-		font-family: Menlo, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono,
-			Bitstream Vera Sans Mono, Courier New, monospace;
-	}
-</style>

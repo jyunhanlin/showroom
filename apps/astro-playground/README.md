@@ -1,54 +1,32 @@
-# Astro Starter Kit: Basics
+# astro-playground
 
-```
-npm create astro@latest -- --template basics
-```
+Static multi-page playground built with [Astro](https://astro.build).
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/withastro/astro/tree/latest/examples/basics)
-[![Open with CodeSandbox](https://assets.codesandbox.io/github/button-edit-lime.svg)](https://codesandbox.io/p/sandbox/github/withastro/astro/tree/latest/examples/basics)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/withastro/astro?devcontainer_path=.devcontainer/basics/devcontainer.json)
+## Scripts
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
-
-![just-the-basics](https://github.com/withastro/astro/assets/2244813/a0a5533c-a856-4198-8470-2d67b1d7c554)
-
-## 🚀 Project Structure
-
-Inside of your Astro project, you'll see the following folders and files:
-
-```
-/
-├── public/
-│   └── favicon.svg
-├── src/
-│   ├── components/
-│   │   └── Card.astro
-│   ├── layouts/
-│   │   └── Layout.astro
-│   └── pages/
-│       └── index.astro
-└── package.json
+```bash
+pnpm --filter astro-playground dev      # start dev server on :4321
+pnpm --filter astro-playground build    # build static site to dist/
+pnpm --filter astro-playground preview  # preview the production build
 ```
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+Or from the repo root:
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+```bash
+pnpm astro:dev
+pnpm astro:build
+pnpm astro:preview
+```
 
-Any static assets, like images, can be placed in the `public/` directory.
+## GitHub Pages deploy
 
-## 🧞 Commands
+Configured via `.github/workflows/astro-playground.yaml`. The workflow sets
+`BASE_PATH=/showroom/astro-playground/`; the layout reads
+`import.meta.env.BASE_URL` so navigation and the favicon resolve correctly
+under that prefix.
 
-All commands are run from the root of the project, from a terminal:
+Local production build with the same base path:
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:3000`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+```bash
+BASE_PATH=/showroom/astro-playground/ pnpm astro:build
+```
