@@ -3,7 +3,7 @@
 import { ContactShadows, Environment, OrbitControls, RoundedBox, useVideoTexture } from '@react-three/drei';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Suspense, useMemo, useRef, useState } from 'react';
-import { CatmullRomCurve3, Group, MathUtils, Mesh, TubeGeometry, Vector3 } from 'three';
+import { CanvasTexture, CatmullRomCurve3, Group, MathUtils, Mesh, SRGBColorSpace, TubeGeometry, Vector3 } from 'three';
 
 const MIN_HEIGHT = 0.65;
 const MAX_HEIGHT = 1.25;
@@ -118,6 +118,201 @@ function Leg({ x, innerRef }: LegProps) {
 
 type DeskItemProps = { position: [number, number, number] };
 
+type CodeToken = { text: string; color: string };
+
+const SYNTAX = {
+  plain: '#d4d4d4',
+  keyword: '#c586c0',
+  func: '#dcdcaa',
+  type: '#4ec9b0',
+  variable: '#9cdcfe',
+  string: '#ce9178',
+  number: '#b5cea8',
+  comment: '#6a9955',
+};
+
+const CODE_LINES: CodeToken[][] = [
+  [
+    { text: 'import', color: SYNTAX.keyword },
+    { text: ' { useFrame } ', color: SYNTAX.plain },
+    { text: 'from', color: SYNTAX.keyword },
+    { text: ' ', color: SYNTAX.plain },
+    { text: "'@react-three/fiber'", color: SYNTAX.string },
+    { text: ';', color: SYNTAX.plain },
+  ],
+  [
+    { text: 'import', color: SYNTAX.keyword },
+    { text: ' { useRef } ', color: SYNTAX.plain },
+    { text: 'from', color: SYNTAX.keyword },
+    { text: ' ', color: SYNTAX.plain },
+    { text: "'react'", color: SYNTAX.string },
+    { text: ';', color: SYNTAX.plain },
+  ],
+  [],
+  [
+    { text: 'const', color: SYNTAX.keyword },
+    { text: ' ', color: SYNTAX.plain },
+    { text: 'SPEED', color: SYNTAX.variable },
+    { text: ' = ', color: SYNTAX.plain },
+    { text: '0.38', color: SYNTAX.number },
+    { text: ';', color: SYNTAX.plain },
+    { text: ' // m/s, ergonomic motor', color: SYNTAX.comment },
+  ],
+  [],
+  [
+    { text: 'export function', color: SYNTAX.keyword },
+    { text: ' ', color: SYNTAX.plain },
+    { text: 'StandingDesk', color: SYNTAX.func },
+    { text: '() {', color: SYNTAX.plain },
+  ],
+  [
+    { text: '  const', color: SYNTAX.keyword },
+    { text: ' height = ', color: SYNTAX.plain },
+    { text: 'useRef', color: SYNTAX.func },
+    { text: '<', color: SYNTAX.plain },
+    { text: 'number', color: SYNTAX.type },
+    { text: '>(', color: SYNTAX.plain },
+    { text: '0.74', color: SYNTAX.number },
+    { text: ');', color: SYNTAX.plain },
+  ],
+  [
+    { text: '  ', color: SYNTAX.plain },
+    { text: 'useFrame', color: SYNTAX.func },
+    { text: '((_, delta) => {', color: SYNTAX.plain },
+  ],
+  [
+    { text: '    height.current += delta * ', color: SYNTAX.plain },
+    { text: 'SPEED', color: SYNTAX.variable },
+    { text: ';', color: SYNTAX.plain },
+  ],
+  [{ text: '  });', color: SYNTAX.plain }],
+  [{ text: '  // raise your posture, lower your back pain', color: SYNTAX.comment }],
+  [
+    { text: '  return', color: SYNTAX.keyword },
+    { text: ' <', color: SYNTAX.plain },
+    { text: 'Desk', color: SYNTAX.type },
+    { text: ' ', color: SYNTAX.plain },
+    { text: 'heightRef', color: SYNTAX.variable },
+    { text: '={height} />;', color: SYNTAX.plain },
+  ],
+  [{ text: '}', color: SYNTAX.plain }],
+];
+
+const TOTAL_CHARS = CODE_LINES.reduce((sum, line) => sum + line.reduce((s, t) => s + t.text.length, 0) + 1, 0);
+const CANVAS_W = 512;
+const CANVAS_H = 340;
+const TOP_BAR_H = 26;
+const GUTTER_W = 36;
+const LINE_HEIGHT = 18;
+const CODE_FONT = '13px "SF Mono", Menlo, Consolas, monospace';
+const UI_FONT = '12px "SF Pro Text", system-ui, sans-serif';
+const CHARS_PER_SEC = 22;
+const HOLD_AT_END = 3.5;
+const CYCLE_SEC = TOTAL_CHARS / CHARS_PER_SEC + HOLD_AT_END;
+
+function drawVSCode(canvas: HTMLCanvasElement, typed: number, showCursor: boolean) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.fillStyle = '#1e1e1e';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  ctx.fillStyle = '#2d2d30';
+  ctx.fillRect(0, 0, CANVAS_W, TOP_BAR_H);
+  ctx.fillStyle = '#1e1e1e';
+  ctx.fillRect(10, 5, 170, TOP_BAR_H - 5);
+  ctx.fillStyle = '#3794ff';
+  ctx.fillRect(10, TOP_BAR_H - 2, 170, 2);
+
+  ctx.font = UI_FONT;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#519aba';
+  ctx.fillText('{ }', 18, TOP_BAR_H / 2 + 1);
+  ctx.fillStyle = '#cccccc';
+  ctx.fillText('StandingDesk.tsx', 40, TOP_BAR_H / 2 + 1);
+
+  ctx.fillStyle = '#1e1e1e';
+  ctx.fillRect(0, TOP_BAR_H, GUTTER_W, CANVAS_H - TOP_BAR_H);
+
+  ctx.font = CODE_FONT;
+  ctx.textBaseline = 'top';
+
+  let charsLeft = typed;
+  let cursorX = GUTTER_W + 8;
+  let cursorY = TOP_BAR_H + 6;
+
+  for (let i = 0; i < CODE_LINES.length; i++) {
+    const line = CODE_LINES[i];
+    const lineY = TOP_BAR_H + 6 + i * LINE_HEIGHT;
+    if (lineY + LINE_HEIGHT > CANVAS_H) break;
+
+    ctx.fillStyle = '#858585';
+    ctx.textAlign = 'right';
+    ctx.fillText(String(i + 1), GUTTER_W - 8, lineY);
+    ctx.textAlign = 'left';
+
+    if (charsLeft < 0) continue;
+
+    let x = GUTTER_W + 8;
+    for (const token of line) {
+      if (charsLeft <= 0) break;
+      const visible = token.text.slice(0, Math.max(0, charsLeft));
+      ctx.fillStyle = token.color;
+      ctx.fillText(visible, x, lineY);
+      x += ctx.measureText(visible).width;
+      charsLeft -= token.text.length;
+    }
+
+    cursorX = x;
+    cursorY = lineY;
+    charsLeft -= 1;
+  }
+
+  if (showCursor) {
+    ctx.fillStyle = '#aeafad';
+    ctx.fillRect(cursorX, cursorY, 1.6, LINE_HEIGHT - 4);
+  }
+
+  ctx.fillStyle = '#007acc';
+  ctx.fillRect(0, CANVAS_H - 18, CANVAS_W, 18);
+  ctx.font = UI_FONT;
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('main  *  TypeScript  UTF-8  LF', 10, CANVAS_H - 9);
+}
+
+function useVSCodeTexture() {
+  const { canvas, texture } = useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = CANVAS_W;
+    c.height = CANVAS_H;
+    drawVSCode(c, 0, true);
+    const t = new CanvasTexture(c);
+    t.colorSpace = SRGBColorSpace;
+    return { canvas: c, texture: t };
+  }, []);
+
+  const typeTimer = useRef(0);
+  const blinkTimer = useRef(0);
+  const drawTimer = useRef(0);
+
+  useFrame((_, delta) => {
+    typeTimer.current = (typeTimer.current + delta) % CYCLE_SEC;
+    blinkTimer.current += delta;
+    drawTimer.current += delta;
+    if (drawTimer.current < 1 / 15) return;
+    drawTimer.current = 0;
+
+    const typed = Math.min(Math.floor(typeTimer.current * CHARS_PER_SEC), TOTAL_CHARS);
+    const showCursor = Math.floor(blinkTimer.current * 2) % 2 === 0;
+    drawVSCode(canvas, typed, showCursor);
+    texture.needsUpdate = true;
+  });
+
+  return texture;
+}
+
 function MacBookAir({ position }: DeskItemProps) {
   const SILVER = '#c8cacd';
   const baseW = 0.3;
@@ -127,6 +322,7 @@ function MacBookAir({ position }: DeskItemProps) {
   const screenH = 0.21;
   const screenT = 0.006;
   const tilt = 0.28;
+  const screenTexture = useVSCodeTexture();
 
   return (
     <group position={position}>
@@ -160,7 +356,7 @@ function MacBookAir({ position }: DeskItemProps) {
         </RoundedBox>
         <mesh position={[0, screenH / 2, 0.0005]}>
           <planeGeometry args={[screenW - 0.012, screenH - 0.014]} />
-          <meshStandardMaterial color="#0a0a0c" roughness={0.5} metalness={0.05} />
+          <meshBasicMaterial map={screenTexture} toneMapped={false} />
         </mesh>
       </group>
     </group>
