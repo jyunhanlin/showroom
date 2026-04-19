@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["import", "react", "typescript", "unicorn", "jsx-a11y", "nextjs"],
+  "plugins": ["import", "typescript", "unicorn", "jsx-a11y"],
   "categories": {
     "correctness": "error",
     "suspicious": "warn"
@@ -13,19 +13,8 @@
   "rules": {
     "import/no-default-export": "off",
     "import/no-named-as-default": "off",
-    "react/react-in-jsx-scope": "off",
-    "jsx-a11y/alt-text": "warn",
-    "nextjs/no-img-element": "off"
+    "jsx-a11y/alt-text": "warn"
   },
-  "overrides": [
-    {
-      "files": ["apps/tanstack-playground/**"],
-      "rules": {
-        "nextjs/no-head-element": "off",
-        "nextjs/no-html-link-for-pages": "off"
-      }
-    }
-  ],
   "ignorePatterns": [
     "**/node_modules",
     "**/.next",
