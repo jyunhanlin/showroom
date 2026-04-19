@@ -1,0 +1,44 @@
+name: Deploy to GitHub Pages(Astro Playground)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - apps/astro-playground/**
+      - .github/workflows/astro-playground.yaml
+
+jobs:
+  deployment:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+          run_install: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm --filter astro-playground install
+
+      - name: Astro build
+        env:
+          BASE_PATH: /showroom/astro-playground/
+        run: pnpm run astro:build
+
+      - name: Deployment
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./apps/astro-playground/dist
+          destination_dir: astro-playground
