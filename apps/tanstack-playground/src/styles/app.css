@@ -1,0 +1,28 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+@layer components {
+  .prose pre {
+    @apply my-4 rounded-lg text-sm;
+  }
+  .prose :not(pre) > code {
+    @apply rounded bg-gray-100 px-1.5 py-0.5 font-mono text-sm;
+  }
+  .prose :not(pre) > code::before,
+  .prose :not(pre) > code::after {
+    content: none;
+  }
+}
+
+@keyframes rocket-oscillate {
+  from {
+    transform: translateY(-10px);
+  }
+  to {
+    transform: translateY(10px);
+  }
+}
+
+.animate-rocket-oscillate {
+  animation: rocket-oscillate 1.5s ease-in-out infinite alternate;
+}
