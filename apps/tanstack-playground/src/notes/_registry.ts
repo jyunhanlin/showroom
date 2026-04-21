@@ -3,10 +3,9 @@ import { NoteFrontmatterSchema, type NoteFrontmatter } from './_schema';
 
 type MdxModule = { default: ComponentType };
 
-type FrontmatterGlobEntry = { frontmatter: unknown };
-
-const frontmatterModules = import.meta.glob<FrontmatterGlobEntry>('./**/*.mdx', {
+const eagerFrontmatters = import.meta.glob<unknown>('./**/*.mdx', {
   eager: true,
+  import: 'frontmatter',
 });
 
 const lazyLoaders = import.meta.glob<MdxModule>('./**/*.mdx');
@@ -32,13 +31,13 @@ function parsePath(globKey: string): { course: string; topic: string; slug: stri
 
 function buildEntries(): NoteEntry[] {
   const entries: NoteEntry[] = [];
-  for (const [globKey, mod] of Object.entries(frontmatterModules)) {
+  for (const [globKey, frontmatter] of Object.entries(eagerFrontmatters)) {
     const { course, topic, slug } = parsePath(globKey);
     const loader = lazyLoaders[globKey];
     if (!loader) {
       throw new Error(`Lazy loader missing for ${globKey}`);
     }
-    const parsed = NoteFrontmatterSchema.safeParse(mod.frontmatter);
+    const parsed = NoteFrontmatterSchema.safeParse(frontmatter);
     if (!parsed.success) {
       throw new Error(`Invalid frontmatter in ${globKey}: ${parsed.error.message}`);
     }
