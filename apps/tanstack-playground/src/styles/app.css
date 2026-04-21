@@ -1,5 +1,7 @@
 @import 'tailwindcss';
-@plugin '@tailwindcss/typography';
+/* Relative path works around pnpm isolation — @tailwindcss/node can't
+   resolve plugins via bare specifier across pnpm's virtual store. */
+@plugin "../../../../node_modules/@tailwindcss/typography";
 
 @layer components {
   .prose pre {
