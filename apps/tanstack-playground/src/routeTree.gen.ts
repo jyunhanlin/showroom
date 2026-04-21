@@ -9,12 +9,14 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root';
-import { Route as AboutRouteImport } from './routes/about';
+import { Route as CourseRouteImport } from './routes/$course';
 import { Route as IndexRouteImport } from './routes/index';
+import { Route as CourseTopicRouteImport } from './routes/$course.$topic';
+import { Route as CourseTopicSlugRouteImport } from './routes/$course.$topic.$slug';
 
-const AboutRoute = AboutRouteImport.update({
-  id: '/about',
-  path: '/about',
+const CourseRoute = CourseRouteImport.update({
+  id: '/$course',
+  path: '/$course',
   getParentRoute: () => rootRouteImport,
 } as any);
 const IndexRoute = IndexRouteImport.update({
@@ -22,40 +24,56 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any);
+const CourseTopicRoute = CourseTopicRouteImport.update({
+  id: '/$topic',
+  path: '/$topic',
+  getParentRoute: () => CourseRoute,
+} as any);
+const CourseTopicSlugRoute = CourseTopicSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => CourseTopicRoute,
+} as any);
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
-  '/about': typeof AboutRoute;
+  '/$course': typeof CourseRouteWithChildren;
+  '/$course/$topic': typeof CourseTopicRouteWithChildren;
+  '/$course/$topic/$slug': typeof CourseTopicSlugRoute;
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute;
-  '/about': typeof AboutRoute;
+  '/$course': typeof CourseRouteWithChildren;
+  '/$course/$topic': typeof CourseTopicRouteWithChildren;
+  '/$course/$topic/$slug': typeof CourseTopicSlugRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   '/': typeof IndexRoute;
-  '/about': typeof AboutRoute;
+  '/$course': typeof CourseRouteWithChildren;
+  '/$course/$topic': typeof CourseTopicRouteWithChildren;
+  '/$course/$topic/$slug': typeof CourseTopicSlugRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: '/' | '/about';
+  fullPaths: '/' | '/$course' | '/$course/$topic' | '/$course/$topic/$slug';
   fileRoutesByTo: FileRoutesByTo;
-  to: '/' | '/about';
-  id: '__root__' | '/' | '/about';
+  to: '/' | '/$course' | '/$course/$topic' | '/$course/$topic/$slug';
+  id: '__root__' | '/' | '/$course' | '/$course/$topic' | '/$course/$topic/$slug';
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
-  AboutRoute: typeof AboutRoute;
+  CourseRoute: typeof CourseRouteWithChildren;
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/about': {
-      id: '/about';
-      path: '/about';
-      fullPath: '/about';
-      preLoaderRoute: typeof AboutRouteImport;
+    '/$course': {
+      id: '/$course';
+      path: '/$course';
+      fullPath: '/$course';
+      preLoaderRoute: typeof CourseRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/': {
@@ -65,12 +83,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    '/$course/$topic': {
+      id: '/$course/$topic';
+      path: '/$topic';
+      fullPath: '/$course/$topic';
+      preLoaderRoute: typeof CourseTopicRouteImport;
+      parentRoute: typeof CourseRoute;
+    };
+    '/$course/$topic/$slug': {
+      id: '/$course/$topic/$slug';
+      path: '/$slug';
+      fullPath: '/$course/$topic/$slug';
+      preLoaderRoute: typeof CourseTopicSlugRouteImport;
+      parentRoute: typeof CourseTopicRoute;
+    };
   }
 }
 
+interface CourseTopicRouteChildren {
+  CourseTopicSlugRoute: typeof CourseTopicSlugRoute;
+}
+
+const CourseTopicRouteChildren: CourseTopicRouteChildren = {
+  CourseTopicSlugRoute: CourseTopicSlugRoute,
+};
+
+const CourseTopicRouteWithChildren = CourseTopicRoute._addFileChildren(CourseTopicRouteChildren);
+
+interface CourseRouteChildren {
+  CourseTopicRoute: typeof CourseTopicRouteWithChildren;
+}
+
+const CourseRouteChildren: CourseRouteChildren = {
+  CourseTopicRoute: CourseTopicRouteWithChildren,
+};
+
+const CourseRouteWithChildren = CourseRoute._addFileChildren(CourseRouteChildren);
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AboutRoute: AboutRoute,
+  CourseRoute: CourseRouteWithChildren,
 };
 export const routeTree = rootRouteImport._addFileChildren(rootRouteChildren)._addFileTypes<FileRouteTypes>();
 
