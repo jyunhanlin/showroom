@@ -1,0 +1,37 @@
+---
+title: Rocketship, Revisited
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/04-rocketship
+lessonNumber: '04-canvas/04-rocketship'
+summary: 把 DOM particle 動畫搬到 Canvas,從「起點→終點」換成「velocity + deltaTime」思維。
+tags: [canvas, deltaTime, velocity, rAF, air-resistance]
+---
+
+import Rocketship from './rocketship';
+
+## TL;DR
+
+- DOM particles(每顆都是 `<div>`)在量大時吃不消;Canvas 可以丟上千顆,效能 10× ↑。
+- Canvas 動畫的心智模型從 CSS 的「start → end」變成「velocity + deltaTime」。
+- 角度 + 力量 → xVelocity / yVelocity,這裡的 `convertPolarToCartesian` 同一支工具兩種思維都可用,只是語義不同。
+
+<DemoFrame title="Rocketship with Canvas particles">
+  <Rocketship />
+</DemoFrame>
+
+## Why it works
+
+每一幀做三件事:
+
+1. **Spawn** — 需要每秒產生 600 顆,所以每幀產生 `600 × deltaTime` 顆。不用 `setInterval`,跟 rAF 對齊。
+2. **Update** — `x += xVelocity * deltaTime`;`yVelocity` 乘上 drag 達到空氣阻力。
+3. **Draw** — `ctx.arc` + `fillStyle`;透明度用 `clampedNormalize(age, lifespan, 0)` 做線性淡出。
+
+粒子 5 秒後從陣列移除,避免記憶體無限增長。這邊不用每幀都 filter,每秒清一次就夠。
+
+`deltaTime` 來自 `performance.now() - lastTimestamp`,但必須 **clamp 到 250ms 上限** — 切到別的 tab 回來時 `deltaTime` 會暴衝到幾十秒,直接算下去粒子會瞬間噴發 10,000 顆讓瀏覽器凍結。
+
+## Gotchas
+
+- **Air resistance 的近似版本會隨 frame rate 崩壞。** 上面 demo 用的是課程示範版 `v *= 1 - AIR_RESISTANCE * deltaTime`,60Hz 看起來很 OK,但低 fps 時 `1 - k*dt` 可能接近 0 甚至變負;正解是 `v *= Math.exp(-AIR_RESISTANCE * deltaTime)`(課程的 info box 給的答案)。
+- **`deltaTime` 一定要 clamp。** 沒 clamp 的話 tab 從背景切回來會爆粒子。
+- **Strict Mode double-invoke。** `useEffect` 裡 `requestAnimationFrame` 一定要在 cleanup 呼叫 `cancelAnimationFrame`,不然會有兩條 rAF loop 並行。
