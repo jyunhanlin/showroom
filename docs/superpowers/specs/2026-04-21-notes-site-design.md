@@ -62,21 +62,18 @@ apps/tanstack-playground/
 │   │   ├── $course.$topic.tsx              # /$course/$topic                 topic TOC
 │   │   └── $course.$topic.$slug.tsx        # /$course/$topic/$slug           single note
 │   │
-│   ├── notes/                              # content (not routes)
+│   ├── notes/                              # MDX content + co-located demo components
 │   │   ├── _registry.ts                    # glob scan + Zod validation + helpers
 │   │   ├── _schema.ts                      # NoteFrontmatterSchema
 │   │   ├── _courses.ts                     # course display metadata
 │   │   ├── _topics.ts                      # topic display metadata
 │   │   └── wham/
 │   │       └── canvas-animation/
-│   │           └── rocketship.mdx
+│   │           ├── rocketship.mdx          # note prose
+│   │           └── rocketship.tsx          # demo React component
 │   │
-│   ├── demos/                              # runnable React components
-│   │   ├── _shared/
-│   │   │   └── canvas-utils.ts             # setupCanvas, polar↔cartesian, etc.
-│   │   └── wham/
-│   │       └── canvas-animation/
-│   │           └── rocketship.tsx
+│   ├── utils/
+│   │   └── canvas.ts                       # setupCanvas, polar↔cartesian, etc.
 │   │
 │   ├── components/
 │   │   ├── note-layout.tsx
@@ -117,11 +114,14 @@ Static routes win over dynamic, so future static pages like `/tags` or `/search`
 ### Dependency direction (strict)
 
 ```
-routes/ → components, notes/_registry, demos
-notes/  → demos (via MDX `import` only)
-demos/  → demos/_shared
+routes/      → components, notes/_registry, notes/**/*.mdx
+notes/*.mdx  → co-located notes/**/*.tsx (relative import), components, utils
+notes/*.tsx  → utils
 components/  ← routes
+utils/       ← (leaf)
 ```
+
+**Registry scope:** `_registry.ts` globs only `**/*.mdx` — the `.tsx` files in the same folders are invisible to the registry and are only reached via MDX `import`.
 
 ## Content model
 
@@ -200,7 +200,7 @@ MDX provider registers `DemoFrame` and `TagPill` globally so MDX files don't nee
 
 ## Canvas demo infrastructure
 
-### `demos/_shared/canvas-utils.ts`
+### `src/utils/canvas.ts`
 
 Minimum surface for M2:
 
@@ -216,7 +216,7 @@ clampedNormalize(value: number, min: number, max: number): number;
 
 `setupCanvas` handles DPR; no resize observer in M2 (fixed-size canvas only).
 
-### Rocketship demo (`src/demos/wham/canvas-animation/rocketship.tsx`)
+### Rocketship demo (`src/notes/wham/canvas-animation/rocketship.tsx`)
 
 - Mutable state (particle array, `lastTimestamp`) stays inside the `useEffect` closure — no re-renders per frame
 - `requestAnimationFrame` ID tracked; cleanup cancels it (Strict Mode safe)
@@ -298,7 +298,7 @@ summary: DOM particle 動畫遷移到 Canvas,學會 velocity + deltaTime 思維�
 tags: [canvas, deltaTime, velocity, rAF, air-resistance]
 ---
 
-import Rocketship from '~/demos/wham/canvas-animation/rocketship';
+import Rocketship from './rocketship';
 
 ## TL;DR
 
