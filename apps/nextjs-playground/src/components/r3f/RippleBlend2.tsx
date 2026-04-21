@@ -80,6 +80,8 @@ function RippleImages() {
       uniforms.u_tex_1.value = img1;
       uniforms.u_tex_2.value = img2;
     }
+    // uniforms is a useMemo-stable ref; we assign to .value rather than read it, so its identity is the only real dep.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [matRef, img1, img2]);
 
   useFrame((_, delta) => {

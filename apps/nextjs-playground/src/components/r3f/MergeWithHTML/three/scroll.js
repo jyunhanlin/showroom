@@ -28,7 +28,7 @@ export default class Scroll {
 
   init() {
     // sets the initial value (no interpolation) - translate the scroll value
-    for (const key in this.renderedStyles) {
+    for (const _key in this.renderedStyles) {
       this.current = this.scrollToRender = this.getScroll();
     }
     // translate the scrollable element
@@ -48,9 +48,9 @@ export default class Scroll {
     return this.docScroll;
   }
   initEvents() {
-    window.onbeforeunload = function () {
+    window.addEventListener('beforeunload', () => {
       window.scrollTo(0, 0);
-    };
+    });
     // on resize reset the body's height
     window.addEventListener('resize', () => this.setSize());
     window.addEventListener('scroll', this.getScroll.bind(this));
