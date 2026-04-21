@@ -1,7 +1,6 @@
 import { Metadata } from 'next';
 import { Fira_Mono } from 'next/font/google';
 
-// oxlint-disable-next-line import/no-unassigned-import -- Next.js global CSS requires side-effect import
 import './globals.css';
 
 export const metadata: Metadata = {
