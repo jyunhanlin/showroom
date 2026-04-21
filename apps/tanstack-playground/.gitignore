@@ -7,3 +7,6 @@ node_modules
 .nitro
 .tanstack
 dist
+
+# tanstack-router regenerates this on every dev/build
+src/routeTree.gen.ts
