@@ -1,1 +1,0 @@
-import{t as e}from"./index-C2ZvtAxL.js";var t=e();function n(){return(0,t.jsxs)(`section`,{children:[(0,t.jsx)(`h1`,{children:`About`}),(0,t.jsx)(`p`,{children:`File-based routing, type-safe links, and SPA-mode prerendered shell.`})]})}export{n as component};

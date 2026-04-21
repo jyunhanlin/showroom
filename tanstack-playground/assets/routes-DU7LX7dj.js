@@ -1,1 +1,0 @@
-import{t as e}from"./index-C2ZvtAxL.js";var t=e();function n(){return(0,t.jsxs)(`section`,{children:[(0,t.jsx)(`h1`,{children:`TanStack Playground`}),(0,t.jsx)(`p`,{children:`TanStack Start running in SPA mode.`})]})}export{n as component};
