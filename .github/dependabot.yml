@@ -1,15 +1,24 @@
-# Basic set up for three package managers
+# Grouped weekly updates.
+# Groups bundle non-major bumps into one PR per ecosystem/dependency-type;
+# major bumps still get their own PR so breaking changes can be reviewed in isolation.
 
 version: 2
 updates:
-  # Maintain dependencies for GitHub Actions
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
       interval: 'weekly'
+    groups:
+      github-actions:
+        patterns:
+          - '*'
 
-  # Maintain dependencies for npm
   - package-ecosystem: 'npm'
     directory: '/'
     schedule:
       interval: 'weekly'
+    groups:
+      dev-dependencies:
+        dependency-type: 'development'
+      production-dependencies:
+        dependency-type: 'production'
