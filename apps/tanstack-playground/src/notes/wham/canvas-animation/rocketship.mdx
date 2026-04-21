@@ -35,7 +35,3 @@ import Rocketship from './rocketship';
 - **Air resistance 的近似版本會隨 frame rate 崩壞。** 上面 demo 用的是課程示範版 `v *= 1 - AIR_RESISTANCE * deltaTime`,60Hz 看起來很 OK,但低 fps 時 `1 - k*dt` 可能接近 0 甚至變負;正解是 `v *= Math.exp(-AIR_RESISTANCE * deltaTime)`(課程的 info box 給的答案)。
 - **`deltaTime` 一定要 clamp。** 沒 clamp 的話 tab 從背景切回來會爆粒子。
 - **Strict Mode double-invoke。** `useEffect` 裡 `requestAnimationFrame` 一定要在 cleanup 呼叫 `cancelAnimationFrame`,不然會有兩條 rAF loop 並行。
-
-## Related
-
-- _(M2 內沒有其他筆記,留空)_
