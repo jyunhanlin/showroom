@@ -8,7 +8,7 @@ import { assetPath } from '@/utils/assetPath';
 
 export const MergeWithHTML = () => {
   useEffect(() => {
-    new Sketch({
+    const _sketch = new Sketch({
       dom: document.getElementById('canvas'),
     });
   }, []);
