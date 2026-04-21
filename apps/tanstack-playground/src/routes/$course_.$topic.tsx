@@ -4,7 +4,7 @@ import { NoteCard } from '~/components/note-card';
 import { notesByTopic } from '~/notes/_registry';
 import { topics, topicName } from '~/notes/_topics';
 
-export const Route = createFileRoute('/$course/$topic')({
+export const Route = createFileRoute('/$course_/$topic')({
   loader: ({ params }) => {
     const items = notesByTopic(params.course, params.topic);
     if (items.length === 0) throw notFound();
