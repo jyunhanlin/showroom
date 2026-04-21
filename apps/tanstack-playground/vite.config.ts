@@ -1,6 +1,11 @@
+import mdx from '@mdx-js/rollup';
+import rehypeShiki from '@shikijs/rehype';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
+import tailwindcss from '@tailwindcss/vite';
 import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
+import remarkFrontmatter from 'remark-frontmatter';
+import remarkMdxFrontmatter from 'remark-mdx-frontmatter';
 import { defineConfig } from 'vite';
 
 const base = process.env.BASE_PATH ?? '/';
@@ -23,7 +28,13 @@ export default defineConfig({
         },
       },
     }),
+    mdx({
+      providerImportSource: '@mdx-js/react',
+      remarkPlugins: [remarkFrontmatter, [remarkMdxFrontmatter, { name: 'frontmatter' }]],
+      rehypePlugins: [[rehypeShiki, { theme: 'github-light' }]],
+    }),
     viteReact(),
+    tailwindcss(),
     nitro(),
   ],
 });
