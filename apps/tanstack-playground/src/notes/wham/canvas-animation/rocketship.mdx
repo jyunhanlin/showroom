@@ -22,9 +22,9 @@ import Rocketship from './rocketship';
 
 每一幀做三件事:
 
-1. **生粒子** — 需要每秒產生 600 顆,所以每幀產生 `600 × deltaTime` 顆。不用 `setInterval`,跟 rAF 對齊。
-2. **更新粒子** — `x += xVelocity * deltaTime`;`yVelocity` 乘上 drag 達到空氣阻力。
-3. **畫粒子** — `ctx.arc` + `fillStyle`;透明度用 `clampedNormalize(age, lifespan, 0)` 做線性淡出。
+1. **Spawn** — 需要每秒產生 600 顆,所以每幀產生 `600 × deltaTime` 顆。不用 `setInterval`,跟 rAF 對齊。
+2. **Update** — `x += xVelocity * deltaTime`;`yVelocity` 乘上 drag 達到空氣阻力。
+3. **Draw** — `ctx.arc` + `fillStyle`;透明度用 `clampedNormalize(age, lifespan, 0)` 做線性淡出。
 
 粒子 5 秒後從陣列移除,避免記憶體無限增長。這邊不用每幀都 filter,每秒清一次就夠。
 
