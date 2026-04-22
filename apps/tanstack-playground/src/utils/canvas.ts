@@ -35,6 +35,7 @@ export function normalize(value: number, min: number, max: number): number {
   return (value - min) / (max - min);
 }
 
-export function clampedNormalize(value: number, min: number, max: number): number {
-  return Math.max(0, Math.min(1, normalize(value, min, max)));
+export function clampedNormalize(value: number, min: number, max: number, outMin = 0, outMax = 1): number {
+  const t = Math.max(0, Math.min(1, normalize(value, min, max)));
+  return outMin + (outMax - outMin) * t;
 }
