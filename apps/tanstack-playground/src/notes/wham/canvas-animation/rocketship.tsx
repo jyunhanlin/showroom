@@ -1,4 +1,4 @@
-import { random, sample } from 'lodash-es';
+import { random, sample, times } from 'lodash-es';
 import { useEffect, useRef } from 'react';
 import { clampedNormalize, convertPolarToCartesian, setupCanvas } from '~/utils/canvas';
 
@@ -25,19 +25,18 @@ export default function Rocketship() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const { ctx, dimensions } = setupCanvas(canvas);
+    const { ctx, dimensions: canvasDimensions } = setupCanvas(canvas);
     let particles: Particle[] = [];
     let lastTimestamp = performance.now();
     let rafId = 0;
-    let lastCleanup = performance.now();
 
     function generateParticle(): Particle {
-      const angleDeg = random(60, 120, true);
+      const angle = random(60, 120, true);
       const velocity = random(100, 200, true);
-      const { x: xVelocity, y: yVelocity } = convertPolarToCartesian(angleDeg, velocity);
+      const { x: xVelocity, y: yVelocity } = convertPolarToCartesian(angle, velocity);
       return {
         createdAt: performance.now(),
-        x: dimensions.width / 2,
+        x: canvasDimensions.width / 2,
         y: 0,
         xVelocity,
         yVelocity,
@@ -53,36 +52,47 @@ export default function Rocketship() {
       const deltaTime = Math.min(now - lastTimestamp, 250) / 1000;
       lastTimestamp = now;
 
-      ctx.clearRect(0, 0, dimensions.width, dimensions.height);
+      ctx.clearRect(0, 0, canvasDimensions.width, canvasDimensions.height);
 
-      const n = Math.round(PARTICLES_PER_SECOND * deltaTime);
-      for (let i = 0; i < n; i++) particles.push(generateParticle());
+      const numOfNewParticles = Math.min(Math.round(PARTICLES_PER_SECOND * deltaTime), PARTICLES_PER_SECOND / 10);
+      const newParticles = times(numOfNewParticles, generateParticle);
+      particles.push(...newParticles);
 
-      for (const p of particles) {
-        p.yVelocity *= 1 - AIR_RESISTANCE * deltaTime;
-        p.x += p.xVelocity * deltaTime;
-        p.y += p.yVelocity * deltaTime;
+      particles.forEach((particle) => {
+        const particleAge = now - particle.createdAt;
+        particle.opacity = clampedNormalize(particleAge, 0, particle.lifespan, 1, 0);
 
-        const age = now - p.createdAt;
-        p.opacity = clampedNormalize(age, p.lifespan, 0);
+        particle.xVelocity *= 1 - AIR_RESISTANCE * 0.25 * deltaTime;
+        particle.yVelocity *= 1 - AIR_RESISTANCE * deltaTime;
+
+        particle.x += particle.xVelocity * deltaTime;
+        particle.y += particle.yVelocity * deltaTime;
 
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fillStyle = p.color;
-        ctx.globalAlpha = p.opacity;
+        ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+        ctx.fillStyle = particle.color;
+        ctx.globalAlpha = particle.opacity;
         ctx.fill();
-      }
-
-      if (now - lastCleanup > 1000) {
-        particles = particles.filter((p) => now - p.createdAt < 5000);
-        lastCleanup = now;
-      }
+      });
 
       rafId = requestAnimationFrame(draw);
     }
 
+    function cleanup() {
+      const now = performance.now();
+      particles = particles.filter((particle) => {
+        const particleAge = now - particle.createdAt;
+        return particleAge < 5000;
+      });
+    }
+
+    const cleanupId = setInterval(cleanup, 1000);
     rafId = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(rafId);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearInterval(cleanupId);
+    };
   }, []);
 
   return (
