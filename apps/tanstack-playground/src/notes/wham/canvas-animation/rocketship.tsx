@@ -1,3 +1,4 @@
+import { random, sample } from 'lodash-es';
 import { useEffect, useRef } from 'react';
 import { clampedNormalize, convertPolarToCartesian, setupCanvas } from '~/utils/canvas';
 
@@ -31,8 +32,8 @@ export default function Rocketship() {
     let lastCleanup = performance.now();
 
     function generateParticle(): Particle {
-      const angleDeg = 60 + Math.random() * 60;
-      const velocity = 100 + Math.random() * 100;
+      const angleDeg = random(60, 120, true);
+      const velocity = random(100, 200, true);
       const { x: xVelocity, y: yVelocity } = convertPolarToCartesian(angleDeg, velocity);
       return {
         createdAt: performance.now(),
@@ -40,9 +41,9 @@ export default function Rocketship() {
         y: 0,
         xVelocity,
         yVelocity,
-        radius: 1 + Math.random() * 2,
-        color: COLORS[Math.floor(Math.random() * COLORS.length)]!,
-        lifespan: 500 + Math.random() * 1000,
+        radius: random(1, 3, true),
+        color: sample(COLORS)!,
+        lifespan: random(500, 1500, true),
         opacity: 1,
       };
     }
