@@ -1,0 +1,58 @@
+---
+title: Transforms, 用 save/restore 畫旋轉粒子
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/05-transforms
+lessonNumber: '04-canvas/05-transforms'
+order: 5
+summary: ctx 是那隻拿畫筆的手；rotate 不是轉物件是轉座標系，要先 translate 到粒子位置。
+tags: [canvas, transform, rotate, translate, save-restore, angularVelocity]
+---
+
+import Confetti from './confetti';
+
+## TL;DR
+
+- Canvas 沒有 CSS 的 `transform-origin`。`ctx.rotate` 轉的是「那隻拿畫筆的手」整個座標系，所以要**先 `translate` 到粒子位置再 `rotate`**，順序反了粒子會繞左上角打轉。
+- `ctx.save()` / `ctx.restore()` 是 transform stack — 畫完 `restore` 回到乾淨狀態，就不用手動 `rotate(-angle)` + `translate(-x, -y)` 把前一顆粒子的 transform 倒回來(而且手動倒回來順序一錯就爆)。
+- 粒子的旋轉是 `rotation += angularVelocity * deltaTime`,再套一層 `angularVelocity *= 1 - AIR_RESISTANCE * dt` — 跟 rocketship 一樣的 drag 模型,只是從線速度換成角速度。
+
+<DemoFrame title="點擊畫布噴出 confetti">
+  <Confetti />
+</DemoFrame>
+
+## Why it works
+
+每顆粒子的 draw 固定是這五行,順序不能換:
+
+```ts
+ctx.save();                // 1. 記住目前 transform
+ctx.translate(x, y);       // 2. 把「手」移到粒子位置
+ctx.rotate(rotation);      // 3. 在新原點上轉
+ctx.fillText(emoji, 0, 0); // 4. 在「手底下」畫 — 座標用 (0, 0)
+ctx.restore();             // 5. 回復到 save 時的狀態
+```
+
+把它當成實體操作:
+
+- `translate` 是把手移到桌面上某一點。
+- `rotate` 是在**手當下的位置**把手轉角度 — 不是轉桌子。如果你先 `rotate` 再 `translate`,後面的 `translate` 方向已經被轉過,粒子會跑到錯誤位置。
+- 畫 `(0, 0)` 是因為手已經在粒子位置,再往哪邊偏移都是相對於手。
+
+沒 `save`/`restore` 會怎樣?前一顆粒子 rotate 45° 還沒倒回來,下一顆從 45° 繼續 rotate 到 90°,第三顆 135°... 整張畫面會像陀螺。
+
+## `fillText` vs `drawImage` 的錨點差異
+
+課程原版用 `ctx.drawImage(img, x - w/2, y - h/2, w, h)` — `drawImage` 的錨點是圖片**左上角**,要手動減掉半個寬高把圖置中。這份筆記用 emoji + `fillText`,搭配:
+
+```ts
+ctx.textAlign = 'center';
+ctx.textBaseline = 'middle';
+```
+
+錨點直接是字的**中心**,所以 `translate` 到粒子位置後,畫在 `(0, 0)` 就自動置中在「手」上,不用減半。這讓 `save → translate → rotate → draw → restore` 的模型看起來更乾淨,但實質一樣。
+
+## Gotchas
+
+- **`ctx.rotate` 是累加的。** 沒 `save`/`restore` 也沒手動 `rotate(-angle)`,下一顆粒子從前一顆的角度繼續轉。
+- **Transform 順序不可交換。** `translate(x,y) → rotate(θ)` 跟 `rotate(θ) → translate(x,y)` 結果不同 — 後者的 `translate` 方向已經被轉了 θ。先 `translate` 再 `rotate`,粒子才會繞自己的中心轉。
+- **Drag 近似在低 fps 會崩壞。** `angularVelocity *= 1 - AIR_RESISTANCE * deltaTime` 在 60Hz 看起來 OK,`deltaTime` 大時 `1 - k*dt` 會變負或接近 0,粒子瞬間停轉甚至反轉。正解是 `Math.exp(-k * dt)`。跟 rocketship 共用這個坑。
+- **Click 座標要換算。** `event.clientX/Y` 是 viewport 座標。Canvas 在頁面裡有自己的位置,要減掉 `canvas.getBoundingClientRect()` 的 `left`/`top` 才是 canvas-local 座標。課程是全屏 canvas 所以直接用 `clientX/Y`,notes 裡這個 demo 是 boxed 的所以必要。
