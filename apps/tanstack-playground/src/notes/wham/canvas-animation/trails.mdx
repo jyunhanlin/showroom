@@ -1,0 +1,83 @@
+---
+title: Trails，畫殘影的兩種寫法
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/06.01-trails
+lessonNumber: '04-canvas/06.01-trails'
+order: 6
+summary: 不要 clearRect，改成每幀蓋一層淡黑色 = 拖尾；想要乾淨可控就改存位置堆疊重畫。
+tags: [canvas, trails, fillRect, opacity, deltaTime]
+---
+
+import { TrailsFillRect, TrailsStack } from './trails';
+
+## TL;DR
+
+- 想要拖尾最快的寫法:把每幀的 `ctx.clearRect` 換成 `ctx.fillRect` 配低 opacity 的黑色。前一幀沒被擦掉,只是被一層薄黑漆蓋上去,越久越黑越淡。
+- opacity 一定要乘 `deltaTime`,否則 120Hz 螢幕一秒蓋的層數是 60Hz 的兩倍,殘影長度直接被 frame rate 決定。
+- 想要乾淨/可控/只給特定物件加殘影:存一疊 N 個過去位置,每幀 `clearRect` 後依 `index` 由暗到亮重畫。代價是程式碼變多,而且 `deltaTime` 不容易塞進去。
+
+<DemoFrame title="fillRect 半透明蓋層">
+  <TrailsFillRect />
+</DemoFrame>
+
+<DemoFrame title="位置堆疊 + 漸層 lightness">
+  <TrailsStack />
+</DemoFrame>
+
+## fillRect 為什麼會拖尾
+
+每幀畫流程從「擦乾淨 → 畫新位置」變成「蓋一層淡黑 → 畫新位置」:
+
+```ts
+const opacity = TRAIL_FADE_SPEED * deltaTime;
+ctx.fillStyle = `hsl(0deg 0% 0% / ${opacity})`;
+ctx.fillRect(0, 0, canvasDimensions.width, canvasDimensions.height);
+```
+
+第 N 幀的方塊在第 N+1 幀被一層 opacity 黑漆覆蓋,在第 N+2 幀被兩層覆蓋,以此類推。視覺上看到的是「越舊的位置越黑越接近背景」,等同於拖尾從亮黃逐漸淡入背景色。
+
+`TRAIL_FADE_SPEED = 6` 是一秒蓋掉的「總 opacity 量」。`deltaTime` 在 60Hz 螢幕約 16.7ms,每幀 opacity 約 0.1;120Hz 約 8.3ms,每幀 opacity 約 0.05 — 但每秒幀數翻倍,**累積消失速度一致**。沒有乘 `deltaTime` 的版本,殘影長度會跟著螢幕跑。
+
+## 位置堆疊版怎麼運作
+
+換另一條思路:不要在 canvas 上玩透明度,直接記得方塊去過哪裡。
+
+```ts
+const boxPositions: { x: number; y: number }[] = [{ x: 0, y: 0 }];
+const STORED_POSITIONS = 40;
+
+// 每幀:
+const newBoxPosition = { x: prev.x + xVelocity * dt, y: prev.y + yVelocity * dt };
+// ...邊界處理...
+boxPositions.push(newBoxPosition);
+if (boxPositions.length > STORED_POSITIONS) boxPositions.shift();
+
+boxPositions.forEach(({ x, y }, index) => {
+  const boxLightness = clampedNormalize(index, 0, STORED_POSITIONS - 1, 0, 60);
+  ctx.fillStyle = `hsl(45deg 100% ${boxLightness}%)`;
+  ctx.fillRect(x, y, box.size, box.size);
+});
+```
+
+`index = 0` 是最舊的位置,`lightness = 0%` 直接黑掉(在暗底色上看不見);`index = STORED_POSITIONS - 1` 是當前位置,`lightness = 60%` 是最亮的黃。中間 39 個位置線性漸層。
+
+注意這份 codebase 的 `clampedNormalize(value, inMin, inMax, outMin, outMax)` 是 5-arg 版,對應課程的 `normalize` 簽名。本地 `normalize` 只有 3-arg 不能用。
+
+## 兩種方法的取捨
+
+| 面向 | fillRect 蓋層 | 位置堆疊 |
+|---|---|---|
+| 程式碼量 | 一行 fillStyle | 多一個陣列、push/shift、forEach 重畫 |
+| 殘影對象 | **整張 canvas** 上所有東西 | 只有你 push 進陣列的東西 |
+| `deltaTime` | 直接乘進 opacity 即可 | 不容易塞 — 一疊位置等距取樣,跟時間無關 |
+| 殘影殘留 | 在好螢幕上會 plateau,永遠到不了純黑 | 完全乾淨,clearRect 每幀重置 |
+| 背景顏色 | 必須暗色(蓋的是黑漆) | 任意,但 `lightness 0%` 要看得見/看不見要配合 |
+
+簡單的場景幾乎都用 fillRect 就好;需要「只給某顆粒子拖尾不要全畫面殘影」或「絕對不能有 plateau 殘留」才換堆疊版。
+
+## Gotchas
+
+- **fillRect 法靠暗背景。** 蓋的顏色是 `hsl(0deg 0% 0%)` — 純黑。如果 canvas CSS 背景是亮色,殘影會「淡入到亮底色」而不是消失,看起來很怪。Demo 用 `bg-slate-900`。
+- **opacity 不乘 `deltaTime` 會被 frame rate 綁架。** 60Hz vs 120Hz 殘影長度差兩倍。課程 info box 點出這點,把 opacity 改成 `TRAIL_FADE_SPEED * deltaTime` 解掉。
+- **堆疊版的 `boxPositions[length-1]` 要保證非空。** 初始化 `[{ x: 0, y: 0 }]`,然後每幀先 push 再 shift,陣列永遠至少有一個元素。TS 嚴格模式下還是要 `!` 或顯式判空。
+- **`deltaTime` 一律 clamp 250ms。** 跟 rocketship、confetti 同個坑 — tab 切回來時 `performance.now()` delta 暴衝,堆疊版會一次更新很大的位置跳幀,fillRect 版會一次蓋掉太多 opacity 直接全黑。
+- **`fillRect` 的 plateau 是真的存在但通常無感。** 課程裡有提到好螢幕看得出來,我自己用筆電看不太出來。要徹底乾淨就用堆疊版。

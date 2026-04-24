@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
 import remarkFrontmatter from 'remark-frontmatter';
+import remarkGfm from 'remark-gfm';
 import remarkMdxFrontmatter from 'remark-mdx-frontmatter';
 import { defineConfig } from 'vite';
 
@@ -30,7 +31,7 @@ export default defineConfig({
     }),
     mdx({
       providerImportSource: '@mdx-js/react',
-      remarkPlugins: [remarkFrontmatter, [remarkMdxFrontmatter, { name: 'frontmatter' }]],
+      remarkPlugins: [remarkFrontmatter, [remarkMdxFrontmatter, { name: 'frontmatter' }], remarkGfm],
       rehypePlugins: [[rehypeShiki, { theme: 'github-light' }]],
     }),
     viteReact(),
