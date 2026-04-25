@@ -1,0 +1,108 @@
+---
+title: Simplex Noise
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/06.03-simplex-noise
+lessonNumber: '04-canvas/06.03-simplex-noise'
+order: 6.03
+summary: 隨機點接線會 spiky，因為相鄰點不相干。Simplex noise 給相鄰輸入吐相關輸出 → 平滑 swoop。第三軸吃 time 就是動畫。
+tags: [canvas, simplex, noise, perlin, procedural]
+---
+
+import { NoiseSwoop, NoiseGrid } from './simplex-noise';
+
+## TL;DR
+
+- 用直線連接 100 個點就可以畫有機 swoop — 但只有當「相鄰點 y 值有相關性」才行,純 random 出來的點接線只會 spiky。
+- `simplex2(x, y) → [-1, 1]`，跟 `Math.sin` 一樣都是有界輸出但是 2D。每次相鄰輸入吐相關輸出,所以接起來平滑。
+- 第二/第三個參數放 timestamp，軌跡會「在 noise field 裡沿時間軸切橫剖面」,動畫感像地形演化。
+- 頻率 = 把輸入座標除以一個大數。`simplex2(x/200, ...)` 比 `simplex2(x, ...)` 平滑得多。
+
+<DemoFrame title="動畫 swoop — simplex2(x/200, time/10) 接 100 段直線">
+  <NoiseSwoop />
+</DemoFrame>
+
+## 為什麼 random 不夠用
+
+直觀上你會想把 100 個點的 y 各自 `Math.random()` 出來接成線。但每點是獨立的 [0, 1] 隨機,相鄰點落差可以是任意大,接出來就是亂針:
+
+```ts
+range(NUM_OF_POINTS).forEach((i) => {
+  const x = normalize(i, 0, NUM_OF_POINTS - 1, 0, canvasDimensions.width);
+  const y = Math.random() * canvasDimensions.height;
+  // ...
+});
+```
+
+要平滑 swoop，需要的是「相鄰 x 對應的 y 也要相鄰」這個性質 — 也就是 noise function 的本質:**輸入連續、輸出也連續**。
+
+## simplex2 的核心性質
+
+Simplex noise 是 Ken Perlin 在 2000 年代發表的演算法,前身是 1980 年的 Perlin noise (兩者都是他做的)。重點性質:
+
+- 輸入是任意座標 (1D / 2D / 3D / 4D)
+- 輸出永遠在 `[-1, 1]`
+- **相鄰輸入對應相關輸出**,變化是平滑的,不會有突跳
+- 同一個 seed 永遠吐同一份 pattern (deterministic)
+
+```ts
+import { createNoise2D } from 'simplex-noise';
+const simplex2 = createNoise2D();
+
+const y = normalize(simplex2(x / 200, 1), -1, 1, 0, canvasDimensions.height);
+```
+
+第二個參數固定 `1` 等於是在 2D noise field 裡走一條水平線、看 y 在這條線上的起伏。
+
+## 頻率 = 除一個大數
+
+直接 `simplex2(x, 1)` 沒用 — 因為 100 個點橫跨 0~canvas.width (例如 800),x 之間相差 8 左右。simplex 對「8 單位的距離」是接近 random 的(noise 的「平滑半徑」大概 1 個單位)。
+
+把 x 除以 200 → 相鄰兩點的 x 輸入差約 0.04,落在平滑半徑內,接出來就是 swoop:
+
+```ts
+const y = normalize(simplex2(x / 200, ...), -1, 1, 0, h);
+```
+
+除越大 = 越平滑(細節變少);除越小 = 越鋸齒(往 random 退化)。試 /20、/100、/200、/500 看差別。
+
+## 時間軸 = 第三個參數
+
+把第二個參數從 `1` 換成 `totalTime / 10`,等於每幀都在 noise field 的不同水平線上取樣:
+
+```ts
+const y = normalize(
+  simplex2(x / 200, totalTime / 10),
+  -1, 1, 0, canvasDimensions.height,
+);
+```
+
+把 noise field 想成一片地形,(x, y) → 高度。`simplex2(x/200, 1)` 是在 y=1 那條等高線上的橫剖面;現在 y 是 totalTime/10,隨時間慢慢往北邊走,每幀剖面都不一樣,動畫就是「飛越山脈」的感覺。
+
+`/10` 是時間速度倍率 — 越大走得越慢。
+
+## 2D 動畫 grid 用 simplex3
+
+換個 demo:20×20 圓陣列,每顆圓的 lightness 由 noise 算。用 `simplex3(x, y, time)` 三維 noise,前兩個是 grid 位置、第三個是時間:
+
+```ts
+const simplex3 = createNoise3D();
+// ...
+const lightness = normalize(
+  simplex3(centerX / 70, centerY / 70, totalTime / 3),
+  -1, 1, 6, 100,
+);
+```
+
+每顆圓在 (centerX/70, centerY/70) 拿到一個 noise 值,normalize 成 lightness 6%~100% 的 hsl 灰階。視覺上是 grid 在「呼吸」,亮的格是山頂、暗的格是谷地,在時間軸上慢慢演變。
+
+<DemoFrame title="2D 地形動畫 — simplex3 用 (x, y, time) 三維">
+  <NoiseGrid />
+</DemoFrame>
+
+## Gotchas
+
+- **`simplex-noise` 套件不是課程的 `noisejs`**。API 從 `createNoiseGenerator(seed).simplex2` 改成 `createNoise2D(prng?)`。功能等價,只是 packaging 差別 — 用 `const simplex2 = createNoise2D()` alias 回課程命名,call site 完全一致。
+- **頻率除數跟 canvas 尺寸耦合**。Demo 的 `w-full` 大概 800px → x 範圍 0~800,除以 200 = 0~4。換 `w-[200px]` 的 canvas,/200 會變得太平滑,要改 /50 才有同樣效果。換 canvas 寬度時記得 retune 除數。
+- **不需要 deltaTime**。`simplex2(x, totalTime/10)` 是純時間函數,frame skip / tab throttle 都不會 drift,跟 sine motion 同一個性質。
+- **`createNoise2D()` 不傳 PRNG = 用 `Math.random()` 做 seed**,每次 page reload 看到不同的 noise pattern。要 deterministic 就傳一個 seedable PRNG (像 `alea`):`createNoise2D(seedablePrng)`。
+- **`createNoise2D` / `createNoise3D` 寫在 `useEffect` 內**,不要 module-level。雖然 canvas 內容不會被 SSR (canvas 在 server 上是空的),但 noise factory 內部會呼叫 `Math.random()` 256 次建 lookup table — 沒必要在 server 上跑。
+- **simplex 跟 random 的差別不只是「平滑」**。同一份 seed 下,`simplex2(0.5, 1)` 永遠吐同一個值;`Math.random()` 沒這保證。所以 simplex 適合用在「動畫但每幀位置之間要有關聯」、「procedural terrain 要 reproducible」的場景。
