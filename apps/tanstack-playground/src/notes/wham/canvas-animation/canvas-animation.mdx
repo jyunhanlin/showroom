@@ -1,0 +1,93 @@
+---
+title: Canvas Animation, immediate mode 的 clear and redraw
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/02-canvas-animation
+lessonNumber: '04-canvas/02-canvas-animation'
+order: 2
+summary: Canvas 沒有 DOM node 可以動，所以每幀 clearRect → 重新 fillRect。setInterval 換 rAF，位移用 velocity (= 速度 + 方向)。
+tags: [canvas, immediate-mode, requestAnimationFrame, velocity, clearRect]
+---
+
+import CanvasAnimation from './canvas-animation';
+
+## TL;DR
+
+- Canvas 沒有 `.box` 這種 element 物件，CSS keyframes 動不了東西。要動就每幀手動畫:`clearRect` 整張 → 用更新後的狀態 `fillRect`。
+- `setInterval` 寫死 60Hz、又會堆 callback，改成 `requestAnimationFrame` 遞迴呼叫自己。
+- 用 `velocity` (帶符號的速度) 取代 `speed` + `direction`，撞牆把符號翻過來;`velocity *= 0.95` 就是摩擦力。
+
+<DemoFrame title="Bouncing box with velocity + friction">
+  <CanvasAnimation />
+</DemoFrame>
+
+## 為什麼一定要 clearRect
+
+DOM 走 retained mode — 留著 element node、自動 dirty-tracking，你改 property 才會 repaint 對應區域。Canvas 是 immediate mode — 畫上去的只是 pixel，沒有「box object」概念，引擎不會幫你管狀態。
+
+如果只 `fillRect(box.x, ...)` 然後 `box.x += 1`，前一幀的方塊還在 canvas 上，新方塊只是疊在後面。視覺結果是一條會長大的橫條，不是會動的方塊:
+
+```ts
+function draw() {
+  ctx.fillStyle = 'hsl(45deg 100% 50%)';
+  ctx.fillRect(box.x, box.y, box.size, box.size);
+  box.x += 1;
+}
+```
+
+每幀第一件事是 `clearRect(0, 0, w, h)` 把整張擦掉，再用更新後的 `box.x` 重畫，才有「動」的錯覺:
+
+```ts
+function draw() {
+  ctx.clearRect(0, 0, canvasDimensions.width, canvasDimensions.height);
+  ctx.fillStyle = 'hsl(45deg 100% 50%)';
+  ctx.fillRect(box.x, box.y, box.size, box.size);
+  box.x += 1;
+}
+```
+
+直覺上會擔心「幾百個物件每幀全部重畫不是很浪費?」實測 paint 操作很便宜，GPU 路徑短，通常還比改一個 DOM property 快。先別過早優化。
+
+## rAF 取代 setInterval
+
+`setInterval(draw, 1000 / 60)` 有兩個坑:
+
+1. **寫死 60 fps 假設**。120Hz / 240Hz 螢幕能畫的 frame 多，但 callback 被綁死在每秒 60 次，動畫看起來反而不流暢。
+2. **callback 會堆**。如果某幀 `draw` 跑超過 16ms，下一次 callback 馬上接著跑，持續落後就把整個 page 拖死。
+
+`requestAnimationFrame` 的契約是「下一幀要畫前再呼叫 callback」，refresh rate 多少跟著多少。寫法是把下一次排程放在 `draw` 結尾:
+
+```ts
+function draw() {
+  // 清畫面、更新狀態、畫新一幀
+  rafId = requestAnimationFrame(draw);
+}
+rafId = requestAnimationFrame(draw);
+```
+
+第一眼看起來像是會 stack overflow 的遞迴，但 rAF 是非同步排程，每次 callback 是一個新的 call stack。
+
+## velocity 不是 speed
+
+撞牆反彈最直觀的寫法是另存一個 `direction = 1 | -1`，撞到邊界翻過來再乘上 `speed`。但 `velocity` 把方向直接編碼進數值，call site 少一層間接:
+
+```ts
+const box = { x: 0, velocity: INITIAL_VELOCITY };
+
+if (box.x > canvasDimensions.width - box.size) {
+  box.velocity = INITIAL_VELOCITY * -1;
+} else if (box.x < 0) {
+  box.velocity = INITIAL_VELOCITY;
+}
+
+box.x += box.velocity;
+```
+
+物理課的差別:speed 是 scalar (一律 ≥ 0)，velocity 是 vector (有正負方向)。把方向編在 sign 裡，更新位置就一招 `+=` 搞定。
+
+摩擦力是同一招的延伸 — 把 vector 縮短:`box.velocity *= 0.95`。每幀剩 95%，撞牆時又被重置回 `INITIAL_VELOCITY`，所以畫面是「快→慢→撞牆→又快→慢」的循環。CSS 用 cubic-bezier 控制曲線;Canvas 直接改物理量本身，這套思維後面可以堆出重力、空氣阻力。
+
+## Gotchas
+
+- **這個 demo 的速度跟 frame rate 綁死。** `box.x += box.velocity` 沒乘 `deltaTime`，120Hz 螢幕跑兩倍快。後面 rocketship 那課會引入 `deltaTime` 修這件事;這課刻意先不處理，留著當對照組。
+- **Strict Mode `useEffect` 會 double-mount。** cleanup 一定要 `cancelAnimationFrame(rafId)`，不然開發環境兩條 rAF loop 同時跑，看起來方塊速度變兩倍。
+- **`setupCanvas` 回傳 `{ ctx, dimensions }`，不是課程的 `{ canvasWidth, canvasHeight }`。** 解構時用 `dimensions: canvasDimensions`，call site 一律 `canvasDimensions.width` — 跟其他 canvas demo 對齊。
+- **`INITIAL_VELOCITY` 跟 `0.95` 跟 canvas 寬度耦合。** 等比級數和是 `10 / (1 - 0.95) = 200`，所以方塊單方向最多走 200px。canvas 太寬 (例如 320px) 方塊會在中間慢下來停住，不會持續彈。Demo 設 `w-[200px]` 就是讓 box 永遠彈到下一個牆。
