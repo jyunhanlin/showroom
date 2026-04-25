@@ -25,7 +25,7 @@ export default function Rocketship() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const { ctx, dimensions: canvasDimensions } = setupCanvas(canvas);
+    const { ctx, dimensions: canvasDimensions, disposeResize } = setupCanvas(canvas);
     let particles: Particle[] = [];
     let lastTimestamp = performance.now();
     let rafId = 0;
@@ -92,6 +92,7 @@ export default function Rocketship() {
     return () => {
       cancelAnimationFrame(rafId);
       clearInterval(cleanupId);
+      disposeResize();
     };
   }, []);
 

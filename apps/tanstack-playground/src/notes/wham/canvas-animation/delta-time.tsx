@@ -1,9 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { setupCanvas } from '~/utils/canvas';
 
-const INITIAL_VELOCITY = 10;
-
-export default function CanvasAnimation() {
+export default function DeltaTime() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -15,23 +13,30 @@ export default function CanvasAnimation() {
       x: 0,
       y: 10,
       size: 20,
-      velocity: INITIAL_VELOCITY,
+      velocity: 120,
     };
+    let lastTimestamp = performance.now();
     let rafId = 0;
 
     function draw() {
+      const now = performance.now();
+      const deltaTime = Math.min(now - lastTimestamp, 250) / 1000;
+      lastTimestamp = now;
+
       ctx.clearRect(0, 0, canvasDimensions.width, canvasDimensions.height);
-      ctx.fillStyle = 'hsl(45deg 100% 50%)';
-      ctx.fillRect(box.x, box.y, box.size, box.size);
+
+      box.x += box.velocity * deltaTime;
 
       if (box.x > canvasDimensions.width - box.size) {
-        box.velocity = INITIAL_VELOCITY * -1;
+        box.x = canvasDimensions.width - box.size;
+        box.velocity *= -1;
       } else if (box.x < 0) {
-        box.velocity = INITIAL_VELOCITY;
+        box.x = 0;
+        box.velocity *= -1;
       }
 
-      box.velocity *= 0.95;
-      box.x = box.x + box.velocity;
+      ctx.fillStyle = 'hsl(45deg 100% 50%)';
+      ctx.fillRect(box.x, box.y, box.size, box.size);
 
       rafId = requestAnimationFrame(draw);
     }
@@ -44,5 +49,5 @@ export default function CanvasAnimation() {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="mx-auto block h-[60px] w-[200px] rounded-md bg-slate-900" />;
+  return <canvas ref={canvasRef} className="mx-auto block h-[60px] w-full rounded-md bg-slate-900" />;
 }

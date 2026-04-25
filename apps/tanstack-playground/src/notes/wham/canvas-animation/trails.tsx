@@ -15,7 +15,7 @@ export function TrailsFillRect() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const { ctx, dimensions: canvasDimensions } = setupCanvas(canvas);
+    const { ctx, dimensions: canvasDimensions, disposeResize } = setupCanvas(canvas);
     const box = {
       x: 0,
       y: 0,
@@ -63,6 +63,7 @@ export function TrailsFillRect() {
 
     return () => {
       cancelAnimationFrame(rafId);
+      disposeResize();
     };
   }, []);
 
@@ -76,7 +77,7 @@ export function TrailsStack() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const { ctx, dimensions: canvasDimensions } = setupCanvas(canvas);
+    const { ctx, dimensions: canvasDimensions, disposeResize } = setupCanvas(canvas);
     const box = {
       size: BOX_SIZE,
       xVelocity: X_VELOCITY,
@@ -132,6 +133,7 @@ export function TrailsStack() {
 
     return () => {
       cancelAnimationFrame(rafId);
+      disposeResize();
     };
   }, []);
 

@@ -3,19 +3,32 @@ export type CanvasDimensions = { width: number; height: number };
 export function setupCanvas(canvas: HTMLCanvasElement): {
   ctx: CanvasRenderingContext2D;
   dimensions: CanvasDimensions;
+  disposeResize: () => void;
 } {
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  const width = rect.width;
-  const height = rect.height;
-  canvas.width = Math.round(width * dpr);
-  canvas.height = Math.round(height * dpr);
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     throw new Error('Failed to acquire 2D rendering context');
   }
-  ctx.scale(dpr, dpr);
-  return { ctx, dimensions: { width, height } };
+  const dimensions: CanvasDimensions = { width: 0, height: 0 };
+
+  function update() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx!.scale(dpr, dpr);
+    dimensions.width = rect.width;
+    dimensions.height = rect.height;
+  }
+
+  window.addEventListener('resize', update);
+  update();
+
+  return {
+    ctx,
+    dimensions,
+    disposeResize: () => window.removeEventListener('resize', update),
+  };
 }
 
 export function convertDegreesToRadians(degrees: number): number {

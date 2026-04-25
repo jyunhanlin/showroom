@@ -1,0 +1,77 @@
+---
+title: Delta Time
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/02.03-delta-time
+lessonNumber: '04-canvas/02.03-delta-time'
+order: 2.3
+summary: Frame-based velocity 在 60Hz vs 120Hz 螢幕跑速差兩倍。改成 px/sec × deltaTime 就跟 frame rate 解耦。
+tags: [canvas, deltaTime, performance.now, frame-rate, sub-pixel]
+---
+
+import DeltaTime from './delta-time';
+
+## TL;DR
+
+- `box.x += velocity` 的 velocity 單位是 px/frame，60Hz vs 120Hz 跑速差兩倍。
+- 改寫成 px/sec × `deltaTime`:`deltaTime = (now - lastTimestamp) / 1000` 是這一幀過了幾秒，乘上 velocity 就是這幀該移動的距離。
+- `deltaTime` 一定要 clamp 在 250ms 上限。tab 切回來時 `performance.now()` delta 可能是好幾秒，一次跳幾百 px 會視覺爆炸或邏輯崩潰。
+
+<DemoFrame title="Delta time 版的彈跳方塊 — frame rate 換不了它的速度">
+  <DeltaTime />
+</DemoFrame>
+
+## Frame rate 是隱形變數
+
+[Canvas Animation](/wham/canvas-animation/canvas-animation) 那篇的 demo 寫 `box.x += box.velocity`。velocity 名字是「速度」，但單位其實是 px/frame，跟 frame rate 完全綁死:
+
+| 螢幕 | refresh rate | `velocity = 10` 實際速度 |
+|---|---|---|
+| 一般 monitor | 60Hz | 600 px/sec |
+| MacBook ProMotion | 120Hz | 1200 px/sec |
+| 高階電競螢幕 | 240Hz | 2400 px/sec |
+
+同一份 code 在不同 device 上看起來完全不同步。Game dev 圈的標準解法叫 **delta time**。
+
+## Delta time 的算法
+
+velocity 改寫成 px/sec:`velocity: 120` 表示一秒走 120 px。每幀算過了多少秒，乘上 velocity 就是這幀該移動的距離:
+
+```ts
+let lastTimestamp = performance.now();
+
+function draw() {
+  const now = performance.now();
+  const deltaTime = (now - lastTimestamp) / 1000;
+  lastTimestamp = now;
+
+  box.x += box.velocity * deltaTime;
+  // ...
+  requestAnimationFrame(draw);
+}
+```
+
+60Hz 上 `deltaTime ≈ 0.0167`，所以 `120 × 0.0167 ≈ 2 px/frame`。120Hz 上 `deltaTime ≈ 0.00833`，`120 × 0.00833 ≈ 1 px/frame` — frame rate 越快，每 frame 走越少，但秒積分起來都是 1 秒走 120 px。
+
+換個視角:你不是在控制每幀走多少，而是控制單位時間走多少。frame rate 變成只是「採樣密度」，動畫的速度跟採樣密度脫鉤。
+
+## 為什麼一定要 clamp
+
+Tab 切到背景後，瀏覽器會 throttle 或暫停 rAF;切回來時 `performance.now() - lastTimestamp` 可能是好幾秒甚至更久。`box.x += 120 × 30 = 3600 px` 一幀跳 3600 px 會直接飛出 canvas，或者 (像 rocketship 那樣的粒子系統) 一次生 30 秒份的粒子直接 OOM。
+
+```ts
+const deltaTime = Math.min(now - lastTimestamp, 250) / 1000;
+```
+
+clamp 在 250ms 等於說「最壞情況當作 4fps 處理」。tab 切回來只會看到一次小跳，而不是視覺爆炸。rocketship、confetti、trails 全部都這樣寫。
+
+## Sub-pixel 不要 round
+
+`120 × 0.0167 = 2.004 px`，聽起來像會卡在像素邊。不會。Canvas 2D context 跟 CSS transform 一樣有 sub-pixel anti-aliasing — 方塊跨在兩 pixel 中間時，瀏覽器會把兩排 pixel 各塗一點點，視覺上看起來就是連續滑過去的。
+
+所以 `box.x` 不要 `Math.round`。round 反而會讓速度看起來不平均 (有些 frame 走 1px、有些走 2px、有些 0px)，感官上更不順。
+
+## Gotchas
+
+- **更新 `lastTimestamp` 的順序不能換**。先讀 `now`、算 `deltaTime`、`lastTimestamp = now`，然後才用 `deltaTime` 算位移。`lastTimestamp` 沒及時更新，下一幀的 `deltaTime` 會把這幀也算進去，動畫直接卡死。
+- **velocity 單位變了，名稱看起來一樣容易誤用**。canvas-animation 的 `INITIAL_VELOCITY = 10` 是 px/frame;這裡的 `velocity: 120` 是 px/sec。同個 codebase 共用 `velocity` 名稱要小心 — 我這裡走 inline 不抽 const，靠就近的算式 (`* deltaTime`) 提示單位。
+- **`performance.now()` ≠ wall clock**。是 page-load 後的相對毫秒，保證單調遞增。`Date.now()` 在系統時間調整時會跳，別用。
+- **跨 demo 視覺速度落差**:canvas-animation 的方塊跑得「飄」是 friction;這篇沒 friction，純 deltaTime，所以等速彈來彈去。要直接比較 frame-based vs deltaTime 在同 frame rate 下看不出差別 — 差別只在跨 device 才顯現。
