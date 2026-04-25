@@ -1,0 +1,101 @@
+---
+title: Magnetic Shavings
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/07-magnetic-shavings
+lessonNumber: '04-canvas/07-magnetic-shavings'
+order: 7
+summary: 'Grid 上每條 line 用 atan2(deltaY, deltaX) 算朝向 cursor 的角度,translate + rotate 在原點畫線。長度 / 顏色 / 粗細隨距離縮放,遠處 fade 成 0 → 不會 snap。'
+tags: [canvas, atan2, rotate, transforms, cursor]
+---
+
+import { MagneticShavingsBasic, MagneticShavingsRainbow } from './magnetic-shavings';
+
+## TL;DR
+
+- 想做出「鐵屑被磁鐵吸引」的視覺:grid 上每條 line 旋轉到朝向 cursor。把 cursor → line center 的 vector 拿給 `Math.atan2(deltaY, deltaX)` 直接吐角度。
+- 旋轉 line 不是改 line 的座標,而是 `ctx.translate(centerX, centerY)` + `ctx.rotate(angle)` 移動畫筆和座標系,然後在原點畫水平線,最後 `ctx.restore()` 收回 transform。
+- Cursor 還沒移動時 line 朝預設方向 (0,0)、進場一瞬間整片 snap 到新角度,看起來很跳。修法是讓 line 長度隨距離縮放 — 距離遠時 0px ≈ 圓點,沒有方向感,自然不會看到 snap。
+- 同樣的 distance 還可以餵給 hue / saturation / lineWidth,做出「磁場暈染」效果。
+
+<DemoFrame title="基本版 — 8×12 grid,線朝 cursor,距離遠就 fade">
+  <MagneticShavingsBasic />
+</DemoFrame>
+
+## atan2 是什麼
+
+前面 sine/cos 是「角度 → cartesian (x, y)」,atan2 是反方向 — 「(x, y) → 角度」。給它兩個 delta,它回給你那個 vector 跟 +x 軸的夾角(radian,範圍 −π ~ π):
+
+```ts
+const deltaX = mousePosition.x - centerX;
+const deltaY = mousePosition.y - centerY;
+const angle = Math.atan2(deltaY, deltaX);
+```
+
+注意參數順序是 `(y, x)`,不是 `(x, y)` — 這是 JS 規定不是課程選擇。`Math.atan2(0, 1) === 0` (右),`Math.atan2(1, 0) === π/2` (下,因為 canvas y 軸朝下)。
+
+也有 `Math.atan(y / x)`,但他不知道 x 是正是負,只能回 −π/2 ~ π/2 半圈。`atan2` 透過分別接 y 跟 x 的 sign 自己判斷象限,給 full π 兩圈。除非有特殊理由,`atan2` 比較通用。
+
+## 為什麼要 translate + rotate
+
+`ctx.rotate(angle)` 是繞 **目前原點** (預設 (0, 0)) 旋轉整個座標系。如果直接在 line 的 absolute 位置畫 + rotate,所有 line 都會繞 canvas 左上角轉,變成扇形。
+
+要繞 line 自己中心轉,先把座標系搬到那裡:
+
+```ts
+ctx.save();
+ctx.translate(centerX, centerY);  // 原點搬到 line center
+ctx.rotate(angle);                 // 繞新原點 (= line center) 轉
+ctx.beginPath();
+ctx.moveTo(-LINE_LENGTH / 2, 0);   // 線的起點:原點往左 8px
+ctx.lineTo(LINE_LENGTH / 2, 0);    // 線的終點:原點往右 8px
+ctx.stroke();
+ctx.restore();                     // 把 translate + rotate 還原
+```
+
+`save / restore` 是 stack-based — `save` 把當下的整個 ctx 狀態 (含 transform、fillStyle、lineWidth...) push 到 stack,`restore` pop。一定要成對呼叫,不然 transform 會在 frame 之間累積、line 會「轉得越來越快」。
+
+## 距離縮放:消除進場 snap
+
+cursor 還沒移動時,我們的 `mousePosition` 是 `{ x: null, y: null }` — 還沒有任何 mouse event。第一次 `pointermove` 觸發後,line 全部從「沒畫」跳到「指向 cursor」。視覺上看起來整面突然 snap 到位置。
+
+修法是讓 **line 長度跟著距離變化**:
+
+```ts
+const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2); // Pythagoras
+const lineLength = clampedNormalize(distance, 0, 200, LINE_LENGTH, 0);
+```
+
+距離 0 時 line 是滿長 16px,距離 ≥ 200 時 line 是 0px(看不見)。fade out 過程很自然:cursor 接近時 line 從圓點長出來、cursor 走遠時收回去。圓點沒有方向感所以「snap」也沒有差異可看。
+
+`clampedNormalize` 比 `normalize` 多一層 `Math.max(0, Math.min(1, ...))` clamp。沒 clamp 的話 distance > 200 會給負數 lineLength,線會反向長出來變得越來越長。課程提到自己第一次寫漏踩過這個坑。
+
+## Bonus: 把 distance 餵給更多參數
+
+distance 不只能控長度,還可以餵給 hue / saturation / lineWidth:
+
+```ts
+const lineWidth = clampedNormalize(distance, 0, 300, 12, 0);
+const hue = distance * 0.5;
+const sat = clampedNormalize(distance, 100, 300, 100, 0);
+const lit = clampedNormalize(distance, 0, 300, 50, 100);
+ctx.strokeStyle = `hsl(${hue}deg ${sat}% ${lit}%)`;
+ctx.lineWidth = lineWidth;
+```
+
+幾個 trick:
+- `hue = distance * 0.5` 不 clamp — 故意讓 hue 隨距離一路跑過整個色輪,離 cursor 越遠顏色越偏紅 → 紫 → 藍。
+- `lit` 從 50 → 100:近處飽和色、遠處趨近白色 (100% lightness 等於白)。
+- `sat` 在 100~300 距離窗格內從 100 → 0:近距離 saturated、遠處褪成灰。
+- `lineWidth` 跟 `lineLength` 用不同的 clamp range (300 vs 200),所以線的「形狀」隨距離不一樣 — 近處短粗、中距離長細、遠處看不見。
+
+<DemoFrame title="Rainbow 版 — 17×25 grid,distance 同時驅動 hue / sat / lit / lineWidth">
+  <MagneticShavingsRainbow />
+</DemoFrame>
+
+## Gotchas
+
+- **`Math.atan2` 參數順序是 `(y, x)`**,跟 `(x, y)` 順序相反。記憶法:atan2 算的是「相對 +x 軸的角度」,所以 y 是分子 (opposite)、x 是分母 (adjacent),寫 atan2(y/x) 結構但用兩個獨立參數而已。
+- **`save/restore` 一定要成對**。掉了 `restore` 下一條 line 會繼承上一條的 translate + rotate,連動下去整面歪掉。掉了 `save` 但有 `restore` 會 pop 到外層的 ctx 狀態,意外重置 lineWidth 之類的東西。我習慣寫成 `save → ... → restore` 同個 forEach scope,看就知道有沒有漏。
+- **`pointermove` 用 `window`**,不是 `canvas`。游標滑出 canvas 的瞬間 canvas 上的 listener 不會 fire,但 window 會 — 視覺上才會跟著 cursor 一路滑走 / 滑回。離開 canvas 時 cursor 仍在算 (centerX, centerY) 距離,但因為實際座標已經越界,distance 大 → lineLength 0 → 看不到。
+- **Initial state 用 `{ x: null, y: null }` + null 守衛**,不要用 `{ x: 0, y: 0 }`。`(0, 0)` 在左上角,會讓附近的 line cluster 「初始狀態指向左上」。null 守衛則是 cursor 還沒進場時整面空白,進場後 fade 進來,最乾淨。
+- **a11y 要不要 `prefers-reduced-motion`?** 課程提到這個 demo 對 motion-sensitive 用戶不友善,所以加了 `checkPrefersReducedMotion()` 在 draw 內 early return。我這份 codebase 還沒抽這個 utility,沒在 demo 裡實作 — 上線前要記得補。
+- **TS narrowing 過不去 closure**。`mousePosition` 物件 read 出 `mouseX = mousePosition.x` 後,inner 用 `mouseX` 而不是 `mousePosition.x.!` — narrowing 在 local 變數上 work,在物件 property 上不 work (因為 closure 內可能被 mutate)。
