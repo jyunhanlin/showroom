@@ -43,12 +43,13 @@ export function convertPolarToCartesian(angleDegrees: number, distance: number):
   };
 }
 
-export function normalize(value: number, min: number, max: number): number {
-  if (max === min) return 0;
-  return (value - min) / (max - min);
+export function normalize(value: number, inMin: number, inMax: number, outMin = 0, outMax = 1): number {
+  if (inMax === inMin) return outMin;
+  const t = (value - inMin) / (inMax - inMin);
+  return outMin + (outMax - outMin) * t;
 }
 
-export function clampedNormalize(value: number, min: number, max: number, outMin = 0, outMax = 1): number {
-  const t = Math.max(0, Math.min(1, normalize(value, min, max)));
+export function clampedNormalize(value: number, inMin: number, inMax: number, outMin = 0, outMax = 1): number {
+  const t = Math.max(0, Math.min(1, normalize(value, inMin, inMax)));
   return outMin + (outMax - outMin) * t;
 }
