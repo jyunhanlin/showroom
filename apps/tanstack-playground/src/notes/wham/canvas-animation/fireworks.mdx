@@ -1,0 +1,219 @@
+---
+title: Fireworks，把整個 module 串起來
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/09-fireworks
+lessonNumber: '04-canvas/09-fireworks'
+order: 9
+summary: 兩階段粒子（rocket→explosion）整合 deltaTime + drag + gravity + trails + connected-dots + cleanup。Extras 用第二個 canvas + CSS blur 做 glow，strobe variant 引入多型粒子 + sin 驅動 twinkle。
+tags: [canvas, fireworks, particles, capstone, blur, strobe]
+---
+
+import { FireworksBasic, FireworksFancy } from './fireworks';
+
+## TL;DR
+
+- Fireworks 是這個 module 的 capstone — 把前面學的東西全部組起來：每顆 firework 是一個物件，先當 comet 飛 (rocket)，飛一段時間後 `explode()` 把自己換成 N 顆粒子。同一個物件、同一個陣列，用 `explodedAt` 區分階段。
+- 爆炸時機是「機率性」的：`fireworkAge >= 250 && Math.random() <= deltaTime * 2`。`deltaTime * 2` 是 frame-rate-independent 的「每秒平均 2 次」rate，配上 250ms 最低延遲，平均約 0.75s 後炸 — 但每顆時機都不一樣，看起來自然。
+- Cleanup 用 `setInterval(fn, 5000)` 另外掛，不要每幀 filter 整個 array。
+- Extras 加兩招：(1) 疊一張 `filter: blur(60px)` 的 canvas，畫一樣的東西但 radius × 10，每顆粒子自己發光；(2) Strobe variant — 一部分 explosion 改用 off-white、低速、靠 `Math.sin(totalTime × twinkleSpeed)` 閃爍 + 半徑 fade 到 0 的特殊粒子。
+
+<DemoFrame title="Basic — module 學的東西全組起來">
+  <FireworksBasic />
+</DemoFrame>
+
+## 兩階段粒子的狀態機
+
+每顆 firework 一個物件。`explodedAt: null` 是 comet phase（rocket 飛上去），有值是 exploded phase（畫粒子）：
+
+```ts
+type Firework = {
+  createdAt: number;
+  explodedAt: number | null;
+  x: number; y: number;
+  xPrevious: number; yPrevious: number;
+  xVelocity: number; yVelocity: number;
+  // ...
+  particles?: Particle[]; // 爆炸後 attach 上來
+};
+```
+
+draw 迴圈分兩條路徑：
+
+```ts
+fireworks.forEach((firework) => {
+  if (firework.explodedAt === null) {
+    // comet: 推 firework 自己的位置 + 試試看要不要爆
+    firework.xVelocity *= drag;
+    firework.yVelocity = firework.yVelocity * drag + GRAVITY * deltaTime;
+    firework.x += firework.xVelocity * deltaTime;
+    firework.y += firework.yVelocity * deltaTime;
+    drawEntity(ctx, firework, 1);
+    if (now - firework.createdAt >= 250 && Math.random() <= deltaTime * 2) {
+      explodeFirework(firework);
+    }
+  } else {
+    // exploded: 推每顆 particle
+    firework.particles!.forEach((particle) => { /* ... */ });
+  }
+});
+```
+
+爆炸是 in-place mutation：把 `explodedAt` 設為 now、把 `particles` array attach 上去。**不是搬到另一個陣列**，所以 cleanup 只要看「`explodedAt` 不為 null 且超過 lifespan」就能把整個 firework 連同它的粒子一起丟掉。
+
+## 為什麼用機率而不是固定時間爆
+
+```ts
+if (fireworkAge >= 250 && Math.random() <= deltaTime * 2) {
+  explodeFirework(firework);
+}
+```
+
+如果寫 `if (fireworkAge >= 1000)` 所有 firework 都剛好飛 1 秒爆 — 整齊得不像煙火。
+
+`deltaTime * 2` 的意思是「每秒平均 2 次」rate（per-frame 機率乘以 fps 約等於 rate）。配 `>= 250` 確保 rocket 至少飛 250ms 不會 spawn 點就爆。平均 0.75s 後炸，但變異大 — 有時 300ms、有時 2 秒，這就是「自然」。
+
+跟 frame rate 解耦：60Hz 跟 120Hz 算出來的「期望爆炸時機」一樣，因為 60 frames × `0.0167 * 2` = 120 frames × `0.0083 * 2` = 每秒 2 次。Frame-independent timing 的標準寫法。
+
+## 粒子層共用「Connected Dots」trick
+
+每顆 particle 都記 `xPrevious / yPrevious`，畫的時候是 line：
+
+```ts
+function drawEntity(ctx, entity, radiusMultiple) {
+  ctx.beginPath();
+  ctx.moveTo(entity.xPrevious, entity.yPrevious);
+  ctx.lineTo(entity.x, entity.y + 0.01); // 0.01 防 lineTo 退化成 0px line
+  ctx.globalAlpha = entity.opacity;
+  ctx.lineWidth = entity.radius * 2 * radiusMultiple;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = entity.color;
+  ctx.stroke();
+}
+```
+
+慢動的粒子兩個 round cap 黏成圓，快動的粒子拉成圓頭線 — 免費的 motion blur。爆炸瞬間粒子 velocity 250-500 px/s，視覺上每幀拉出 4-8 px 的線，跟尾燄混一起就是煙火該有的「絲狀拖尾」。
+
+## Trails 跟 connected-dots 差在哪
+
+兩個都做 motion blur 但層級不同：
+
+| | Connected dots | Trails |
+|---|---|---|
+| 位於 | `drawEntity` 一次畫一條 line | 整張 canvas 的清除策略 |
+| 機制 | 每幀 line from prev → current | 不 `clearRect`，改 `fillRect` 半透明黑 |
+| 範圍 | 該幀那一條粒子的位移 | 整張畫面歷史粒子的殘影 |
+
+兩個合用：粒子本身有 motion blur（單幀內），畫面留有歷史殘影（跨幀疊加）。少了哪一個都會少一層深度。
+
+## Cleanup 不要每幀做
+
+```ts
+const cleanupId = setInterval(() => {
+  const now = performance.now();
+  fireworks = fireworks.filter((firework) => {
+    if (firework.explodedAt === null) return true;
+    return now - firework.explodedAt < BASIC_MAX_LIFESPAN;
+  });
+}, 5000);
+```
+
+每 5 秒做一次 filter，不是每幀。為什麼：filter 60Hz × 100 顆粒子 = 6000 ops/sec、用了 GC 也吃；煙火早死 1 秒晚死 1 秒人眼看不出來，沒必要即時。
+
+唯一要注意的是 cleanup interval 要在 `useEffect` cleanup 裡 `clearInterval`，不然 strict mode unmount 後 timer 還在跑。
+
+<DemoFrame title="Fancy — 加 blur layer + strobe variant">
+  <FireworksFancy />
+</DemoFrame>
+
+## Glow trick：第二張 canvas + CSS blur
+
+最直觀的 glow 寫法是每顆粒子畫一個 radial gradient — 但 colorway 有多色時要 pick 哪一個顏色當 glow？單色的話整朵煙火都被一個顏色暈染，糊掉色彩。
+
+換個思路：**疊兩張 canvas，畫一樣的東西，第二張套 `filter: blur(60px)` 把畫面整片糊掉**。糊掉之後每顆粒子自然帶自己的色 halo。
+
+```tsx
+<div className="relative h-[500px] w-full overflow-hidden rounded-md bg-slate-950">
+  <canvas ref={sharpCanvasRef} className="absolute inset-0 block h-full w-full" />
+  <canvas
+    ref={blurredCanvasRef}
+    className="pointer-events-none absolute inset-0 block h-full w-full"
+    style={{ filter: 'blur(60px)' }}
+  />
+</div>
+```
+
+兩張 canvas 共用一個 simulation tick：每幀更新一次粒子狀態、`drawEntity(sharpCtx, p, 1)` + `drawEntity(blurredCtx, p, 10)`。`radiusMultiple` 只影響 `lineWidth`，所以 blurred canvas 上每顆粒子變成 10 倍粗的線，再經過 60px blur，就是 halo。
+
+### Z-order 為什麼 blurred 在上
+
+直覺上 glow 應該在粒子**後面**讓粒子看起來銳利。但 sharp canvas 用了 trails — 每幀蓋 10% 黑色 fillRect，幾秒後背景累積成幾乎不透明的黑。如果 sharp 在上，blurred 整張被蓋掉 → 看不到 glow。
+
+所以反過來：**blurred 在上**。它每幀 `clearRect` 是透明的，只有粒子位置有東西。透明區域看穿到下方 sharp（粒子 + 累積黑底），有東西的地方是 glow halo 直接顯示。`pointer-events-none` 讓滑鼠事件穿透到下層（之後若要加互動）。
+
+### Sharp 用 fillRect 半透明、Blurred 用 clearRect
+
+```ts
+sharpCtx.fillStyle = BACKGROUND;
+sharpCtx.globalAlpha = 0.1;
+sharpCtx.fillRect(0, 0, w, h);  // smearing trails
+sharpCtx.globalAlpha = 1;
+
+blurredCtx.clearRect(0, 0, w, h); // glow 不需要 trails
+```
+
+Glow layer 不需要殘影 — 它的目的是「現在這幀有什麼粒子發光」，不要歷史。Sharp layer 才是看 trails 的地方。
+
+## Strobe variant：多型粒子 + sin twinkle
+
+Default 粒子的 opacity 是純 lifespan fade：`clampedNormalize(age, 250, lifespan, 1, 0)`。
+Strobe 粒子在 fade 之外多一層 `Math.sin` 振盪 — 視覺上像在閃。
+
+```ts
+const baseOpacity =
+  typeof particle.twinkleSpeed === 'number'
+    ? clamp(Math.sin(totalTime * particle.twinkleSpeed), 0, 1)
+    : 1;
+particle.opacity = clampedNormalize(particleAge, 250, particle.lifespan, baseOpacity, 0);
+```
+
+兩件事同時發生：
+1. `sin(totalTime * twinkleSpeed)` 在 −1 ~ 1 之間振盪，被 `clamp(.., 0, 1)` 截掉負區段，所以粒子有「半個週期亮、半個週期黑」的閃爍 — 標準的 twinkle。
+2. `clampedNormalize(age, 250, lifespan, baseOpacity, 0)` 把這個振盪當「上限」線性收斂到 0。粒子早期閃得很亮、晚期閃得很暗、最後完全消失。
+
+`twinkleSpeed: random(5, 40, true)` — 每顆 strobe 粒子自己的閃速。同步閃就是「整片在 fade in/out」、不同步才像各自 twinkle。
+
+### Strobe vs default 的 type 差異
+
+兩者共用同一個 `Particle` shape，差別在：
+
+| | Default | Strobe |
+|---|---|---|
+| `twinkleSpeed` | undefined | 5~40 random float |
+| `radiusInitial` / `radiusFinal` | 同值（不變） | initial 1.5~3 → final 0（收縮） |
+| `velocity` | 250~500 (向外擴散) | 0~300 (緊密團簇) |
+| `color` | colorway sample | `hsl(30~45deg 100% 85~100%)` (off-white) |
+| `lifespan` | MAX/4 ~ MAX/2 (短) | MAX/2 ~ MAX (長) |
+
+加 strobe 不需要兩個 array／兩個迴圈 — 就在 `explodeFirework` 裡 `if (variant === 'strobe')` 分支生成不同 shape，迴圈裡用 `typeof particle.twinkleSpeed === 'number'` narrow。
+
+### Radius 也跟著 lifespan 收
+
+```ts
+particle.radius = clampedNormalize(
+  particleAge, 250, particle.lifespan,
+  particle.radiusInitial, particle.radiusFinal,
+);
+```
+
+Default 粒子 `radiusInitial === radiusFinal`，這行 no-op。Strobe 粒子 `radiusFinal: 0`，所以末期粒子變細、消失。視覺上配 twinkle 看起來像「閃完縮回去」— 比純 opacity fade 自然。
+
+## Gotchas
+
+- **`prefers-reduced-motion` 我只在 mount 時 check 一次。** 用戶執行中切系統設定不會 live update — 要正解的話要 `window.matchMedia(...).addEventListener('change', ...)`。Note 範圍內偷懶。
+- **Sharp canvas 的 trails 累積成黑底**，所以 blur layer **必須在上面**。如果你把 z-order 換掉看不到 glow，先檢查這個。
+- **Two-stage state 用 in-place mutation 切換。** `explodedAt` 從 null 變成 timestamp、`particles` attach 到同一個物件。不要搬到另一個 array — cleanup 邏輯會變兩倍複雜，而且 GC pressure 也大。
+- **`clamp(Math.sin(...), 0, 1)` 不是 `Math.abs`。** abs 會讓粒子完全沒有「全黑」phase（最低值 0），看起來只是輕微脈動。clamp 截 0 才有「黑半週期 + 亮半週期」的真 twinkle。
+- **`lineTo(x, y + 0.01)` 不是 typo**。Stationary 粒子 `xPrevious === x && yPrevious === y` 會讓 line 退化、`lineCap: 'round'` 也畫不出圓 — 加 0.01 px 強迫 line 有長度，cap 才會 render 成圓。
+- **Spawn 用 `setInterval(spawn, 200)` + 20% 機率**，不是固定每秒一顆。視覺節奏更自然，集中爆 / 稀疏期 都會出現。換成 `setInterval(generateFirework, 1000)` 會變鼓點機。
+- **`canvasDimensions` 在 fancy 版只取 sharp canvas 的**，因為兩張 canvas 用 absolute inset-0 + h-full + w-full 必然同尺寸。`disposeResize` 要兩張都呼叫，不然其中一張的 resize listener 會 leak。
+- **Two-RAF 跟 single-RAF 我選後者。** 課程原版兩張 canvas 各跑一個 `requestAnimationFrame(draw)` 迴圈，靠共用的 `lastTimestamp` 讓第二個迴圈 `deltaTime ≈ 0` 來避免 double-step — 巧妙但脆弱（call 順序、跨 frame 邊界都可能爆）。我這邊改成單一 RAF tick 同時 draw 兩張 canvas，simulation 跑一次、清楚。
+- **COLORWAYS 是我自己挑的 5 組**（cosmetic 選擇）— 不是課程的 `data.js`。要更接近 Josh 的 palette 自己換，但變數名 `COLORWAYS` 跟 `sample(COLORWAYS)!` 用法都一致。
