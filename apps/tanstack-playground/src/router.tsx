@@ -1,13 +1,14 @@
 import { createHashHistory, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 
-const basepath = import.meta.env.BASE_URL.replace(/\/$/, '') || '/';
+const isClient = typeof document !== 'undefined';
+const ssrBasepath = import.meta.env.BASE_URL.replace(/\/$/, '') || '/';
 
 export function getRouter() {
   return createRouter({
     routeTree,
-    basepath,
-    history: typeof document === 'undefined' ? undefined : createHashHistory(),
+    basepath: isClient ? '/' : ssrBasepath,
+    history: isClient ? createHashHistory() : undefined,
     defaultPreload: 'intent',
     scrollRestoration: true,
   });
