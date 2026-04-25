@@ -1,0 +1,86 @@
+---
+title: Connected Dots
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/06.04-connected-dots
+lessonNumber: '04-canvas/06.04-connected-dots'
+order: 6.04
+summary: '60Hz 上限讓快速移動粒子 flicker。每幀的「上一幀 → 這一幀」位置用 lineTo + lineCap=round 連起來 — 慢動是圓、快動拉成線 = 免費 motion blur。'
+tags: [canvas, motion-blur, lineCap, particles, pointermove]
+---
+
+import { CursorTrail, ParticlePopper } from './connected-dots';
+
+## TL;DR
+
+- 60Hz 螢幕一秒只更新 60 次,人眼追快速動態其實比這個更靈敏 — 看到「跳格」illusion 就破。
+- 每幀只畫一個圓 → 快速移動會看到分散的 stamps;改成「連接上一幀位置」的 line 配 `lineCap: 'round'` → 慢動兩個 cap 黏一起看起來是圓、快動拉成圓頭線。
+- bonus: `lineCap: 'square'` 讓粒子「轉向」朝移動方向 (方形 cap 有方向)。
+
+<DemoFrame title="Cursor trail — 快速 waggle 試試,toggle Connect dots 看差別">
+  <CursorTrail />
+</DemoFrame>
+
+## 為什麼快速移動會 flicker
+
+每幀 `clearRect` 後在新位置畫一個圓。在 60Hz 上,如果游標在一幀內移動 100 px,前後兩幀的圓中心就差 100 px — 大腦處理不出「同一個圓滑過去」,反而看到兩個獨立的 stamps,中間是空白。
+
+這不是 canvas 特有的 — 電影 panning 太快也會頭暈,因為快門速度跟眼睛取樣 rate 不匹配。device refresh rate 的物理上限是搬不動的,但我們可以「補幀」。
+
+## lineCap 的幾何 trick
+
+Canvas 的 line cap (`'round'`、`'square'`) 是 line length **之外**多畫的。一條 0px 長的 line 配 `lineCap: 'round'` 看起來就是個圓 — 兩個半圓 cap 直接黏在一起。
+
+```ts
+ctx.moveTo(prevPos.x, prevPos.y);
+ctx.lineTo(currPos.x, currPos.y);
+ctx.lineCap = 'round';
+ctx.lineWidth = 8;
+ctx.stroke();
+```
+
+- prev === curr (粒子靜止): line 0px,只看到兩個 cap 疊起來 → 圓
+- prev != curr (粒子移動): line 拉長,兩端各 + 一個半圓 cap → 圓頭線(類似膠囊)
+
+從來沒有「圓 vs 線」的切換 — 一直都是 stroke,只是長度變化。
+
+## 粒子 popper 的版本
+
+這招在物理粒子上特別舒服。每顆 particle 多存 `xPrevious / yPrevious`,update 順序是:
+
+```ts
+particle.yVelocity += GRAVITY * deltaTime;
+particle.x += particle.xVelocity * deltaTime;
+particle.y += particle.yVelocity * deltaTime;
+
+ctx.beginPath();
+ctx.moveTo(particle.xPrevious, particle.yPrevious);
+ctx.lineTo(particle.x, particle.y);
+ctx.lineCap = 'round';
+ctx.lineWidth = particle.radius * 2;
+ctx.strokeStyle = particle.color;
+ctx.stroke();
+
+particle.xPrevious = particle.x;
+particle.yPrevious = particle.y;
+```
+
+順序是「畫完才更新 prev」,所以 line 連的是「上一幀的位置」到「這一幀的位置」 — frame n 的 stamp 跟 frame n-1 的 stamp 之間沒有空白。
+
+下面 demo 切到 `circle` 看噴泉是「分離的點」,切到 `round` 看是「連續的軌跡」,切到 `square` 看「會轉向的方塊」。click 畫布噴粒子。
+
+<DemoFrame title="粒子 popper — circle / round / square 切換比較">
+  <ParticlePopper />
+</DemoFrame>
+
+## square cap 為什麼會「轉向」
+
+`lineCap: 'square'` 加的是方形 cap,**對齊 line 的方向**。粒子靜止時 line 0px,方形 cap 朝預設方向(通常是 line 起點到終點的方向);粒子在飛時 line 拉長,方形 cap 朝飛行方向 = 視覺上「物件朝速度方向」。
+
+不需要算 angularVelocity、不需要 `ctx.rotate`,光是 line 的數學就送你「物件轉向」。免費。
+
+## Gotchas
+
+- **Safari 0px line 不畫 cap**。靜止時 `prev === curr`,line 0px,Safari 不會畫 cap → 粒子閃。修法:`lineTo(x, y + 0.01)` 加 0.01。視覺上看不出來,但保證 line 永遠不是嚴格 0 長。Demo 裡兩個都加了。
+- **`xPrevious` 初值要 = `x`**。新 spawn 的粒子如果 `xPrevious = 0` 預設值,第一幀會從 (0,0) 拉一條長線到 spawn 位置 — 看起來像「從原點射出」的鬼影。`generateParticle` 裡 `xPrevious: x, yPrevious: y` 直接複製初始位置。
+- **`pointermove` 用 `window` 而不是 canvas**。canvas 上的 listener 只有游標在 canvas 裡才觸發,游標滑出 canvas 的瞬間不會記錄最後位置 — 下次回 canvas 時 prev 是很久以前的舊值,line 會拉一條長條過去。掛 window 上,canvas 外的 prev 也是新鮮的。
+- **state 透過 ref 傳給 rAF loop**。React state (`connectDots`、`mode`) 變動不會 re-trigger useEffect (deps `[]`),所以 draw loop 讀的是 closure 鎖定的初值。寫 `connectDotsRef.current = connectDots` 在每次 render 時同步 ref,draw 讀 `connectDotsRef.current` 拿最新值。比起 deps 變動 → re-create loop 乾淨,動畫不會中斷。
+- **`pointermove` 在 Strict Mode 會掛兩次**。useEffect cleanup 一定要 `removeEventListener`,不然兩個 handler 同時更新 mousePosition,一個 spurious update 蓋過另一個,trail 看起來會跳。
