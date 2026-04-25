@@ -44,5 +44,5 @@ export default function CanvasAnimation() {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="mx-auto block h-[60px] w-[200px] rounded-md bg-slate-900" />;
+  return <canvas ref={canvasRef} className="mx-auto block h-[40px] w-[200px] rounded-md bg-slate-900" />;
 }

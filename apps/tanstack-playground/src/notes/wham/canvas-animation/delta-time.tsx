@@ -49,5 +49,5 @@ export default function DeltaTime() {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="mx-auto block h-[60px] w-full rounded-md bg-slate-900" />;
+  return <canvas ref={canvasRef} className="mx-auto block h-[40px] w-full rounded-md bg-slate-900" />;
 }

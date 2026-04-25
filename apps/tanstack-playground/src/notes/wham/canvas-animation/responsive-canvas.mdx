@@ -15,7 +15,7 @@ import ResponsiveCanvas from './responsive-canvas';
 - 解法是把 setup 邏輯包成可重跑的 `update()`，掛 `window.addEventListener('resize', update)`。setupCanvas 額外回傳 `disposeResize` 給 React `useEffect` cleanup。
 - 邊界判斷如果只翻 velocity 不 clamp 位置，window 縮到 cut off 元素的瞬間 velocity 會 ping-pong 卡邊;補一句 `logo.x = canvasDimensions.width - logo.size` 推回畫布內。
 
-<DemoFrame title="拉拉看視窗寬度，emoji 會跟著重新計算邊界">
+<DemoFrame title="拖右下角的 resize handle (或拉視窗寬度)，emoji 會跟著重新計算邊界">
   <ResponsiveCanvas />
 </DemoFrame>
 
