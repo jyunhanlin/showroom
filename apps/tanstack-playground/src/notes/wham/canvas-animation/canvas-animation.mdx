@@ -1,5 +1,5 @@
 ---
-title: Canvas Animation, immediate mode 的 clear and redraw
+title: Canvas Animation, immediate-mode clear and redraw
 sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/02-canvas-animation
 lessonNumber: '04-canvas/02-canvas-animation'
 order: 2
@@ -19,7 +19,7 @@ import CanvasAnimation from './canvas-animation';
   <CanvasAnimation />
 </DemoFrame>
 
-## 為什麼一定要 clearRect
+## Why clearRect is mandatory
 
 DOM 走 retained mode — 留著 element node、自動 dirty-tracking，你改 property 才會 repaint 對應區域。Canvas 是 immediate mode — 畫上去的只是 pixel，沒有「box object」概念，引擎不會幫你管狀態。
 
@@ -46,7 +46,7 @@ function draw() {
 
 直覺上會擔心「幾百個物件每幀全部重畫不是很浪費?」實測 paint 操作很便宜，GPU 路徑短，通常還比改一個 DOM property 快。先別過早優化。
 
-## rAF 取代 setInterval
+## rAF replaces setInterval
 
 `setInterval(draw, 1000 / 60)` 有兩個坑:
 
@@ -65,7 +65,7 @@ rafId = requestAnimationFrame(draw);
 
 第一眼看起來像是會 stack overflow 的遞迴，但 rAF 是非同步排程，每次 callback 是一個新的 call stack。
 
-## velocity 不是 speed
+## velocity is not speed
 
 撞牆反彈最直觀的寫法是另存一個 `direction = 1 | -1`，撞到邊界翻過來再乘上 `speed`。但 `velocity` 把方向直接編碼進數值，call site 少一層間接:
 

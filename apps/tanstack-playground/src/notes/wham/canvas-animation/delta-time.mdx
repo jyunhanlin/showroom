@@ -19,7 +19,7 @@ import DeltaTime from './delta-time';
   <DeltaTime />
 </DemoFrame>
 
-## Frame rate 是隱形變數
+## Frame rate is the invisible variable
 
 [Canvas Animation](/wham/canvas-animation/canvas-animation) 那篇的 demo 寫 `box.x += box.velocity`。velocity 名字是「速度」，但單位其實是 px/frame，跟 frame rate 完全綁死:
 
@@ -31,7 +31,7 @@ import DeltaTime from './delta-time';
 
 同一份 code 在不同 device 上看起來完全不同步。Game dev 圈的標準解法叫 **delta time**。
 
-## Delta time 的算法
+## Computing delta time
 
 velocity 改寫成 px/sec:`velocity: 120` 表示一秒走 120 px。每幀算過了多少秒，乘上 velocity 就是這幀該移動的距離:
 
@@ -53,7 +53,7 @@ function draw() {
 
 換個視角:你不是在控制每幀走多少，而是控制單位時間走多少。frame rate 變成只是「採樣密度」，動畫的速度跟採樣密度脫鉤。
 
-## 為什麼一定要 clamp
+## Why you must clamp
 
 Tab 切到背景後，瀏覽器會 throttle 或暫停 rAF;切回來時 `performance.now() - lastTimestamp` 可能是好幾秒甚至更久。`box.x += 120 × 30 = 3600 px` 一幀跳 3600 px 會直接飛出 canvas，或者 (像 rocketship 那樣的粒子系統) 一次生 30 秒份的粒子直接 OOM。
 
@@ -63,7 +63,7 @@ const deltaTime = Math.min(now - lastTimestamp, 250) / 1000;
 
 clamp 在 250ms 等於說「最壞情況當作 4fps 處理」。tab 切回來只會看到一次小跳，而不是視覺爆炸。rocketship、confetti、trails 全部都這樣寫。
 
-## Sub-pixel 不要 round
+## Don't round sub-pixels
 
 `120 × 0.0167 = 2.004 px`，聽起來像會卡在像素邊。不會。Canvas 2D context 跟 CSS transform 一樣有 sub-pixel anti-aliasing — 方塊跨在兩 pixel 中間時，瀏覽器會把兩排 pixel 各塗一點點，視覺上看起來就是連續滑過去的。
 

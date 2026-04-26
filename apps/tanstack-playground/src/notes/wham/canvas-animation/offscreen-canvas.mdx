@@ -1,5 +1,5 @@
 ---
-title: OffscreenCanvas，把 draw loop 搬到 worker
+title: OffscreenCanvas, move the draw loop to a worker
 sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/08-offscreen-canvas
 lessonNumber: '04-canvas/08-offscreen-canvas'
 order: 8
@@ -23,7 +23,7 @@ import { OffscreenCanvasComparison } from './offscreen-canvas';
 
 按那顆按鈕會 busy-loop 主執行緒 500ms。右邊的 main thread canvas 會卡住、左邊的 worker canvas 繼續順跑。這就是 offload 的點 — 不是「畫得比較快」，是「跟 UI 分家，不互相影響」。
 
-## 為什麼 `<canvas>` 可以從 worker 動
+## Why `<canvas>` can be driven from a worker
 
 直覺感覺很怪：worker 不能碰 DOM，但 OffscreenCanvas 改的明明就是畫面上的 pixel？
 
@@ -31,7 +31,7 @@ import { OffscreenCanvasComparison } from './offscreen-canvas';
 
 所以「不能碰 DOM」這條規則沒被打破 — worker 改的是「foreign content」，不是 element 本身。
 
-## 兩段式 transfer
+## Two-step transfer
 
 `transferControlToOffscreen()` 跟 `postMessage` 兩個動作，名字都叫 transfer，但意思不同：
 
@@ -55,7 +55,7 @@ worker.postMessage({ type: 'init', offscreenCanvas }); // ❌ DataCloneError
 
 `OffscreenCanvas` 不能被結構化複製（postMessage 預設行為），它只能被 transfer。少了第二個參數就直接 throw。
 
-## Resize：跨 thread 邊界
+## Resize: crossing the thread boundary
 
 Worker 沒 `window`，看不到 resize event 也讀不到 `devicePixelRatio`。所以 responsive canvas 的處理要拆成兩邊：
 
@@ -86,7 +86,7 @@ self.onmessage = (event) => {
 
 Main thread 負責「量、發訊息」，worker 負責「設 raster 大小、scale 進 DPR、跑 draw」。兩邊都有自己的 state — worker 內部用 `canvasWidth` / `canvasHeight` 做幾何計算，跟 main thread 的 `dimensions` 沒共用。
 
-## 為什麼第一次 draw 等到 resize 訊息再開
+## Why the first draw waits for the resize message
 
 Init 訊息只給 `offscreenCanvas`，沒給尺寸。如果在 init 收到時就 `requestAnimationFrame(draw)` 開始畫，第一幀的 `canvasWidth` 還是 0 — 整張畫不出來。
 
@@ -101,7 +101,7 @@ if (!isRunning) {
 
 Resize 至少會 fire 一次（main thread mount 時主動 call `sendDimensions()`），那時才有合法尺寸可以用。後續 resize 不會 re-trigger draw loop（已經在跑了）。
 
-## Vite worker 語法
+## Vite worker syntax
 
 ```tsx
 const worker = new Worker(
@@ -116,7 +116,7 @@ const worker = new Worker(
 
 Worker 檔內 import lodash / simplex-noise 都跟一般檔案一樣。Tree-shake 也照常。
 
-## 為什麼 `OffscreenCanvasRenderingContext2D` 而不是 `CanvasRenderingContext2D`
+## Why `OffscreenCanvasRenderingContext2D` instead of `CanvasRenderingContext2D`
 
 Worker 拿到的 ctx type 不一樣：
 

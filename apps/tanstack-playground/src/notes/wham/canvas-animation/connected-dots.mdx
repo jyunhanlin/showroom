@@ -19,13 +19,13 @@ import { CursorTrail, ParticlePopper } from './connected-dots';
   <CursorTrail />
 </DemoFrame>
 
-## 為什麼快速移動會 flicker
+## Why fast motion flickers
 
 每幀 `clearRect` 後在新位置畫一個圓。在 60Hz 上,如果游標在一幀內移動 100 px,前後兩幀的圓中心就差 100 px — 大腦處理不出「同一個圓滑過去」,反而看到兩個獨立的 stamps,中間是空白。
 
 這不是 canvas 特有的 — 電影 panning 太快也會頭暈,因為快門速度跟眼睛取樣 rate 不匹配。device refresh rate 的物理上限是搬不動的,但我們可以「補幀」。
 
-## lineCap 的幾何 trick
+## The lineCap geometry trick
 
 Canvas 的 line cap (`'round'`、`'square'`) 是 line length **之外**多畫的。一條 0px 長的 line 配 `lineCap: 'round'` 看起來就是個圓 — 兩個半圓 cap 直接黏在一起。
 
@@ -42,7 +42,7 @@ ctx.stroke();
 
 從來沒有「圓 vs 線」的切換 — 一直都是 stroke,只是長度變化。
 
-## 粒子 popper 的版本
+## The particle popper variant
 
 這招在物理粒子上特別舒服。每顆 particle 多存 `xPrevious / yPrevious`,update 順序是:
 
@@ -71,7 +71,7 @@ particle.yPrevious = particle.y;
   <ParticlePopper />
 </DemoFrame>
 
-## square cap 為什麼會「轉向」
+## Why square cap "rotates"
 
 `lineCap: 'square'` 加的是方形 cap,**對齊 line 的方向**。粒子靜止時 line 0px,方形 cap 朝預設方向(通常是 line 起點到終點的方向);粒子在飛時 line 拉長,方形 cap 朝飛行方向 = 視覺上「物件朝速度方向」。
 

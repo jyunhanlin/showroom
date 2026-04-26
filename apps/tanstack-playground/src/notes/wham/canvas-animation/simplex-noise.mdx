@@ -20,7 +20,7 @@ import { NoiseSwoop, NoiseGrid } from './simplex-noise';
   <NoiseSwoop />
 </DemoFrame>
 
-## 為什麼 random 不夠用
+## Why random isn't enough
 
 直觀上你會想把 100 個點的 y 各自 `Math.random()` 出來接成線。但每點是獨立的 [0, 1] 隨機,相鄰點落差可以是任意大,接出來就是亂針:
 
@@ -34,7 +34,7 @@ range(NUM_OF_POINTS).forEach((i) => {
 
 要平滑 swoop，需要的是「相鄰 x 對應的 y 也要相鄰」這個性質 — 也就是 noise function 的本質:**輸入連續、輸出也連續**。
 
-## simplex2 的核心性質
+## simplex2's core properties
 
 Simplex noise 是 Ken Perlin 在 2000 年代發表的演算法,前身是 1980 年的 Perlin noise (兩者都是他做的)。重點性質:
 
@@ -52,7 +52,7 @@ const y = normalize(simplex2(x / 200, 1), -1, 1, 0, canvasDimensions.height);
 
 第二個參數固定 `1` 等於是在 2D noise field 裡走一條水平線、看 y 在這條線上的起伏。
 
-## 頻率 = 除一個大數
+## Frequency = divide by a large number
 
 直接 `simplex2(x, 1)` 沒用 — 因為 100 個點橫跨 0~canvas.width (例如 800),x 之間相差 8 左右。simplex 對「8 單位的距離」是接近 random 的(noise 的「平滑半徑」大概 1 個單位)。
 
@@ -64,7 +64,7 @@ const y = normalize(simplex2(x / 200, ...), -1, 1, 0, h);
 
 除越大 = 越平滑(細節變少);除越小 = 越鋸齒(往 random 退化)。試 /20、/100、/200、/500 看差別。
 
-## 時間軸 = 第三個參數
+## Time axis = third parameter
 
 把第二個參數從 `1` 換成 `totalTime / 10`,等於每幀都在 noise field 的不同水平線上取樣:
 
@@ -79,7 +79,7 @@ const y = normalize(
 
 `/10` 是時間速度倍率 — 越大走得越慢。
 
-## 2D 動畫 grid 用 simplex3
+## 2D animated grid with simplex3
 
 換個 demo:20×20 圓陣列,每顆圓的 lightness 由 noise 算。用 `simplex3(x, y, time)` 三維 noise,前兩個是 grid 位置、第三個是時間:
 

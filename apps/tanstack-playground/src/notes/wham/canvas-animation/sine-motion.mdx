@@ -19,7 +19,7 @@ import { SineOrbit, SineWorm } from './sine-motion';
   <SineOrbit />
 </DemoFrame>
 
-## sin/cos 為什麼會畫圓
+## Why sin/cos trace a circle
 
 幾何上,`(cos θ, sin θ)` 隨 θ 從 0 到 2π,軌跡剛好就是單位圓上的一點。把 θ 換成 `time`(秒)、各自 `normalize` 到 canvas 座標範圍就完事:
 
@@ -44,7 +44,7 @@ const y = normalize(
 
 `* 2` 是頻率倍數。`Math.sin(t)` 的週期是 2π 秒(JS 三角函式吃 radian),乘 2 變成 π 秒一圈。想要剛好 1 秒一圈就 `* Math.PI * 2`。
 
-## 5 顆球 + offset 變 loading spinner
+## 5 balls + offset = loading spinner
 
 每顆球差一點點時間相位:
 
@@ -59,7 +59,7 @@ balls.forEach(({ color }, index) => {
 
 `Math.sin(t + 0.3)` 等於 `Math.sin(t)` 提前 0.3 秒的版本。每顆球都是「下一顆過 0.3 秒會在的位置」,視覺上就是後一顆追前一顆,5 顆排成一條跟隨蛇 — 這是 loading spinner 最常見的長相。
 
-## 非對稱頻率 → Lissajous 蟲形
+## Asymmetric frequencies → Lissajous worm
 
 x 跟 y 不再共用同一個 speed,軌跡就不再閉合成圓:
 

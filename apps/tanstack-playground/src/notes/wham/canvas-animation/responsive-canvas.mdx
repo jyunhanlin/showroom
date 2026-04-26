@@ -19,7 +19,7 @@ import ResponsiveCanvas from './responsive-canvas';
   <ResponsiveCanvas />
 </DemoFrame>
 
-## Canvas 為什麼一 resize 就糊
+## Why canvas blurs on resize
 
 `<canvas>` 有兩套尺寸:
 
@@ -47,7 +47,7 @@ update();
 
 `setupCanvas` 多回傳一個 `disposeResize`，是 `removeEventListener` 的 wrapper，給 `useEffect` cleanup 用 — 不然 Strict Mode double-mount + unmount 會留 listener。
 
-## 為什麼 dimensions 一定要是物件
+## Why dimensions must be an object
 
 `setupCanvas` 只 return 一次，但 width/height 在 resize 之後要持續更新。
 
@@ -70,7 +70,7 @@ return { ctx, dimensions };
 
 物件是 reference type，`update` 改的是那塊記憶體本身，consumer 透過 `canvasDimensions.width` 每次讀都拿到最新值。也是為什麼 demo 的 `ctx.clearRect(0, 0, canvasDimensions.width, canvasDimensions.height)` 不用知道有 resize 也照樣對。
 
-## Boundary 還會被打到一個坑
+## Another boundary pitfall
 
 直觀的寫法:撞到邊界就翻 velocity。
 

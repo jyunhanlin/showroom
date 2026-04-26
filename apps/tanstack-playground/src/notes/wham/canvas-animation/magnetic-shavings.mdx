@@ -20,7 +20,7 @@ import { MagneticShavingsBasic, MagneticShavingsRainbow } from './magnetic-shavi
   <MagneticShavingsBasic />
 </DemoFrame>
 
-## atan2 是什麼
+## What atan2 does
 
 前面 sine/cos 是「角度 → cartesian (x, y)」,atan2 是反方向 — 「(x, y) → 角度」。給它兩個 delta,它回給你那個 vector 跟 +x 軸的夾角(radian,範圍 −π ~ π):
 
@@ -34,7 +34,7 @@ const angle = Math.atan2(deltaY, deltaX);
 
 也有 `Math.atan(y / x)`,但他不知道 x 是正是負,只能回 −π/2 ~ π/2 半圈。`atan2` 透過分別接 y 跟 x 的 sign 自己判斷象限,給 full π 兩圈。除非有特殊理由,`atan2` 比較通用。
 
-## 為什麼要 translate + rotate
+## Why translate + rotate
 
 `ctx.rotate(angle)` 是繞 **目前原點** (預設 (0, 0)) 旋轉整個座標系。如果直接在 line 的 absolute 位置畫 + rotate,所有 line 都會繞 canvas 左上角轉,變成扇形。
 
@@ -53,7 +53,7 @@ ctx.restore();                     // 把 translate + rotate 還原
 
 `save / restore` 是 stack-based — `save` 把當下的整個 ctx 狀態 (含 transform、fillStyle、lineWidth...) push 到 stack,`restore` pop。一定要成對呼叫,不然 transform 會在 frame 之間累積、line 會「轉得越來越快」。
 
-## 距離縮放:消除進場 snap
+## Distance scaling kills the entry snap
 
 cursor 還沒移動時,我們的 `mousePosition` 是 `{ x: null, y: null }` — 還沒有任何 mouse event。第一次 `pointermove` 觸發後,line 全部從「沒畫」跳到「指向 cursor」。視覺上看起來整面突然 snap 到位置。
 
@@ -68,7 +68,7 @@ const lineLength = clampedNormalize(distance, 0, 200, LINE_LENGTH, 0);
 
 `clampedNormalize` 比 `normalize` 多一層 `Math.max(0, Math.min(1, ...))` clamp。沒 clamp 的話 distance > 200 會給負數 lineLength,線會反向長出來變得越來越長。課程提到自己第一次寫漏踩過這個坑。
 
-## Bonus: 把 distance 餵給更多參數
+## Bonus: feed distance into more params
 
 distance 不只能控長度,還可以餵給 hue / saturation / lineWidth:
 

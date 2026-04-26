@@ -1,5 +1,5 @@
 ---
-title: Transforms, 用 save/restore 畫旋轉粒子
+title: Transforms, save/restore for rotated particles
 sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/05-transforms
 lessonNumber: '04-canvas/05-transforms'
 order: 5
@@ -39,7 +39,7 @@ ctx.restore();             // 5. 回復到 save 時的狀態
 
 沒 `save`/`restore` 會怎樣?前一顆粒子 rotate 45° 還沒倒回來,下一顆從 45° 繼續 rotate 到 90°,第三顆 135°... 整張畫面會像陀螺。
 
-## `fillText` vs `drawImage` 的錨點差異
+## `fillText` vs `drawImage` anchor differences
 
 課程原版用 `ctx.drawImage(img, x - w/2, y - h/2, w, h)` — `drawImage` 的錨點是圖片**左上角**,要手動減掉半個寬高把圖置中。這份筆記用 emoji + `fillText`,搭配:
 
