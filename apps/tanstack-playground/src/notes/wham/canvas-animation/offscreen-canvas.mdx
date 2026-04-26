@@ -1,0 +1,138 @@
+---
+title: OffscreenCanvas，把 draw loop 搬到 worker
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/08-offscreen-canvas
+lessonNumber: '04-canvas/08-offscreen-canvas'
+order: 8
+summary: "`<canvas>` 是 replaced element — pixel content 不算 DOM，所以可以從 worker 動。`transferControlToOffscreen()` 切出一個 OffscreenCanvas，postMessage 用第二個參數把 ownership 傳給 worker，主執行緒不再能碰它。Resize 跨 thread 邊界要在主執行緒 listen，再 postMessage 把 width / height / dpr 送進去。"
+tags: [canvas, web-worker, offscreen-canvas, performance]
+---
+
+import { OffscreenCanvasComparison } from './offscreen-canvas';
+
+## TL;DR
+
+- Canvas 動畫吃 main thread。如果 page 上其他東西（React render、event handler、heavy compute）卡住主執行緒，動畫就掉幀。
+- `<canvas>` 是 replaced element — 它的 pixel content 不是 DOM 一部分，所以「從 worker 改 pixel」沒違反「worker 不能碰 DOM」的規則。
+- 機制：`canvas.transferControlToOffscreen()` 切出一個 `OffscreenCanvas` JS 物件 → `worker.postMessage({...}, [offscreenCanvas])` 把 ownership 整個轉走（第二個參數是 transferable list）。
+- Worker 看不到 `window`，所以 resize 必須主執行緒 listen 再 postMessage 通知 worker。Worker 內 `requestAnimationFrame` 跟 main thread 一樣綁 vsync。
+- 大多數情況不需要這個 — 一般 cosmetic canvas 動畫主執行緒跑得夠順。OffscreenCanvas 是給 Tinkersynth 等級「每幀做幾千個 intersection」才划算。
+
+<DemoFrame title="Side-by-side：worker vs main thread">
+  <OffscreenCanvasComparison />
+</DemoFrame>
+
+按那顆按鈕會 busy-loop 主執行緒 500ms。右邊的 main thread canvas 會卡住、左邊的 worker canvas 繼續順跑。這就是 offload 的點 — 不是「畫得比較快」，是「跟 UI 分家，不互相影響」。
+
+## 為什麼 `<canvas>` 可以從 worker 動
+
+直覺感覺很怪：worker 不能碰 DOM，但 OffscreenCanvas 改的明明就是畫面上的 pixel？
+
+關鍵是 replaced element。`<canvas>`、`<img>`、`<video>` 這類 tag DOM 只負責「在 layout 裡留位置 + 設一張 raster」。raster 內容本身不是 DOM tree 的節點，不參與選取、不能被 querySelector 看到。OffscreenCanvas 改的就是這張 raster，沒碰到實際 DOM 結構（layout、attributes 都動不了）。
+
+所以「不能碰 DOM」這條規則沒被打破 — worker 改的是「foreign content」，不是 element 本身。
+
+## 兩段式 transfer
+
+`transferControlToOffscreen()` 跟 `postMessage` 兩個動作，名字都叫 transfer，但意思不同：
+
+```ts
+// Step 1: <canvas> → OffscreenCanvas
+const offscreenCanvas = canvas.transferControlToOffscreen();
+
+// Step 2: main thread → worker
+worker.postMessage({ type: 'init', offscreenCanvas }, [offscreenCanvas]);
+```
+
+第一步：把實體 `<canvas>` 的 raster control 切出去給一個新建的 `OffscreenCanvas` 物件。切完之後 main thread 還拿得到 `offscreenCanvas` 變數，但**不能再對 `canvas` 呼叫 `getContext('2d')`** — 它的 raster 已經被搶走了。
+
+第二步：把 `offscreenCanvas` 的 ownership 從 main thread 轉給 worker。`postMessage` 第二個參數那個陣列叫 transferable list — 列在裡面的物件**會從原本的 thread detach**，主執行緒之後再 access 它就會 throw `InvalidStateError`。
+
+如果省略 transferable list：
+
+```ts
+worker.postMessage({ type: 'init', offscreenCanvas }); // ❌ DataCloneError
+```
+
+`OffscreenCanvas` 不能被結構化複製（postMessage 預設行為），它只能被 transfer。少了第二個參數就直接 throw。
+
+## Resize：跨 thread 邊界
+
+Worker 沒 `window`，看不到 resize event 也讀不到 `devicePixelRatio`。所以 responsive canvas 的處理要拆成兩邊：
+
+```tsx
+// Main thread
+function sendDimensions() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  worker.postMessage({ type: 'resize', width: rect.width, height: rect.height, dpr });
+}
+sendDimensions();
+window.addEventListener('resize', sendDimensions);
+```
+
+```ts
+// Worker
+self.onmessage = (event) => {
+  if (event.data.type === 'resize') {
+    const { width, height, dpr } = event.data;
+    offscreenCanvas.width = Math.round(width * dpr);
+    offscreenCanvas.height = Math.round(height * dpr);
+    ctx.scale(dpr, dpr);
+    canvasWidth = width;
+    canvasHeight = height;
+  }
+};
+```
+
+Main thread 負責「量、發訊息」，worker 負責「設 raster 大小、scale 進 DPR、跑 draw」。兩邊都有自己的 state — worker 內部用 `canvasWidth` / `canvasHeight` 做幾何計算，跟 main thread 的 `dimensions` 沒共用。
+
+## 為什麼第一次 draw 等到 resize 訊息再開
+
+Init 訊息只給 `offscreenCanvas`，沒給尺寸。如果在 init 收到時就 `requestAnimationFrame(draw)` 開始畫，第一幀的 `canvasWidth` 還是 0 — 整張畫不出來。
+
+所以 worker 內 `isRunning` flag 卡在 resize handler：
+
+```ts
+if (!isRunning) {
+  self.requestAnimationFrame(draw);
+  isRunning = true;
+}
+```
+
+Resize 至少會 fire 一次（main thread mount 時主動 call `sendDimensions()`），那時才有合法尺寸可以用。後續 resize 不會 re-trigger draw loop（已經在跑了）。
+
+## Vite worker 語法
+
+```tsx
+const worker = new Worker(
+  new URL('./offscreen-canvas.worker.ts', import.meta.url),
+  { type: 'module' },
+);
+```
+
+`new URL(..., import.meta.url)` 是 Vite（跟 webpack 5）原生的 worker 識別 pattern — 它看到這個 shape 會自動把 worker 檔案抽成獨立 chunk、處理 dev / production URL。
+
+`{ type: 'module' }` 讓 worker 用 ES module 語法（`import { foo } from '...'`），少了它要走 classic `importScripts()` 那條老路。現代瀏覽器都支援 module worker，沒必要 fallback。
+
+Worker 檔內 import lodash / simplex-noise 都跟一般檔案一樣。Tree-shake 也照常。
+
+## 為什麼 `OffscreenCanvasRenderingContext2D` 而不是 `CanvasRenderingContext2D`
+
+Worker 拿到的 ctx type 不一樣：
+
+```ts
+let ctx: OffscreenCanvasRenderingContext2D | null = null;
+ctx = offscreenCanvas.getContext('2d'); // type narrows to OffscreenCanvasRenderingContext2D
+```
+
+API 大致一樣（`fillRect`、`beginPath`、`arc` 都有），所以 draw 邏輯可以無痛複製。少數 method 兩邊不一致（例如 `drawFocusIfNeeded` 只在 DOM-bound context 有），但動畫 code 用不到。
+
+## Gotchas
+
+- **Worker 內用 `self.requestAnimationFrame`**，不是頂層的 `requestAnimationFrame`。TS 在 worker 環境下能 resolve（有 `lib: 'webworker'`），但全域呼叫容易被 IDE 誤判成 `Window` 那一支。明寫 `self.` 比較安全。
+- **`<canvas>` 一旦 `transferControlToOffscreen()` 就回不去**。React Strict Mode 下 effect mount → unmount → mount，第二次 transfer 撞 `InvalidStateError: Cannot transfer control from a canvas for more than one time`。這 app 沒 explicit Strict Mode，但 dev 模式（HMR、hydration retry）還是會把 effect 跑兩遍 — 我這裡的解法是把 `transferControlToOffscreen` + worker 建立包進 `Promise.resolve().then(...)`，cleanup 時 set 一個 `cancelled` flag，第一次的 microtask 在 transfer 前 bail，第二次的 microtask 才真的動手。Production 沒這個問題（effect 只跑一次），但 dev 看不到 worker canvas 就先想到這個。
+- **`postMessage` 不傳 transferable list 不是 silent failure**，是直接 throw `DataCloneError`。如果寫 `worker.postMessage({ offscreenCanvas })` 漏了第二個 array 參數，console 會立刻紅字 — 這點還算好 debug。
+- **DPR scale 在每次 resize 都要重設**。Canvas 的 `width = N` 會 reset transform stack，所以 `ctx.scale(dpr, dpr)` 必須跟著 width / height 一起改 — 漏掉就是 retina 螢幕看糊圖。
+- **不需要 reduced-motion check**。這 demo 教學重點是 thread 邊界本身，動效強度等同 simplex-noise 那課；要加可以參考 fireworks 的 `checkPrefersReducedMotion`。
+- **`worker.terminate()` 在 cleanup 不可省**。Worker 是獨立 process，組件 unmount 後 React 不會幫你 GC 它。漏掉 → 切換 note 之間 worker 一直堆積，每個還在 60Hz 畫 noise。
+- **大多數情況不該用**。如果 canvas 動畫主執行緒跑順、page 上沒重 React render，OffscreenCanvas 的 setup cost（兩個檔案、訊息協議、cleanup 細節）不划算。Josh 在 Tinkersynth 用是因為 occlusion 算法每幀做幾千個 intersection check — 一般煙火 / 粒子場景遠遠不到那個 threshold。
