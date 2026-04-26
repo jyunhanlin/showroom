@@ -5,6 +5,10 @@ export const topics: Record<string, TopicMeta> = {
     name: 'Canvas Animation',
     description: 'rAF loop, deltaTime, velocity-based animation',
   },
+  'motion-and-react': {
+    name: 'Motion + React',
+    description: 'motion/react library, layout & exit animations',
+  },
 };
 
 export function topicName(id: string): string {
