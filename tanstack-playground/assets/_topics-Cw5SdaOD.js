@@ -1,1 +1,0 @@
-var e={"canvas-animation":{name:`Canvas Animation`,description:`rAF loop, deltaTime, velocity-based animation`}};function t(t){return e[t]?.name??t}export{e as n,t};
