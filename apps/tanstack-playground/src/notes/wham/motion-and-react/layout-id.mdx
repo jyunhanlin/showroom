@@ -1,0 +1,167 @@
+---
+title: Shared Layout (`layoutId`)
+sourceUrl: https://courses.joshwcomeau.com/wham/05-motion-and-react/04-layout-id
+lessonNumber: '05-motion-and-react/04-layout-id'
+order: 4
+summary: '多個 motion 元件掛同一個 `layoutId`，motion 會把它們當「同一顆」做 cross-instance layout tween。Vercel-style nav backdrop / card-to-detail expand 都靠這個。坑：圓角拉伸要 `initial={{ borderRadius }}`、兄弟 stacking 要 conditional `zIndex`、`useId()` 避免 hardcode 撞號。'
+tags: [motion, react, layout-id, shared-layout, FLIP]
+---
+
+import { LayoutIdCardExpand, LayoutIdNav } from './layout-id';
+
+## TL;DR
+
+- `layoutId` 是 layout animation 的 **cross-instance** 版本：給多個 motion 元件同一個 ID，motion 把它們當「邏輯上的同一顆」處理 — 一邊 unmount、另一邊 mount，視覺上看到 box 從 A 滑到 B。
+- 兩種典型 use case：(1) hover-following backdrop（多個 conditionally-rendered backdrop 共用 ID）、(2) thumbnail → detail expand（grid card unmount 的同時 detail mount）。
+- `layoutId` 一定要 stable 且 instance-unique。寫死字串會在「同 page 多個 instance」時撞號 → 用 `useId()` 拿一個 hook-scoped 的 ID。
+- 圓角會跟著 scale 拉伸變形。motion 知道怎麼修但要明說 — 用 `initial={{ borderRadius: N }}`（**不是** `animate`），它會每幀算反向 border-radius 抵消 scale。
+- 兄弟元素的 stacking 用 DOM order 決定。Backdrop 跨越兄弟邊界時會壓住別的兄弟內容 — 修法：hovered item 給比較**低**的 zIndex 把它推到下層。
+
+<DemoFrame title="Vercel-style nav — hover backdrop">
+  <LayoutIdNav />
+</DemoFrame>
+
+把游標移到不同 link 上，backdrop 跟著滑。注意三件事：(1) 滑動是平滑 spring 而不是瞬切；(2) 圓角從頭到尾是 `8px`，不會在拉伸時變橢圓；(3) 從 "Home" 滑到 "Integrations" 經過 "Usage" 時，"Usage" 的字一直可讀，沒被 backdrop 蓋住。
+
+## 假象的本體
+
+直覺上會覺得「畫面上有一顆 backdrop 在滑」。實際上 DOM 裡每個 link 各自有自己的 backdrop，只是同一時間最多只有一個被 conditionally rendered：
+
+```tsx
+{LINKS.map(({ slug, label, bg }) => (
+  <li key={slug}>
+    {hoveredNavItem === slug && (
+      <motion.div layoutId={id} style={{ backgroundColor: bg }} />
+    )}
+    <a onMouseEnter={() => setHoveredNavItem(slug)}>{label}</a>
+  </li>
+))}
+```
+
+游標從 "Home" 移到 "Usage" 時：
+1. "Home" 那個 motion.div unmount
+2. "Usage" 那個 motion.div mount
+3. motion 看到「同一個 layoutId 換了 DOM 位置」，把舊位置 + 舊尺寸記下、套 transform 把新元素拉回舊位置、tween 到 identity
+
+跟 `layout` prop 是同一招（layout projection），只是「比對對象」從「同一個元件 render 之間」擴成「相同 layoutId 的所有 instance 之間」。
+
+把每個 backdrop 換成不同顏色就能直接看穿假象 — 你會看到「藍色滑出去、黃色從另一頭出現」的中間幀，而不是「一顆色塊在移」。
+
+## `useId()` 而不是 hardcode 字串
+
+```tsx
+const id = useId();   // 每個 component instance 都拿到唯一字串
+// ...
+<motion.div layoutId={id} />
+```
+
+如果寫 `layoutId="hovered-backdrop"`，同 page 兩個 `<Navigation />` 共用同一個 ID — motion 會把兩邊 backdrop 當同一顆，hover 一邊另一邊跟著消失。`useId()` 是 React 18+ 的 hook，每個 component instance 不同，render 之間穩定，做 layoutId 完美。
+
+## 圓角拉伸的修法
+
+Backdrop 從窄 link ("Home") 滑到寬 link ("Integrations") 過程中，motion 套上 `scale(1.5, 1)` 之類的橫向拉伸。`border-radius: 8px` 在被 scale 時會跟著變形 — 8px 的圓角橫向變成 12px，視覺上變成「橢圓角」而不是圓角。
+
+修法是 **`initial={{ borderRadius: N }}`**：
+
+```tsx
+<motion.div layoutId={id} initial={{ borderRadius: 8 }} />
+```
+
+motion 看到 `initial` 帶 `borderRadius`，會**每幀動態調整 border-radius 數值**抵消 scale 的拉伸 — 物理上圓角變大、視覺上維持 8px 圓。
+
+注意是 `initial` 不是 `animate`：
+
+```tsx
+// ❌ 會看到「進場時圓角從預設動到 8px」的怪 enter animation
+animate={{ borderRadius: 8 }}
+
+// ❌ 修上面那個，但變兩行
+animate={{ borderRadius: 8 }}
+initial={false}
+
+// ✅ 一行解決
+initial={{ borderRadius: 8 }}
+```
+
+`initial` 在 motion 裡有兩個語義 — 一個是「進場動畫起始值」，另一個是「這個 prop 的靜態 baseline，在 layout transition 時用 inverse 修正」。border-radius 走的是後者。
+
+為什麼 motion 不主動讀 element 的 border-radius 自動修?推測：每幀算 inverse border-radius 比動 transform 貴（不是 compositor-only），預設關掉、要的人 explicit opt-in。
+
+## z-index gotcha
+
+Backdrop 從 "Home" 滑到 "Integrations" 中間會「踩過」"Usage"。如果三個 `<li>` 同 stacking level，DOM 順序決定誰在上 — "Usage" 在 "Home" 後面 = 排在 "Home" **上面**，所以 backdrop（在 Home 的 `<li>` 內）被 Usage 遮住一半，看起來是「backdrop 從 Usage 後面鑽過去」。
+
+但反過來 backdrop 從 "Usage" 滑到 "Integrations" 中間會經過 "Integrations" — backdrop 在 Usage 的 `<li>` 內，Integrations 在 Usage 後面 = Integrations 在上面，所以 backdrop 出去那段被 Integrations 遮，**看起來像 backdrop 把 Home 的字蓋掉**。整體就是有時候蓋有時候沒蓋的不一致感。
+
+修法：hovered item 的 `<li>` 給比較**低**的 zIndex，把它推到所有兄弟下面：
+
+```tsx
+<li style={{ zIndex: hoveredNavItem === slug ? 1 : 2 }}>
+```
+
+Hovered item 的 backdrop 永遠在最底，其他兄弟的 link 文字永遠在最上。視覺一致：backdrop 永遠從別的 link 文字「下方」鑽過去。
+
+## Card-to-detail expand
+
+`layoutId` 不只用在 hover backdrop。經典的 thumbnail → detail expand 也是同一招：
+
+<DemoFrame title="Card grid → click 展開 detail">
+  <LayoutIdCardExpand />
+</DemoFrame>
+
+點任一張 card → 它變成 detail panel 撐滿容器；點背景或 Close → 收回去。底層機制：
+
+```tsx
+<div className="grid grid-cols-2">
+  {CARDS.map(card => (
+    <div key={card.id}>
+      {activeId !== card.id && (
+        <motion.button
+          layoutId={`card-${card.id}`}
+          onClick={() => setActiveId(card.id)}
+          className={card.bg}
+        >
+          {card.label}
+        </motion.button>
+      )}
+    </div>
+  ))}
+</div>
+
+<AnimatePresence>
+  {active && (
+    <motion.div layoutId={`card-${active.id}`} className={active.bg}>
+      <h3>{active.label}</h3>
+      <p>{active.description}</p>
+    </motion.div>
+  )}
+</AnimatePresence>
+```
+
+關鍵：**啟用某 card 時，grid 裡那張 card 必須 unmount**。如果 grid card 跟 detail card 同時掛在 DOM 上、共用同一個 `layoutId`，motion 不知道要 tween 哪一顆 — undefined behavior（通常會看到一顆瞬切、另一顆不動）。`activeId !== card.id` 守衛把 grid card 收掉，detail card 從 grid card 的舊位置 mount，motion 接力。
+
+`AnimatePresence` 是專門管 mount/unmount 動畫的 wrapper — detail card 退場時 fade backdrop + 滑回 grid 位置，沒有它就直接 pop 消失。
+
+## detail 內文用 nested `motion.h3 / motion.p`
+
+跟前一課一樣的坑：detail 撐大時 motion 對最外層 motion.div 套 `scale`，內部文字會被拉糊。修法是把 title / description 包成 `motion.h3 layout="position"` / `motion.p layout="position"`，套 inverse transform 抵消 parent scale：
+
+```tsx
+<motion.div layoutId={`card-${active.id}`}>
+  <motion.h3 layout="position">{active.label}</motion.h3>
+  <motion.p layout="position">{active.description}</motion.p>
+</motion.div>
+```
+
+收回去也一樣，文字反向 tween 回 grid 大小不變形。
+
+## Gotchas
+
+- **`useId()` 而不是 hardcode**。同 page 兩份 `<Navigation />` 共用 hardcode `layoutId` → 兩邊互相干擾。`useId()` 給 hook scope 內穩定唯一字串。
+- **`initial={{ borderRadius }}` 不是 `animate`**。`animate` 會額外觸發 enter animation；`initial` 只給 motion 一個 baseline 算 inverse。
+- **detail mount 時 grid card 必須 unmount**。同 layoutId 兩個元件同時存在 = undefined behavior。`activeId !== card.id && <motion.button .../>` 是這個 demo 的關鍵 guard。
+- **z-index 用相對數字、別硬綁絕對 z 值**。我用 `1 / 2`，方便這個 nav 容器內部 stacking 自包，不會跟 page 上其他元素打架。如果硬寫 `z-50` / `z-10` 還是要算清楚 stacking context。
+- **AnimatePresence 必須是 detail motion.div 的直系父或更高層**。退場動畫是 AnimatePresence 在管 — wrapper 漏了，detail unmount 直接 pop 消失沒有 exit transition。
+- **detail 跟 grid card 用同一個 className 形狀**（同樣的 `${card.bg}`）。如果 detail 加了 grid card 沒有的 box-shadow / outline，layout transition 會出現「跳一下」的 visual artifact。要加額外 styling 就用 `transition` prop 慢慢 fade in，不要硬塞在 className 上。
+- **Card 用 `motion.button` 不是 `motion.div`**。a11y — 用 button 自帶 keyboard focus / Enter 觸發，screen reader 也認得。Motion 對任何 DOM tag 都行，挑語義對的。
+- **Backdrop 點擊的 close 行為**。`backdrop` 有 `onClick={() => setActiveId(null)}`，但要小心 detail card 內部 click bubble 上來 — detail card 用 `absolute` 在 backdrop **之上**所以 click event target 會是 detail，不會冒泡到 backdrop。如果 detail 用 `pointer-events-none` 或位置不對，backdrop 點擊邏輯會失效。
