@@ -1,0 +1,175 @@
+---
+title: View Transitions in Practice (Toast Stack & Action-Driven Dialog)
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/07.03-vt-exercises
+lessonNumber: '03-advanced-interactions/07.03-vt-exercises'
+order: 12
+summary: '兩個 real UI 用 View Transitions：toast dismiss 讓兄弟自動 slide-down、action-driven dialog 用「unmount 前改 view-transition-name」切換不同退場動畫。Critical 坑：exit animation target `::view-transition-old(name)`，不是 `::view-transition-group(name)`（後者管位置 → 會「飛到頂」）。z-index 反向才能讓 dismissed toast 從**後面**淡出。'
+tags: [view-transitions, react, flushSync, exit-animation, toast, dialog]
+---
+
+import { ActionDrivenDialog, ToastStack } from './view-transition-actions';
+
+## TL;DR
+
+- 兩個 conditional-render exit animation：toast 從 stack 中移除、dialog 退場。VT 在這種「component unmount → DOM 拔掉」場景比純 CSS transition 強 — VT 把退場 snapshot 存到 pseudo-element，等 keyframes 跑完才真的清掉。
+- Toast stack：dismiss 一條 → 倖存的兄弟自動 slide down，因為 VT 偵測到 layout 改變、套 transform 把它們從舊位置 tween 回新位置。每個 toast 給 unique `view-transition-name`（如 `toast-1`、`toast-2`）。
+- 「Fade behind 而不是 fade in front」用 reverse z-index：第一個 toast `z-index: N`、最後一個 `z-index: 1`。dismissed toast 的 old snapshot 因此被倖存兄弟蓋住、視覺上往後消失。
+- Action-driven dialog：unmount 前**直接改 `viewTransitionName`** 成 `dialog-cancel` / `dialog-confirm`，CSS 裡兩個 `::view-transition-old(name)` 各帶不同 keyframes — 一個 fall+rotate+blur、一個 slide down。
+- **Critical：exit animation 的 target 是 `::view-transition-old(name)` 不是 `::view-transition-group(name)`**。`group` 管位置/大小 transition，蓋掉它 dialog 會「飛到頂」；`old` 是真正在淡出的 snapshot pseudo-element，動它才正確。
+- 所有 VT 都要 `flushSync`、都要 fallback path（`prefers-reduced-motion` + 沒有 `document.startViewTransition` 時直接 unmount）。本 note 假設讀者已看過 [view-transitions](#) 基本款，這篇只 focus 兩個 real-world pattern。
+
+<DemoFrame title="Toast stack — dismiss 後兄弟 slide down">
+  <ToastStack />
+</DemoFrame>
+
+按右上角 ✕ dismiss 一條 toast，**沒被 dismiss 的兄弟順順往上滑**，dismissed 那條本身淡出 — 不是 CSS transition、是 VT 在每 frame 套不同的 transform。
+
+<DemoFrame title="Action-driven dialog — Cancel vs Confirm 退場不同">
+  <ActionDrivenDialog />
+</DemoFrame>
+
+開 dialog 後按 Cancel：dialog 往下掉、邊轉邊模糊（彷彿「破掉了」）。按 Confirm：dialog 平順往下滑（彷彿「送出了」）。同一個 React 元件，兩種視覺敘事。
+
+## Toast — slide-down 是免費的
+
+CSS-only 寫 toast dismiss：dismissed 條 `opacity: 0; height: 0`、加 transition 給 height。問題：(1) `height: auto → 0` transition 不會跑（CSS 限制）；(2) 兄弟 toast 的位置改變 = layout shift = browser 沒幫你 transition、瞬間 snap 上去。
+
+VT 的解法：dismissed toast 從 React state 拿掉就好。`document.startViewTransition` callback 跑前 browser 截一張 snapshot；callback 內 React 把該 toast unmount → DOM 重排；callback 結束後 browser 截第二張。然後針對每個有 `view-transition-name` 的元素自動算 from→to 的 transform diff，套 keyframes 跑完。
+
+```tsx
+function dismiss(id: number) {
+  document.startViewTransition(() => {
+    flushSync(() => setToasts((c) => c.filter((t) => t.id !== id)));
+  });
+}
+```
+
+每個 toast 給 inline style：
+
+```tsx
+<li style={{ viewTransitionName: `toast-${toast.id}` }}>
+```
+
+VT 才知道「這顆」是「同一顆」、能比對前後位置。沒名字 browser 對所有元素 cross-fade，倖存 toast 會「fade out 再 fade in」而不是 slide。
+
+## Fade behind 而不是 fade in front
+
+Default 情況，dismissed toast 的 old snapshot 蓋在倖存兄弟之上 — fade out 過程中它擋住其他 toast 的內容。視覺上像「半透明殘影」漂在前景。
+
+要它從後面消失，反向 z-index：
+
+```tsx
+{toasts.map((toast, index) => (
+  <li
+    key={toast.id}
+    style={{
+      viewTransitionName: `toast-${toast.id}`,
+      zIndex: toasts.length - index,  // 第一條最高、最後最低
+    }}
+  >
+```
+
+第一條 toast `z-index: 4`、最後一條 `z-index: 1`。dismissed toast 的 old snapshot 在自己的 stacking context — 倖存兄弟 z-index 比它高就把它蓋住、它從**底層**淡出，視覺上像「滑進地板下面」。
+
+> Course 提到還有 `reading-flow` 等 declarative 解法可避開 magic number，但目前瀏覽器支援度低、本 demo 走樸素 reverse z-index 路線。
+
+加 `isolation: isolate` 在 `<ul>` 上鎖 stacking context，避免內部 z-index 跟外面打架。
+
+## Action-driven dialog — 一個元素、兩個結局
+
+Dialog 的有趣點：同一個 DOM node、退場時根據 user action 跑**不同**動畫。直覺寫法是 conditional className 切兩組 `@keyframes` — 但 component 已經要 unmount 了，className 還沒套上 browser 已經拔掉 DOM。
+
+VT 的招：unmount **前一刻**改 `viewTransitionName`：
+
+```tsx
+function dismiss(action: 'cancel' | 'confirm') {
+  const dialog = dialogRef.current;
+  if (dialog) {
+    dialog.style.viewTransitionName = `vt-dialog-${action}`;
+  }
+  document.startViewTransition(() => {
+    flushSync(() => setOpen(false));
+  });
+}
+```
+
+CSS 寫兩組 `::view-transition-old(name)` 規則：
+
+```css
+::view-transition-old(vt-dialog-cancel) {
+  animation: vt-dialog-cancel 600ms cubic-bezier(0.54, -0.8, 1, 0.9) forwards;
+}
+::view-transition-old(vt-dialog-confirm) {
+  animation: vt-dialog-confirm 400ms ease-out forwards;
+}
+@keyframes vt-dialog-cancel {
+  to {
+    filter: blur(10px);
+    transform: translateY(100%) rotate(-20deg);
+    opacity: 0;
+  }
+}
+@keyframes vt-dialog-confirm {
+  to {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+```
+
+按 Cancel → name 改成 `vt-dialog-cancel` → cancel keyframes 套上去 → fall+rotate+blur。按 Confirm → name 改成 `vt-dialog-confirm` → confirm keyframes 套上去 → 平順下滑。同一個 DOM、同一個 React unmount，兩個視覺敘事。
+
+## `::view-transition-old(name)` vs `::view-transition-group(name)`
+
+Course 講師明確點名的坑：寫 exit animation **一定要 target `::view-transition-old(name)`**，不要寫 `::view-transition-group(name)`。
+
+差別：
+
+- `::view-transition-group(name)` — 管 from→to 的位置 + 大小 transition（FLIP-style projection）。寫 keyframes 在 group 上會蓋掉 browser 自己的 layout interpolation → dialog 不會原地淡出，而是被你的 keyframes 拉到 `transform: translateY(100%)` 的目的地、看起來「飛到頂端」（因為 group 的 starting transform 是 from-position 的 inverse）。
+- `::view-transition-old(name)` — 退場 snapshot 的 pseudo-element，預設只跑一個 250ms cross-fade。寫 keyframes 在 old 上是 *替換*那個 fade，dialog 視覺上正常退場、不影響 layout projection。
+
+口訣：**old 管「淡出」、group 管「移動」**。退場動畫 = 改淡出 = old。
+
+## `flushSync` 跟 fallback 還是要
+
+承襲 [view-transitions](#) 的兩個基本盤：
+
+```tsx
+function dismiss(id: number) {
+  if (!document.startViewTransition) {
+    setToasts((c) => c.filter((t) => t.id !== id));
+    return;
+  }
+  document.startViewTransition(() => {
+    flushSync(() => setToasts((c) => c.filter((t) => t.id !== id)));
+  });
+}
+```
+
+- `flushSync` — React 預設 batch state update，VT callback 結束後 update 才 flush，browser 截到的「after」snapshot 跟「before」一樣 → 沒 transition。`flushSync` 強制當下 commit，VT 才能正確截 after。
+- Fallback — `document.startViewTransition` 是新 API，Firefox 128 以前 / Safari 18 以前沒有。`if (!document.startViewTransition)` 直接 unmount、UX 失去動畫但功能不壞。
+- `prefers-reduced-motion: reduce` — 同樣 skip VT 直接 unmount。本 demo 用 `usePrefersReducedMotion()` hook 檢查、callsite 一個 boolean argument 控制。
+
+## 連點兩下會怎樣
+
+按一次 dismiss → VT 跑 ~250ms → 跑完才接受下一次 click。VT 期間 click 倒不是被「擋掉」，是 VT 自己會 abort 或 queue：實際行為依 browser 而異。我這個 demo Toast 沒做 disable，連點兩下實測 Chrome 會 abort 第一個 transition 直接跑第二個 — 倖存兄弟會「跳一下」但不會壞掉。dialog 因為 `disabled` 在開的時候 button disable，沒這個風險。
+
+production 上要嚴謹處理：要嘛在 dismiss handler 開頭擋 `if (isTransitioning) return;`、要嘛 disable 按鈕、要嘛 queue。看 UX 取捨。
+
+## a11y — `aria-live` 跟 screen reader
+
+VT 是純視覺層的事，screen reader 看不到 transition、只看 DOM。Toast list `aria-live="polite"` 讓 toast 增加/減少時 SR 會 announce — 跟 VT 沒關係，但缺了的話聽眾不知道有東西消失。
+
+Dialog 用 `role="dialog" aria-modal="true" aria-labelledby="..."` 是基本盤；focus management（dialog 開的時候 focus 移進去、關了 focus 回到 trigger）也跟 VT 沒關係但 production 必加。本 demo 為了精簡省略，實際用要加 `useRef` + `focus()` 跟 focus trap。
+
+## Gotchas
+
+- **CRITICAL：exit animation target `::view-transition-old(name)` 不是 `::view-transition-group(name)`**。group 管位置 transition、蓋掉它 dialog 會「飛到頂」；old 是淡出 snapshot、改它才對。**口訣：old 管淡出、group 管移動**。
+- **`flushSync` 一定要在 VT callback 內包 React setState**。React 預設 batch update、callback 結束才 flush → browser 截「after」snapshot 跟「before」一樣 → 沒 transition。
+- **Reverse z-index 才能 fade behind**。default DOM order 第一個在最底，dismissed toast 的 old snapshot 蓋在倖存兄弟上方，視覺上像「殘影漂在前景」。`zIndex: total - index` 一行解決。
+- **改 `viewTransitionName` 要在 startViewTransition 之前**。順序：(1) `element.style.viewTransitionName = newName`；(2) `document.startViewTransition(callback)`；(3) callback 內 unmount。順序反了 callback 跑完 name 才改、browser 已經 commit 了 transition、新 name 不生效。
+- **Conditional render + VT 必須 `flushSync` 包起來**。setState 不在 callback 內或沒 flushSync = before/after snapshot 一樣 = 沒動畫。
+- **`prefers-reduced-motion` 跟 fallback 兩件不同的事都要做**。reduced-motion = user 主動 opt-out、瀏覽器有 API 但跳過用；fallback = 瀏覽器沒 API、`document.startViewTransition` 是 `undefined`。production 兩者都要 handle。
+- **Custom `::view-transition-old(name)` keyframes 要明寫 `animation-duration`**。default 是 250ms — cancel 那種 fall+rotate+blur 跑 250ms 太快、感覺像「瞬移」而不是「掉下去」。設 600ms 才有重力感。
+- **VT 進行中再 trigger 一次 VT，行為依 browser 而異**。Chrome 會 abort 跑第二個、Safari 行為又不同。production 要嘛 `disabled` button、要嘛 guard `isTransitioning` flag。本 demo Toast 沒 guard 是為了示範簡潔。
+- **`isolation: isolate` 在 stack 容器上鎖 stacking context**。z-index 內外打架是常見坑，加這個一行讓 toast 的 z-index 只在 `<ul>` 內生效。

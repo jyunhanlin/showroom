@@ -1,0 +1,143 @@
+---
+title: Portrait Reveal (`clamp` cursor distance to filter + transform)
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/01.01-cursor-exercises
+lessonNumber: '03-advanced-interactions/01.01-cursor-exercises-portrait'
+order: 2
+summary: '把 cursor 距離同時餵給兩個 `clampedNormalize`：一個算 `filter: blur(...)`、一個算 `translateY`，距離 range 故意錯開（translateY 比 blur 提早收斂）。模糊的 SVG 在 cursor 接近時凝聚成一張臉。重點：blur 一定 clamp、永遠量 stable wrapper 不要量會動的圖、`prefers-reduced-motion` / focus state 要 snap 到完全顯現。'
+tags: [cursor, clampedNormalize, filter-blur, useRelativeMousePosition, prefers-reduced-motion]
+---
+
+import { PortraitReveal } from './portrait-reveal';
+
+## TL;DR
+
+- 同一個 cursor distance 同時餵兩個 `clampedNormalize`：一個輸出 `blur(0–20px)`、一個輸出 `translateY(0–16px)`。兩個 visual property 一起收斂，視覺感比單一屬性「活」很多。
+- 兩條 mapping 的 distance range **故意錯開**（blur 50→200、translateY 20→150）。translateY 比 blur 提早收斂 = cursor 還很遠時圖已經先「站正」、再慢慢清晰，layered feel 比同步拉一條線更像真人對焦。
+- `clampedNormalize` 而不是 `normalize`：blur 跑成負數沒意義（CSS 直接 reject）但 translateY 跑成負數會把圖往上甩出視覺位置。clamped 卡住兩端避免 cursor 走超界時兩邊一起壞。
+- 量 cursor 距離的 ref 掛在 **stable wrapper** 上，不是會 translateY 的圖本身。圖每幀位移 = bounding box 跟著動 = 距離計算不穩 = feedback loop（同 cursor-distance 教過的「不要量會動的東西」，這裡是 translate 觸發版而不是 scale 觸發版）。
+- `prefers-reduced-motion` 跟 keyboard focus 要 **snap 到完全顯現**，不能讓 reduced-motion 使用者一直看到模糊團、也不能讓 keyboard 使用者只能看到 idle blob。
+
+<DemoFrame title="Portrait Reveal — cursor 越靠近，臉越清晰">
+  <PortraitReveal />
+</DemoFrame>
+
+把游標移近卡片，模糊團聚焦成一張臉。距離 ≤ 50px 完全清晰、距離 ≥ 200px 全模糊；同時 ≤ 20px 才完全 settle、≥ 150px 維持下沉 16px。Tab 到卡片也會直接 reveal（keyboard fallback）。
+
+## 兩條 range 錯開的「層次感」
+
+```ts
+const distance = mousePosition.x !== null
+  ? Math.sqrt(mousePosition.x ** 2 + mousePosition.y ** 2)
+  : Infinity;
+
+const blurRadius = clampedNormalize(distance, 50, 200, 0, 20);
+const translateY = clampedNormalize(distance, 20, 150, 0, 16);
+```
+
+兩條 `clampedNormalize` 餵同一個 `distance`，但 input range 不同：
+
+| property | input range | output range |
+|---|---|---|
+| `blurRadius` | 50–200px | 0–20px |
+| `translateY` | 20–150px | 0–16px |
+
+差異在於 translateY 的 range 比 blur **窄且左移**。轉換成 user 體感：
+
+1. cursor 從很遠（>200px）走進來 → 兩個都還在 max → 圖既糊又下沉
+2. 走到 150px → translateY 開始收斂、blur 還滿值 → 圖開始往上回正、但仍模糊
+3. 走到 50px → blur 才開始收 → 圖此時已經幾乎站正、blur 才開始減少
+4. 走到 20px → translateY 已 0、blur 還在收尾
+5. 走到 0px → 兩個都 0 → 完全清晰
+
+這個「先回正、再對焦」的順序模仿相機對焦或眼睛聚焦的感覺。如果兩條 range 一模一樣，blur 跟 translateY 同步動，看起來像「整張圖一起做一件事」 — 比單一 property 動好但不夠生動。錯開以後是「兩件事接力」，腦補出層次。
+
+## 為什麼 blur 一定要 clamp
+
+`normalize(250, 50, 200, 0, 20)` 回 `26.67`（線性外插超出 maxOutput）；`normalize(0, 50, 200, 0, 20)` 回 `-6.67`。CSS 對 `filter: blur(-6.67px)` 直接 reject、退回沒 filter 的狀態 — cursor 越靠近圖突然「啪」一聲變超清晰，看起來像 bug。
+
+對 translateY 來說 `normalize` 的負值更糟：圖會被往上甩出 wrapper。clamped 版自動把 t 卡在 [0, 1]，cursor 不管走多遠或多近，output 都不會超出設定的兩端。
+
+## Don't change what you measure（translate 版）
+
+`useRelativeMousePosition(wrapperRef)` 的 ref 掛在 **不會動的卡片 wrapper** 上，不是裡面那張會 translateY 的 SVG container：
+
+```tsx
+<button ref={wrapperRef} type="button" className="...">  {/* stable, 不動 */}
+  <div style={{ filter: `blur(${blurRadius}px)`, transform: `translateY(${translateY}px)` }}>
+    <svg>...</svg>
+  </div>
+</button>
+```
+
+如果把 ref 掛在被 transform 的內層 div：cursor 接近 → translateY 變 0、圖往上回正 → 圖的 bounding box 跟著上移 → cursor 跟「新位置」的距離變大 → translateY 又增加 → 圖往下移 → 距離又變小 → 30Hz 自我震盪。
+
+cursor-distance 那課的 ball-in-socket 是 **scale** 觸發 feedback loop（scale 改變視覺中心點微小浮動），這課是 **translate** 觸發更直接的版本（translate 直接位移 bounding box，效應比 scale 更明顯）。同樣的修法：永遠量穩定的祖先，不要量會動的子節點。
+
+注意 `filter: blur` 本身**不會**改 bounding box（filter 不影響 layout），所以單純 blur 不會觸發 loop。是 translate 的鍋。
+
+## prefers-reduced-motion + keyboard focus
+
+```tsx
+const [isFocused, setIsFocused] = useState(false);
+const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+useEffect(() => {
+  const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+  setPrefersReducedMotion(query.matches);
+  const handle = (event: MediaQueryListEvent) => setPrefersReducedMotion(event.matches);
+  query.addEventListener('change', handle);
+  return () => query.removeEventListener('change', handle);
+}, []);
+
+// ...
+
+if (prefersReducedMotion || isFocused) {
+  blurRadius = 0;
+  translateY = 0;
+}
+```
+
+兩種使用者 cursor distance 算法救不到：
+
+1. **`prefers-reduced-motion: reduce`** — 系統設定要求「不要做 motion」。最糟的處理是「忽略 setting、繼續跑」，第二糟是「整個 effect 移除、永遠是 idle blob」（user 連那是一張臉都不知道）。正確：snap 到完全顯現，user 看到的是清晰版本，沒有 motion 也沒有資訊不對等。
+2. **Keyboard 使用者** — 沒有 cursor 可以靠近。Wrapper 用 `<button type="button">`（不是 `<div tabIndex={0}>`）— button 自帶 keyboard focus 跟 `Enter` 觸發、screen reader 也認語義；`onFocus` / `onBlur` 在 focus 時把 blur / translateY 都歸零、blur 時回到 cursor distance 邏輯。focus ring 用 `focus-visible:ring-2` 讓 keyboard tab 進來看得見 affordance、滑鼠 click 不會額外多一圈 ring。
+
+`addEventListener('change', ...)` 而不是 deprecated 的 `addListener` — Safari 14+ / Chrome 84+ 都支援。記得 cleanup `removeEventListener`。
+
+## SVG 容器整顆模糊，不要每個 child 各自模糊
+
+```tsx
+{/* ✅ */}
+<div style={{ filter: `blur(${r}px)`, transform: `translateY(${y}px)` }}>
+  <svg>
+    <circle ... />
+    <circle ... />
+    <path ... />
+  </svg>
+</div>
+
+{/* ❌ */}
+<svg>
+  <circle style={{ filter: `blur(${r}px)` }} />
+  <circle style={{ filter: `blur(${r}px)` }} />
+  <path style={{ filter: `blur(${r}px)` }} />
+</svg>
+```
+
+兩個原因：
+
+1. **Performance**：每個 SVG child 各自跑一次 filter pass，shape 數量 × 每幀。上面 demo 有 6 個 shape — 整顆模糊是 1 pass、各自模糊是 6 pass。
+2. **Paint order**：SVG `<filter>` 的 blur 會把每個 shape 各自的「blur 邊」溢出原本的 bounding box，相鄰 shape 的 blur 邊會互相疊加 — 兩個眼睛中間多出一道亮邊、嘴巴跟下巴邊界出現詭異 halo。整顆套 filter 的話 blur 是「合成圖之後」一次做的，視覺上是真正的「失焦」感而不是「每個元素分別失焦」的散焦感。
+
+`transform: translateY` 同理放在 wrapper — 子節點各自 translate 沒意義，反而跟 SVG 內部 layout 衝突。
+
+## Gotchas
+
+- **不要每個 SVG child 各自套 `filter: blur`**。perf 上 N shape = N 次 filter pass、視覺上每個 shape 的 blur 邊會互相疊出 halo。整顆 wrapper 一次模糊才對。
+- **`useRef<HTMLButtonElement>(null)` 而不是 `useRef(null)`**。`useRelativeMousePosition` 的 generic 需要 element type；TypeScript 有 inference 但 explicit 寫出來在 hover IntelliSense 上看得到 `wrapperRef.current?.getBoundingClientRect()` 而不是 `unknown`。Wrapper 換成 `<button>` 之後 element type 也要跟著從 `HTMLDivElement` 改 `HTMLButtonElement`。
+- **distance range 沒有公式、要手調**。50–200 / 20–150 是這個 demo 試出來的；換成 96px 大頭照可能要 80–250 / 30–180。原則：max range 大概是「圖最寬邊 × 2~3」、min range 是 dead zone（「靠近就完全 reveal」的 tolerance）。
+- **`prefers-reduced-motion` 要監聽 change 不只是讀一次**。user 可能在 page 開著時去 system preferences 切設定。`matchMedia(...).addEventListener('change', ...)` + cleanup。
+- **transform 套 wrapper、不要套 SVG 自己**。直接 `<svg style={{ transform }}>` 在 Safari 某些版本有 sub-pixel rounding 問題；包一層 div translate 是 stable cross-browser 寫法。
+- **keyboard focus 要 fallback 到 fully-revealed**。tabIndex + focus 把 blur / translateY 歸零，否則 keyboard user 永遠只看到 idle blob — 這是 a11y bug 不是「nice to have」。
+- **`focus-visible:` 而不是 `focus:`**。`focus-visible` 只在 keyboard 觸發 focus 時顯示 ring，滑鼠 click 不出 ring；`focus:` 兩種都顯示，user click 圖會多一圈 ring 看起來像 bug。
+- **mobile/touch 沒有 hover** — 這個 demo 在 touch device 上預設只看到 idle blob、tap 才會 trigger focus reveal。production 上要用 `(hover: none)` media query 給一個替代版本（譬如 IntersectionObserver 進畫面就 reveal）。

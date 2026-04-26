@@ -53,3 +53,24 @@ export function clampedNormalize(value: number, inMin: number, inMax: number, ou
   const t = Math.max(0, Math.min(1, normalize(value, inMin, inMax)));
   return outMin + (outMax - outMin) * t;
 }
+
+export function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+export function convertRadiansToDegrees(radians: number): number {
+  return (radians * 180) / Math.PI;
+}
+
+export function getDistanceBetweenPoints(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
+  const deltaX = p1.x - p2.x;
+  const deltaY = p1.y - p2.y;
+  return Math.sqrt(deltaX ** 2 + deltaY ** 2);
+}
+
+export function convertCartesianToPolar(x: number, y: number): [angleDegrees: number, distance: number] {
+  let angle = convertRadiansToDegrees(Math.atan2(y, x));
+  if (angle < 0) angle += 360;
+  const distance = Math.sqrt(x ** 2 + y ** 2);
+  return [angle, distance];
+}

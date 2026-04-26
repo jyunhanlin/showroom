@@ -1,0 +1,138 @@
+---
+title: Mapping Cursor to SVG (`viewBox` ↔ pixel-space)
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/03-mapping-cursor-to-svg
+lessonNumber: '03-advanced-interactions/03-mapping-cursor-to-svg'
+order: 5
+summary: 'SVG 有自己的座標系（`viewBox`），跟 `event.clientX/Y` 拿到的 pixel 不同。直接把 pixel 塞給 `cx`/`cy` 會在 viewBox 跟容器尺寸不同時整個錯位。兩個解法：(1) `normalize(relativeX, 0, bb.width, 0, VIEWBOX)` — 直觀好記；(2) `svg.createSVGPoint() → matrixTransform(svg.getScreenCTM().inverse())` — 優雅但 DOM API 偏門。多數人選 normalize。'
+tags: [svg, cursor, normalize, viewBox, getBoundingClientRect, coordinate-system]
+---
+
+import { SvgClickToDraw, SvgCursorTracker, SvgGrowingCircles } from './svg-cursor-mapping';
+
+## TL;DR
+
+- SVG 有兩套座標系：`viewBox` 是內部邏輯空間（例如 `viewBox="0 0 100 100"`），實際渲染尺寸（例如 `250 × 250`）是另一回事。`event.clientX/Y` 給你 pixel，SVG 子元素的 `cx`/`cy` 吃 viewBox 數值。直接塞會錯位。
+- 解法 1（推薦）：用 `normalize(relativeX, 0, bb.width, 0, VIEWBOX_SIZE)` 把 pixel 線性映射到 viewBox。直觀、好記、好 debug。
+- 解法 2（替代）：`svg.createSVGPoint()` + `matrixTransform(svg.getScreenCTM().inverse())`。SVG 內建的座標轉換，數學上更乾淨但 API 偏門、第二次寫又得查文件。
+- 兩者效能差不多。`normalize` 每秒 60 次也根本看不到 cost；`getScreenCTM` + matrix 是底層 C++ 路徑但可讀性低。
+- 這幾個 demo 不掛 spring smoothing — cursor 直接黏 SVG 內容時，硬要 spring 反而會「拖一拍」感覺脫節。也讓 demo 跟 motion 工具脫鉤。
+
+<DemoFrame title="Cursor → viewBox 座標轉換">
+  <SvgCursorTracker />
+</DemoFrame>
+
+游標移到 SVG 上，紅點跟著走 — 但紅點的 `cx`/`cy` 寫的是 viewBox 數字（0–100），不是 pixel。離開 SVG 時紅點消失。
+
+## viewBox 跟 pixel 是兩件事
+
+```tsx
+<svg viewBox="0 0 100 100" width="250" height="250">
+  <circle cx="50" cy="50" r="5" />
+</svg>
+```
+
+SVG 物理上 250 × 250 px，但裡面所有座標、長度、stroke-width 都吃 viewBox 單位 — `cx="50"` 是「viewBox 中央」，瀏覽器會自動把 1 viewBox unit 縮放成 2.5 px 來畫。
+
+問題出在抓 cursor。`event.clientX` 給你 viewport pixel；`getBoundingClientRect()` 給你 SVG element 的 pixel-space rect。如果直接 `<circle cx={event.clientX - bb.left} ... />`，當 SVG width = 250 px、viewBox = 100 時，cursor 移動 50 px，circle 跑了「50 viewBox unit」= 125 px = 整個畫面外。
+
+修法是兩步：(1) 把 cursor 換成 SVG 相對 pixel；(2) 把那個 pixel 線性映射到 viewBox。
+
+```ts
+const bb = svg.getBoundingClientRect();
+const relativeX = event.clientX - bb.left;       // pixel space
+const relativeY = event.clientY - bb.top;
+const x = normalize(relativeX, 0, bb.width, 0, VIEWBOX_SIZE);  // → viewBox space
+const y = normalize(relativeY, 0, bb.height, 0, VIEWBOX_SIZE);
+```
+
+`normalize(value, inMin, inMax, outMin, outMax)` 就是線性比例：input range 是 `[0, bb.width]`、output range 是 `[0, VIEWBOX_SIZE]`。
+
+## 替代解法：matrixTransform
+
+SVG DOM 內建 `getScreenCTM()`（Current Transform Matrix），給你「screen → SVG 內部空間」的反矩陣後拿來變換一個點：
+
+```ts
+const point = svg.createSVGPoint();
+point.x = event.clientX;
+point.y = event.clientY;
+const ctm = svg.getScreenCTM();
+if (!ctm) return;
+const { x, y } = point.matrixTransform(ctm.inverse());
+```
+
+優點：自動處理 viewBox + 任何 transform（如果 SVG 本身被 CSS scale 過）、不用拿 bb、數學上精準。缺點：API 太偏門，三個月後重看自己會懵；多數人記不住 `createSVGPoint` 跟 `getScreenCTM` 的存在；且 `getScreenCTM` 可能回 null，每次都要 narrow。
+
+兩者效能差不多 — `normalize` 是兩個減法 + 兩個除法，`matrixTransform` 是底層 C++ 矩陣乘法。在 60Hz pointermove 上根本量不到差。挑可讀性贏的：用 `normalize`。
+
+## 16 圈隨距離脹縮
+
+<DemoFrame title="4×4 grid — cursor 越近，圈越大">
+  <SvgGrowingCircles />
+</DemoFrame>
+
+每個 circle 跟 cursor 算距離，把距離塞進 `clampedNormalize` 算 `r`：
+
+```tsx
+const distance = getDistanceBetweenPoints(cursor, { x: cx, y: cy });
+const r = clampedNormalize(distance, 0, 100, MAX_RADIUS, MIN_RADIUS);
+// 距離 0 → r = 18（大）
+// 距離 ≥ 100 → r = 4（小）
+```
+
+注意 `outMin=18`、`outMax=4` 是**反過來**寫 — distance 越小希望 r 越大，所以 input min 對應 output max。`clampedNormalize` 自動處理 reversed range，不用自己做減法。
+
+idle state（cursor 還沒進過 SVG）給 `cursor = null`、距離當 `Infinity`，`clampedNormalize` 直接卡在 outMax = 4，所有圈都是小的 — 第一眼就看得到，而不是空畫面。
+
+### 16 顆 OK，再多就換 canvas
+
+每個 circle 一個 React node + 一次 distance 計算。16 個沒事。如果是幾百顆同時動 → DOM update cost 累積、reflow 開始拖；那種規模就改用 canvas 一個 frame 全部重畫。SVG 的 sweet spot 是「少量 + 想要 stylable / interactive 個別元素」。
+
+## Click to draw
+
+<DemoFrame title="點哪畫哪 — polyline 連起所有點">
+  <SvgClickToDraw />
+</DemoFrame>
+
+```tsx
+<svg viewBox="0 0 400 300" onClick={handleClick}>
+  {points.length >= 2 && (
+    <polyline
+      points={points.map((p) => `${p.x},${p.y}`).join(' ')}
+      fill="none"
+      stroke="..."
+    />
+  )}
+  {points.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="5" />)}
+</svg>
+```
+
+兩個重點：
+
+**Polyline 寫在 circles 之前**。SVG 沒有 `z-index`（嚴格說有，但 browser 支援不齊），**DOM 順序 = 繪製順序**，後寫的蓋前寫的。想要線在底、點在上 → 線先寫。換順序你會看到線的端點蓋住圓點一個 pixel 的小切角。
+
+**onClick 還是要 normalize**。`event.nativeEvent.offsetX/Y` 看起來像「SVG 內部座標」其實不是 — `offsetX/Y` 是相對於 target element 的 **pixel space**（跟 `clientX - bb.left` 等價，差別只在 cross-browser 的一些 edge case）。viewBox 跟 pixel 不一致時還是要過一次 `normalize`。
+
+### 為什麼不用 vanilla `createElement`
+
+如果離開 React 自己加 SVG node，**一定**要用 `createElementNS`：
+
+```ts
+// ❌ 沒效，建出來的是 HTMLUnknownElement，畫不出來
+const c = document.createElement('circle');
+
+// ✅
+const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+```
+
+SVG 是 XML namespace 的元素，`document.createElement` 預設給 HTML namespace。React JSX 自動知道在 `<svg>` 子層用 SVG namespace，閃掉這個坑。
+
+## Gotchas
+
+- **viewBox / pixel mismatch 是核心**。`viewBox="0 0 100 100"` 渲染 250 × 250 px → 1 unit = 2.5 px。pixel 數字直接塞 `cx`/`cy` 就是錯位 2.5 倍。永遠先 `normalize(relativePixel, 0, bb.width, 0, VIEWBOX_SIZE)`。
+- **`normalize(value, inMin, inMax, outMin, outMax)` 參數順序**。容易把 `inMax` 跟 `outMin` 寫反 — 顯然是 outMin 該在 outMax 前面，但會疑惑 input range 是不是寫對。背口訣：先 input 後 output、各自 min 在前。
+- **`createElementNS` 不是 `createElement`**。vanilla 自加 SVG node 時 `document.createElement('circle')` 會吐 `HTMLUnknownElement`、畫不出來、也不報錯。React JSX 自動處理 namespace 不會踩。
+- **DOM order = paint order**。SVG 沒實作 z-index（CSS spec 允許但 browser 支援不齊全）。線在底要寫前面，點在上要寫後面。順序錯了視覺一樣亂。
+- **`offsetX/Y` 是 pixel space 不是 viewBox space**。看名字像「SVG 內部 offset」，實際是相對 target 的 pixel offset。還是要過 `normalize`。
+- **`getBoundingClientRect()` 對 SVG 也是 pixel space**。SVG 是 DOM element，bb 給的是物理像素位置，跟 viewBox 完全無關 — 所以才需要 normalize 接起來。
+- **viewBox aspect ratio 對不上 container 會出現 letterbox**。`viewBox="0 0 100 100"` 放進 `200 × 100` 容器 → 預設 `preserveAspectRatio="xMidYMid meet"` 會置中縮放 + 留白。容器寬高比決定畫面是不是滿版，所以 viewBox ratio 跟容器 ratio 對齊比較好對 cursor。
+- **getScreenCTM 可能回 null**。如果 SVG 還沒掛上 layout 樹（initial render 前一瞬）`getScreenCTM()` 可能是 null。要選用這個解法時必加 narrow，而 `normalize` 路徑只要 bb 有值就好，少一個 edge case。

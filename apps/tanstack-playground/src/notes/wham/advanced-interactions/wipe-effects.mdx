@@ -1,0 +1,192 @@
+---
+title: 'Wipe Effects (`clip-path: polygon()` transitions)'
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/04-wipe-effects
+lessonNumber: '03-advanced-interactions/04-wipe-effects'
+order: 6
+summary: '`clip-path: polygon()` 點對點 interpolate = 雨刷式 wipe reveal。三個踩雷：(1) intangible pixels — 被裁掉的區域不接 pointer events，`:hover` 一定要拉到 parent `<button>` 否則永遠觸發不到；(2) doom flicker — visible-by-default + hover-hides 變 cursor → 縮 → 沒 hover → 長 → cursor 又上 → loop，跟 cursor-distance「不要量會動的東西」同根；(3) drop-shadow paint order — filter 在 clip-path 之前算，shadow 也被切，把 filter 拉到 parent wrapper。'
+tags: [clip-path, polygon, wipe-effects, intangible-pixels, drop-shadow, prefers-reduced-motion]
+---
+
+import { LinearGraphReveal, TextWipe, WipeRevealCards } from './wipe-effects';
+
+## TL;DR
+
+- `clip-path: polygon(p1, p2, ..., pN)` 把 element 切成任意形狀。CSS 在 transition `clip-path` 時 **點對點 interpolate** — `polygon(0% 0%, ...)` 的第一個點跟下一個 state 的第一個點配對 tween，**from / to 點數必須一樣**否則整個動畫退化成瞬切。
+- 0-height polygon trick：`polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%)` — 四個點全擠在底部 = 完全看不到。把前兩個點搬到 `0% 0%` / `100% 0%` 就 wipe-reveal 了，整個 element 從下往上「拉開」。
+- **Intangible pixels**：被 clip 掉的區域不接 pointer events。如果元素 idle 是被 clip 全藏起來的、又把 `:hover` 寫在它自己身上 → cursor 永遠摸不到、永遠觸發不到。修法：把 `:hover` 拉到 stable parent，最好直接用 `<button>`（順便拿 keyboard a11y / focus-visible）。
+- **Doom flicker**：visible-by-default + `:hover` 縮起來的版本，cursor 一進去 → 元素縮 → cursor 不再 hover → 元素長回 → cursor 又上面 → 30Hz loop。同 cursor-distance「不要量會被自己影響的東西」一樣的根。修法也一樣：`:hover` 拉到 parent。
+- **Drop-shadow paint order**：browser 套 `filter` **在** `clip-path` **之前**，shadow 是對 *clipped* 形狀生的而非原始 element 的方框 → shadow 也跟著被切掉。修法是把 `filter: drop-shadow(...)` 拉到 **parent wrapper** 上，shadow 對著未被 clip 的 wrapper 生、不會被 clip。
+
+<DemoFrame title="Wipe-reveal cards — hover/focus 從下往上拉開">
+  <WipeRevealCards />
+</DemoFrame>
+
+四張卡片，每張一個 time-of-day 配色（dawn/noon/dusk/night）。Hover 或 keyboard focus 任一張卡片：天空/建築 silhouette 從底部 wipe 上來、整張同時 `scale(1.05)` 微抬起。注意 drop-shadow 整段 wipe 都在 — 因為 shadow 掛在外層 `<button>` 上，不是被 clip 的內層。
+
+## `clip-path: polygon()` 入門
+
+`clip-path: polygon(...)` 接一連串 `x y` 座標點（`%` 或 `px`），browser 把這些點順序連起來 + 自動閉合成 polygon，polygon 內部留下、外部裁掉。
+
+```css
+.box {
+  /* 矩形：左上 → 右上 → 右下 → 左下 */
+  clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+}
+```
+
+CSS transition `clip-path` 時的 interpolation 規則：**點對點配對**。`from` 第一個點跟 `to` 第一個點 tween、第二個跟第二個、依此類推。因此：
+
+```css
+/* ❌ from 4 點、to 5 點 → browser 不知道怎麼配對，動畫退成瞬切 */
+.from { clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); }
+.to   { clip-path: polygon(0% 0%, 50% 0%, 100% 0%, 100% 100%, 0% 100%); }
+
+/* ✅ 兩邊都 4 點，可以平滑 tween */
+.from { clip-path: polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%); }
+.to   { clip-path: polygon(0% 0%,   100% 0%,   100% 100%, 0% 100%); }
+```
+
+## 0-height polygon trick
+
+```css
+/* idle：四個點全在底部 → height 為 0 → 看不到 */
+.skyline {
+  clip-path: polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%);
+}
+
+/* hover 時前兩個點移到頂部 → 整個 element 從下往上「拉開」 */
+button:hover .skyline {
+  clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+}
+```
+
+四個點配對 tween：`0% 100% → 0% 0%`（左上點往上爬）、`100% 100% → 100% 0%`（右上點往上爬）、後兩個維持在底部不動。視覺結果：上邊從底部往頂部移動，element 從 0 高度長到全高。
+
+要 wipe 左→右只是換軸：`polygon(0 0, 0 0, 0 100%, 0 100%) → polygon(0 0, 100% 0, 100% 100%, 0 100%)`。
+
+<DemoFrame title="Text wipe — 左 → 右 reveal">
+  <TextWipe />
+</DemoFrame>
+
+## Intangible pixels — 沒看到的不接事件
+
+被 clip 掉的區域不接 pointer events。直覺寫法：
+
+```css
+/* ❌ 永遠觸發不到 */
+.skyline {
+  clip-path: polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%);  /* idle 全裁 */
+}
+.skyline:hover {
+  clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);  /* 想 reveal */
+}
+```
+
+idle 狀態 `.skyline` 整個是 0 高度 = 沒像素 = cursor 永遠進不去 = `:hover` 永遠不觸發。
+
+修法：**把 `:hover` 拉到一個始終可見的 parent**，最好直接用 `<button>` — 順便拿到 keyboard `:focus-visible` 跟 screen reader 語意：
+
+```tsx
+<button className="group">
+  <div className="clip-... group-hover:clip-... group-focus-visible:clip-..." />
+</button>
+```
+
+`<button>` 有自己的尺寸（label 文字 + image area）永遠可見，`:hover` 掛在它身上沒問題、用 Tailwind 的 `group-hover` / `group-focus-visible` 串到內層 clipped 元素。
+
+## Doom flicker — visible-by-default 版本的同樣陷阱
+
+反過來的 case：idle 時看得到、`:hover` 時想把它縮起來。
+
+```css
+/* ❌ doom flicker */
+.skyline {
+  clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+}
+.skyline:hover {
+  clip-path: polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%);
+}
+```
+
+- cursor 進入 `.skyline` → `:hover` 觸發 → element 開始縮
+- cursor 還在原本的 viewport 位置，但 `.skyline` 已經縮到那個位置之外 → `:hover` 不再 match
+- element 長回來 → cursor 又在它上面了 → `:hover` 再次 match → 又縮…
+
+跟 cursor-distance 教過的「不要量會被自己影響的東西」是同一個 root cause — measurement target 跟 visual effect 形成 feedback loop。實測這個 flicker 可達 30Hz，**直接踩 WCAG「3 Hz 以上 flicker」的光敏癲癇 threshold**。
+
+修法跟那篇一樣：**把 `:hover` 拉到 stable parent**。Parent 的 bounding box 不被 clip-path 影響、cursor 進去就一直在裡面、loop 斷掉。
+
+## Drop-shadow paint order — filter 比 clip-path 先
+
+```css
+/* ❌ shadow 跟著被 clip 掉 */
+.card {
+  clip-path: polygon(...);
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.2));
+}
+```
+
+CSS painting model：`filter` 在 `clip-path` **之前** apply。`drop-shadow` 從**已經被 clip 的形狀**生 shadow — idle 時 element 是 0 高度的線、shadow 也只是一條線；reveal 過程中 shadow 跟著 polygon 邊長。整個視覺感是「沒 shadow」。
+
+修法：把 `filter` 拉到 **wrapper parent**，shadow 對著未被 clip 的 wrapper（永遠是完整 rect）生：
+
+```tsx
+{/* parent: 永遠是完整的 button 形狀，shadow 對它生 */}
+<button style={{ filter: 'drop-shadow(0 6px 14px rgba(0, 0, 0, 0.18))' }}>
+  {/* child: clip-path 在這層 */}
+  <div style={{ clipPath: 'polygon(...)' }}>
+    <Skyline />
+  </div>
+</button>
+```
+
+順便注意：`drop-shadow` 在 iOS Safari 跟 transform / clip-path 組合下偶爾會有 z-fighting 或 shadow 鬼影，遇到時改用 `box-shadow` on parent（`box-shadow` 永遠是 element 矩形 box 的 shadow，跟 clip-path 完全無關）。
+
+## 多屬性組合：clip-path + transform，不同曲線
+
+Card hover 時想要：(a) skyline reveal，(b) 整張卡微抬。兩條動畫**用不同的 Bezier 曲線**做出 layered feel — reveal 用 ease-out 後段慢、translate/scale 用 ease-in-out 對稱。
+
+```css
+.card-image {
+  transition:
+    clip-path 700ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
+}
+```
+
+`transition` 用 comma 分開個別屬性、各自獨立 duration / curve。寫成 `transition: all 700ms ease` 會強迫所有屬性同曲線同時長 — 動起來像「整張卡同步移動」、少了 layered 質感。
+
+## Cursor-driven clip-path 一定要 spring
+
+<DemoFrame title="Linear-style cursor reveal — 滑過去畫面才出現">
+  <LinearGraphReveal />
+</DemoFrame>
+
+把 cursor 移到 graph 上，數據從左到右跟著 cursor 位置 reveal。
+
+直接把 cursor X 算出來的 percentage 接生 `clipPath`（例如 `polygon(0 0, 42% 0, 42% 100%, 0 100%)`）會抖 — pointermove 一秒幾十次、每次值微跳，graph 的右邊緣像在抽搐。修法：**raw cursor → motion `useSpring` → percentage**：
+
+```ts
+const motionPct = useMotionValue(0);
+const springPct = useSpring(motionPct, { stiffness: 140, damping: 22, mass: 0.8 });
+const clipPath = useTransform(springPct, (p) => `polygon(0 0, ${p}% 0, ${p}% 100%, 0 100%)`);
+
+useEffect(() => { motionPct.set(targetPct); }, [targetPct, motionPct]);
+```
+
+Spring 把 raw cursor 的高頻抖動吸掉、graph 右邊緣有「跟著 cursor，但帶點重量感」的 inertia — 跟 Linear.app 行銷頁那條線的手感一樣。`stiffness: 140 / damping: 22` 是中等彈性 + 中等阻尼、收斂大概 250ms。stiff 拉高反應更快但抖動回來；damp 拉高更慢但更穩，按品味調。
+
+## Browser support
+
+`clip-path: polygon()` 從 2017 後所有 evergreen browser 都支援、IE 11 沒救但 IE 11 已死。`-webkit-clip-path` prefix 在 Safari 還是建議寫一下（PostCSS autoprefixer 會自動加，手寫沒裝 autoprefixer 的話注意）。`transition` clip-path 在所有瀏覽器都支援，`useSpring` driven 的 motion clip-path 也都正常。
+
+## Gotchas
+
+- **`<button>` 包整個 hit area，`:hover` 拉到 button 上**。Intangible pixels（被 clip 的區域不接 pointer events）+ doom flicker（visible-by-default 版的 feedback loop）是同一個修法：parent 不被 clip-path 影響的東西當 hover host。順便拿 `:focus-visible` keyboard a11y。
+- **drop-shadow 拉到 parent wrapper，不要跟 clip-path 同一層**。CSS paint order：filter 在 clip-path 之前，shadow 從已 clip 的形狀生 = 也被切掉。Parent wrapper 永遠是完整方框、shadow 對它生。
+- **clip-path polygon from / to 點數一定要一樣**。4 點 → 4 點可以 tween；4 點 → 5 點直接退化成瞬切（browser 沒有 polygon 點插入規則）。寫複雜 wipe 時 idle / target 兩邊都先湊到同點數，多餘的點放在不影響視覺的位置。
+- **`transition` 用 comma 分開、不要 `transition: all`**。多屬性組合（clip-path + transform）用不同 duration / Bezier 才有 layered feel；`all` 強迫所有屬性同步、動起來像板塊在移動而不是 layered motion。
+- **iOS Safari 的 clip-path + drop-shadow 組合偶爾會 z-fighting**。Shadow 鬼影 / 邊緣鋸齒。遇到時 fallback 到 parent 的 `box-shadow`（永遠是 element rect 的 shadow，跟 clip-path 完全 decouple）。
+- **`prefers-reduced-motion: reduce` 要 snap-to-revealed**。Wipe-reveal 對 motion-sensitive 使用者會誘發症狀。Reduced-motion 時 skip animation、直接顯示 final state（hover/focus 仍可改 visual 但不要 animate transition）。Text wipe demo 的 `initial={prefersReducedMotion ? false : ...}` 是這個 pattern。
+- **Cursor-driven clip-path 一定要 spring**。pointermove 高頻 + clip-path 直接套 raw cursor → 抖到不能看。`useMotionValue` + `useSpring` + `useTransform` 是 motion 的標準 spring smoothing 三件套，stiffness/damping 按品味調。
+- **clip-path 是 paint-only，不會影響 layout**。被 clip 掉的部分仍佔原本 box size、parent flex / grid 不會 reflow。要真正「不佔位」的 wipe 還要搭配 `display: none` / `height: 0`，但那就無法 transition。Trade-off：clip-path 動得起來但留 layout 空間；`height: 0` 不留空間但動畫複雜（內容高度未知時）。

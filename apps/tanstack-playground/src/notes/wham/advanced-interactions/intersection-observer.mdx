@@ -1,0 +1,161 @@
+---
+title: Scroll-triggered Animations (`IntersectionObserver`)
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/05.04-scroll-triggered-animations
+lessonNumber: '03-advanced-interactions/05.04-scroll-triggered-animations'
+order: 8
+summary: 'Scroll-driven 是「scroll 位置 = 動畫進度」（scrubbing），scroll-triggered 是「scroll 過 threshold → 動畫整段播一次」。後者目前只能靠 `IntersectionObserver`，搭 `threshold` 跟 `rootMargin` 兩個 knob 微調觸發點。整頁捲動百分比這種沒綁特定元素的需求 → 退回 `scroll` event listener + `throttle`。'
+tags: [intersection-observer, scroll-triggered, threshold, rootMargin, throttle]
+---
+
+import { FadeInOnScroll, ScrollPercentageDemo } from './intersection-observer';
+
+## TL;DR
+
+- **Scroll-driven**（`animation-timeline`）= scroll 位置直接綁定動畫進度，user 倒著滑動畫倒著播。閱讀進度條那種。
+- **Scroll-triggered**（`IntersectionObserver`）= 元素穿越 threshold 那一刻觸發動畫，動畫接著用自己 duration 播完，跟 scroll 後續位置無關。fade-in、彈窗 mascot 那種「fire and forget」choreography。
+- 同一筆 scroll 資料、兩個截然不同的體感。挑哪個的判準：「scroll 本身就是動畫」→ driven；「動畫該完整播一次、有自己節奏」→ triggered。
+- `IntersectionObserver` 的兩個 knob：`threshold`（0–1，元素多少比例進 viewport 才算 intersecting，預設 0 = 一個 pixel 就算）、`rootMargin`（縮放比較矩形，`-32px` 把 viewport 往內縮 32px → 元素得超過邊界 32px 才觸發）。
+- 「整頁滑了多少 %」這種沒綁特定元素的需求 IntersectionObserver 做不來 → 退回 `window.addEventListener('scroll', throttle(fn, 100))`。一秒 10 次更新 user 看不出抖動，省一個數量級的 listener cost。
+
+<DemoFrame title="Fade-in on scroll — IntersectionObserver">
+  <FadeInOnScroll />
+</DemoFrame>
+
+往下滑這個 280px 高的 scroller，每個 box 在「半個 box 進視窗」那一刻 fade in。往回滑出視窗會 reset 回不可見 — 這是 `isIntersecting` 的 binary 行為，不是 scrubbing。
+
+## scroll-driven 跟 scroll-triggered 的差別
+
+兩者都吃 scroll 位置這份輸入訊號，輸出體感差很遠：
+
+- **scroll-driven**：scroll 是動畫的 timeline。User 滑 30% → 動畫播到 30% frame、停下。倒滑 → 倒播。reading progress bar、parallax hero、scroll-snap photo gallery 這類「scroll 位置 = 該秀的內容位置」的場景。CSS `animation-timeline: scroll()` / `view()` 是 native 解。
+- **scroll-triggered**：scroll 是事件源、動畫播自己的。User 滑到 box 進視窗那刻觸發 fade-in，接下來 600ms 跟後續 scroll 完全脫鉤、user 倒滑也不會倒著 fade。彈窗 mascot、stagger 進場、CTA 反白都屬這類。
+
+挑判準一句話：「動畫該完整跑完還是該被 scrub 控制？」整段播完 → triggered；被 scrub → driven。
+
+## IntersectionObserver 基本用法
+
+```ts
+const observer = new IntersectionObserver(
+  (entries) => {
+    const [entry] = entries;
+    if (entry.isIntersecting) {
+      box.classList.add('visible');
+    } else {
+      box.classList.remove('visible');
+    }
+  },
+  { threshold: 0.5, rootMargin: '-32px' },
+);
+observer.observe(box);
+```
+
+幾個重點：
+
+- callback 接到的是 `entries` array，不是單一 entry。一個 observer 可同時 observe 多個元素，多個元素同時 intersect 時 entries 一次來。寫 `entries.forEach(entry => ...)` 才是通用寫法，這個 demo 為了示範方便用 destructure。
+- callback 是 batched + async。瀏覽器自己決定何時 dispatch、不會每個 scroll frame 都 call、不影響 main thread frame budget — 這是 IntersectionObserver 比手寫 `getBoundingClientRect` + scroll listener 強的地方。
+- cleanup：`observer.disconnect()` 一次拔掉所有 observe；也可 `observer.unobserve(target)` 拔單一個。React 裡放在 useEffect cleanup。
+
+## `threshold` 跟 `rootMargin`
+
+```ts
+{ threshold: 0.5, rootMargin: '-32px' }
+```
+
+- `threshold`：0–1 之間，元素多少比例進 root rectangle 才算 intersecting。`0` = 一個 pixel 入鏡就觸發（預設）；`0.5` = 一半入鏡才觸發；`1` = 整個元素都得在 root 內才觸發。也可給 array `[0, 0.25, 0.5, 0.75, 1]` 在多個 ratio 各觸發一次（拿 `entry.intersectionRatio` 做 fine-grained 控制）。
+- `rootMargin`：CSS margin shorthand 字串（`'-32px'`、`'10% 0px -50% 0px'`）。**正值放大** root rectangle、**負值縮小**。`-32px` = root 四邊各往內縮 32px → 元素得超過實際 viewport 邊界 32px 才開始觸發 intersecting；`50px 0px` = top/bottom 各延伸 50px → 元素「即將」進視窗時就提前觸發。
+
+兩個合用很彈性：`threshold: 0.5, rootMargin: '-100px 0px'` = 元素進視窗 100px 後且半個元素入鏡才 fade in，視覺上「box 走到 viewport 中段才被點亮」。
+
+## `rootMargin` 在 iframe 裡要 `root: document`
+
+course playground 跑在 iframe，預設 root（implicit viewport）跟 iframe 的真實 viewport 不一致 → `rootMargin` 行為怪、有時根本不觸發。workaround：
+
+```ts
+new IntersectionObserver(callback, {
+  threshold: 0.5,
+  rootMargin: '-32px',
+  root: document, // ← iframe workaround
+});
+```
+
+正常 page 裡 `root: null`（預設）就好，不用碰。這個坑遇到才知道，遇到就改。
+
+## React hook 包裝
+
+```tsx
+function useIntersectionObserver(ref, options = {}) {
+  const [isIntersecting, setIsIntersecting] = useState(false);
+  const { threshold, rootMargin, root } = options;
+
+  useEffect(() => {
+    const target = ref.current;
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      (entries) => setIsIntersecting(entries[0].isIntersecting),
+      { threshold, rootMargin, root: root ?? null },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [ref, threshold, rootMargin, root]);
+
+  return isIntersecting;
+}
+```
+
+呼叫端：
+
+```tsx
+const ref = useRef(null);
+const isVisible = useIntersectionObserver(ref, { threshold: 0.5 });
+return <div ref={ref} style={{ opacity: isVisible ? 1 : 0 }} />;
+```
+
+兩個常見變形：
+
+- 只 fire 一次（fade-in 不要回 reset）：在 callback 裡 `if (entry.isIntersecting) { setHasShown(true); observer.unobserve(target); }`。一旦觸發就拔掉 observer 不再 update。
+- 多元素一個 observer：把 observer 升到 ref 外、觀察一個 ref array。State 用 `Map<Element, boolean>` 而不是 single boolean。元素少（< 100 個）的話多個 hook 各自一個 observer 也沒差，瀏覽器自己會優化。
+
+## 整頁 scroll 百分比 → 退回 scroll listener + throttle
+
+IntersectionObserver 的設計是「某個元素跟 root 的相對關係」。整頁滑了百分之多少這種沒綁特定元素的需求做不到，老實點退回 scroll event listener：
+
+<DemoFrame title="Scroll percentage progress bar — throttled scroll listener">
+  <ScrollPercentageDemo />
+</DemoFrame>
+
+```ts
+const handleScroll = throttle(() => {
+  const totalHeight = document.body.scrollHeight;
+  const scrollPercentage = (window.scrollY / (totalHeight - innerHeight)) * 100;
+  setProgress(scrollPercentage);
+}, 100);
+window.addEventListener('scroll', handleScroll);
+```
+
+`throttle(fn, 100)` = 一秒最多 10 次 update。user 看不出 100ms 抖動、frame budget 也夠。沒 throttle 在 trackpad 一秒可灌 100+ 次 scroll event，純算數字不貴但 React re-render + layout / paint 累加會吃掉 frame budget。
+
+注意這個 demo 是 scroll-driven 的 JS 版 — 跟 `animation-timeline: scroll()` 同樣輸出，差別是 CSS 版跑在 compositor / 不阻塞 main thread。能用 CSS 版就用，老瀏覽器或要在 React state 裡用百分比做更多事才退回 JS。
+
+## 未來：`animation-trigger`
+
+CSS 規格在路上的 `animation-trigger` property 會把 scroll-triggered 也 native 化，類似：
+
+```css
+.box {
+  animation: fade-in 600ms forwards;
+  animation-trigger: view() once; /* 進視窗一次觸發、跟 scroll 解耦 */
+}
+```
+
+落地後 IntersectionObserver 在「單純 fade-in / stagger」這類 use case 會變多餘。但複雜邏輯（observe 多個元素計算、`intersectionRatio` 連續值、跟 React state 綁）IntersectionObserver 仍然在。
+
+## Gotchas
+
+- **iframe 裡 `rootMargin` 表現詭異 → 顯式 `root: document`**。正常 page 不用碰；遇到不觸發或觸發位置怪先試這個。
+- **`threshold` 邊界要分清楚**：`0` 是一個 pixel 入鏡就觸發（預設），`1` 是整個元素都進 root 才觸發。多數 fade-in 想要 `0.1`–`0.5` 之間的中間值。
+- **observer 一定要 cleanup**。useEffect 裡 `return () => observer.disconnect()`；不 cleanup 在 React Strict Mode 會 leak 一個多餘 observer，元素 unmount 後也繼續算 intersection。「只觸發一次」的場景 trigger 完直接 `observer.unobserve(target)`。
+- **多元素 → 一個 observer 還是多個 observer？** 元素少（< 100 個）、各自獨立 → 多個 hook、多個 observer 寫起來最直接、瀏覽器會 batch。元素多（一頁幾百張卡片做 lazy load）→ 升到一個 observer + `Map<Element, state>`，省掉 N 份 observer instance。
+- **`entries` 是 array**。observe 多個元素時 callback 一次拿到所有 changed entries → `entries.forEach((entry) => ...)`。Demo 為了簡單 destructure `[entry] = entries` 是因為一個 observer 對一個 target；多 target 共用 observer 時這寫法會吃掉其他 entry。
+- **scroll event 要 throttle 不是 debounce**。debounce 在 user 停止滑動才 fire，bar 滑動中完全不更新 = 體感「卡住」。throttle 是「最多每 100ms fire 一次」，滑動中持續更新只是頻率上限被夾住。pointermove 同理（前一課 `cursor-distance` 的 throttle 也是相同概念）。
+- **reduced-motion**。fade-in 對暈眩患者不友善，production 要 `if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;` skip 整段 transform，或退成「opacity 直接 1」沒有 translateY。Demo 為示範方便沒加。
+- **`entry.intersectionRatio` 給連續值**。binary `isIntersecting` 不夠時（想做「越進視窗越不透明」這種連續映射）用 `threshold: [0, 0.1, 0.2, ..., 1]` 拿到多個 ratio sample，跟 `clampedNormalize` 搭配做 fine-grained 控制。

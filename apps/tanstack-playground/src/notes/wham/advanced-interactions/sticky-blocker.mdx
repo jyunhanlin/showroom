@@ -1,0 +1,141 @@
+---
+title: Sticky Blocker (per-section sticky bg under transparent header)
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/06-sticky-trick
+lessonNumber: '03-advanced-interactions/06-sticky-trick'
+order: 10
+summary: '純 CSS 解「sticky header 背景隨 scrolled section 切換」：header 自己透明、每個 section 第一個 child 放一個 `position: sticky; top: 0; height: header-height` 的 blocker、背景色等於 section 背景。Blocker 被 parent scroll 邊界 clamp，section 滑出去 blocker 也跟著退場、下一個 section 的 blocker 接力 — 像不動其實是兩顆色塊在 handoff。代價：每個 section 要留 header 高度的空間。'
+tags: [css, sticky, scroll, intersection-observer-alternative, animation-timeline]
+---
+
+import { StickyBlockerDemo } from './sticky-blocker';
+
+## TL;DR
+
+- 透明 header + 每個 section 內第一個 child 放一個 `position: sticky; top: 0; height: header-height` 的 blocker，blocker 背景色 = section 背景色。視覺上 header 「跟著 scrolled section 換背景」、實際上是兩顆 blocker 在 handoff。
+- Blocker 被 parent 的 scroll 邊界 clamp 住：section 滑出去時 blocker 跟著退場、下一個 section 的 blocker 接力。每個 section 只要管自己的顏色，沒有跨元件協調。
+- Header 用 `position: fixed`（或 sticky + 負 margin 把後面內容拉上來），不能單純 `position: sticky` — sticky 會吃 layout 空間、把 hero 推下去 header height 的高度。
+- 限制：每個 section 需要至少 header height 的「上方留白」給 blocker。設計緊湊（hero 直接用 hero image 撐滿）就沒空間放 blocker，這時候只能 fallback IntersectionObserver。
+- `animation-timeline: scroll(...)` 是現代等價解（CSS 直接綁 scroll 進度到任何 property），但本身有 gotchas — Josh 課堂提到 theme-toggle 切色時不會 transition 因為 animation-timeline 接管那個 property。
+
+<DemoFrame title="Sticky blocker — header 背景隨 section 切換">
+  <StickyBlockerDemo />
+</DemoFrame>
+
+往下捲：藍色 hero 滑出時、白色 main content 的 blocker 接上來，header 文字 (`whimsical.dev`) 從頭到尾都在但「身後的底色」從淺藍變白，沒有 IntersectionObserver、沒有 JS。
+
+## 核心招式
+
+```html
+<header class="fixed top-0 h-12">whimsical.dev</header>
+
+<section class="hero">
+  <div class="blocker"></div>   <!-- sticky, 48px, light-blue -->
+  <h1>...</h1>
+</section>
+
+<section class="main">
+  <div class="blocker"></div>   <!-- sticky, 48px, white -->
+  <article>...</article>
+</section>
+```
+
+```css
+header { background: transparent; }   /* 關鍵 */
+.blocker { position: sticky; top: 0; height: 48px; }
+.hero .blocker { background: hsl(210deg 80% 85%); }
+.main .blocker { background: white; }
+```
+
+Header 是透明的 — user 看到的「header 背景」其實是 blocker 的顏色透過 header 的透明區域露出來。每個 section 自己塞一個 blocker：
+
+1. 初始狀態 hero 的 blocker 卡在 `top: 0`，header 透明 → header 後面是淺藍。
+2. user 往下捲，hero 整段滑上去，hero 的 blocker 被 parent (`.hero`) scroll 邊界 clamp — 滑到 hero section bottom 之後就跟著被推出 viewport。
+3. 同一時間 main 的 blocker 進場、卡在 `top: 0`，header 透明 → header 後面變白。
+
+Handoff 是 sticky positioning 的 native 行為，不是 JS 寫的「切換邏輯」。
+
+## 為什麼 header 用 fixed 不用 sticky
+
+直覺寫法：header 也用 `position: sticky; top: 0`。但 sticky 元素**會吃 layout 空間** — header 高 48px 就在 document flow 裡占 48px、後面的 hero 被推下去 48px。視覺上 hero 開頭被 header 蓋掉 48px、blocker 又疊在 header 後面，整個 stacking 亂掉。
+
+兩個修法：
+
+- **`position: fixed`**：完全脫離 flow，hero 從 top: 0 開始，blocker 從 hero 第一行開始 sticky。這是課堂主推。
+- **`position: sticky` + 負 margin**：在 header 加 `margin-bottom: -48px`、把後面內容拉上來 48px，效果等同 fixed。這課介意 sticky 跟 z-index/scroll context 互動的話可以用。
+
+DemoFrame 裡的 demo 用第二種（sticky + 負 margin），因為 demo 的 scroll container 是有界的 (`overflow-y-auto`)，`fixed` 會 escape 到整個 viewport 而不是 demo card — sticky 才能 clamp 在 scroll container 裡。
+
+## Blocker 必須是 section 第一個 child
+
+```html
+<!-- ✅ -->
+<section class="hero">
+  <div class="blocker"></div>
+  <h1>Title</h1>
+</section>
+
+<!-- ❌ -->
+<section class="hero">
+  <h1>Title</h1>
+  <div class="blocker"></div>   <!-- 已經被 h1 推下去 48px+ -->
+</section>
+```
+
+Sticky 的 `top: 0` 是相對於 scroll container 而非 parent — 但 sticky 元素本身**初始位置**還是看 DOM order。Blocker 不是第一個 child 的話，初始位置已經在 section 中段，往上 stuck 到 top: 0 那段過程 user 看得到 blocker 從中間「升上來」的怪 enter。
+
+DOM order 上放第一個、初始位置就在 section 頂端、stuck 到 top: 0 沒有位移、user 完全看不出「這顆東西在動」。
+
+## Stacking order
+
+```
+header (z-index: 20, 透明)
+└─ blocker (z-index: 0, 有色)
+└─ section content (z-index: 10, 蓋過 blocker)
+```
+
+Header 必須比 blocker 高 — 否則 blocker 蓋掉 header 文字。Blocker 比 section 內容低 — 否則 blocker 蓋掉 hero 的 `<h1>`。實作上 section 內容用 `position: relative; z-index: 10`、blocker `z-index: 0`、header `z-index: 20`，三層分明。
+
+Demo 偷懶把 blocker 放到 section 第一個 child + section 內容 wrap 一個 `relative z-10`，省一個明確的 stacking context 設定。
+
+## 限制：section 要有「給 blocker 的空間」
+
+Hero section 的 blocker 高 48px。User 看到的 hero 內容從 blocker 之後的 `<h1>` 開始 — 等於 hero 上方有 48px 的「色塊但沒內容」。如果 hero 設計是滿版 image、image 直接到 top edge，這 48px 就直接吃掉一段 image。
+
+Josh 在課堂提自己的 homepage：design 是「雲朵插畫直接到頂」、沒有空間給 blocker，最後 fallback 寫 IntersectionObserver 在不同 section 切 header `--color`。今天他會用 `animation-timeline` 改寫，但 `animation-timeline` 也有 caveat（下一節）。
+
+設計可以接受「section 上方有 header height 的留白」就用 sticky blocker — 多數 blog / docs / marketing pages 本來就有 padding-top，這招幾乎免費。
+
+## animation-timeline 的替代解
+
+```css
+header {
+  animation: switch-bg linear;
+  animation-timeline: scroll(root);
+  animation-range: 0 200px;
+}
+
+@keyframes switch-bg {
+  from { background: hsl(210deg 80% 85%); }
+  to { background: white; }
+}
+```
+
+`animation-timeline: scroll(...)` 把 animation progress 綁到 scroll position 而非時間。scroll 0→200px 對應 animation 0→100%，header 背景色從 hero 色 fade 到 main 色。
+
+優點：blocker 那 48px 留白省掉、可以做漸變色而不只是兩段切。
+缺點：
+
+1. **`animation-timeline` 接管那個 property** — 套了 animation-timeline 的 `background-color` 之後，CSS `transition: background 200ms` 在 theme toggle (`prefers-color-scheme` 切換) 時不再生效。對 dark mode toggle 是真的 a11y 退步。
+2. Browser support 還在追：Chrome 115+ 有、Safari 17.x 還沒、Firefox 用 flag。Production 上要 `@supports` fallback。
+
+Sticky blocker 只用 `position: sticky` — 已經 universal support、沒有 transition 衝突。能用 sticky 就先用 sticky，layout 真的塞不下再上 animation-timeline。
+
+## Gotchas
+
+- **Section 必須有至少 header height 的「上方留白」給 blocker**。設計上 hero image 滿版、padding-top: 0 的話，blocker 直接吃進 hero 內容區。修法：(1) 接受 header 高的 padding、(2) fallback IntersectionObserver、(3) 上 `animation-timeline`。
+- **Header 用 `fixed` 或 `sticky + 負 margin`，別用單純 sticky**。Sticky 吃 layout 空間 → hero 被推下去 → 整個 stacking 跟 blocker 撞掉。如果 scroll container 有界（modal / card），fixed 會 escape，要用 sticky + 負 margin。
+- **Blocker 高度必須等於 header 高度**。差 1px = scroll 過程中露出底層 section 一條邊；差很多 = 看得出 blocker 跟 header 沒對齊。CSS variable 統一管：`--header-h: 48px` 兩邊都讀。
+- **Header 文字顏色要在所有 blocker 顏色上都讀得到**。淺藍 + 白都過得了的就 `slate-900` 之類。如果你的 sections 顏色差很大（黑 hero + 白 article），header 文字本身要用 `mix-blend-mode: difference` 之類技巧，或乾脆只 sticky 一個 logo、不放可讀文字。
+- **Mobile browser chrome 的 dynamic viewport 會干擾 sticky**。iOS Safari 滑動時 address bar 收縮、`100vh` 跳動、sticky 在收縮瞬間有 1 frame 抖動。實測在 iOS 16+ 大幅改善但不完美 — production 上 sticky header + 大型 layout 變動要在裝置上測。
+- **Blocker 必須是 section 的第一個 child（DOM order）**。不是的話初始位置在 section 中段、往上 stuck 過程看得到怪 enter 動畫。最簡單就是寫死一個規則「section 開頭一律 `<div class="blocker"></div>` 然後才是內容」。
+- **`animation-timeline` 接管的 property 失去 transition**。改用 animation-timeline 之後同 property 上的 `transition` rule 不會跑 — 對 theme toggle (`prefers-color-scheme` 切換) 是真退步。Production 上要用就要驗 dark mode toggle 是不是還會 fade。

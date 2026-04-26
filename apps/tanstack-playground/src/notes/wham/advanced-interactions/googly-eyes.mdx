@@ -1,0 +1,194 @@
+---
+title: Googly Eyes (polar coords + spring tracking)
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/02-googly-eyes
+lessonNumber: '03-advanced-interactions/02-googly-eyes'
+order: 4
+summary: '把 cursor 距離投到 polar 座標、再縮 0.1 倍當 pupil 偏移 — 圓形眼球需要圓形 clamp。Spring 用 `useSpring` 拿一個 MotionValue（不是 `animate()`），cursor 連續 re-target 時平滑追隨。多眼的「失去興趣」用 creature center 距離同步，而不是每顆眼睛各自判斷。'
+tags: [cursor, polar-coords, spring, motion-value, motion-react]
+---
+
+import { GooglyEyesCreature, SingleGooglyEye } from './googly-eyes';
+
+## TL;DR
+
+- Pupil 跟 cursor 的偏移用 **polar 座標**算：`convertCartesianToPolar(x, y) → [angle, distance]`，把 distance 縮 0.1 倍再 clamp 到眼球半徑內，最後 `convertPolarToCartesian(angle, modifiedDistance)` 轉回來。圓形眼球用圓形 clamp，不用方形 clamp。
+- 平滑追隨用 motion 的 **`useSpring`**（給一個 MotionValue），不是 `animate()`。`animate()` 設計給「一次 transition」、cursor 連續 re-target 時會打架；`useSpring` 是專門給「持續 re-target、永遠在 settle 中」的 use case。
+- `0.1` 的 multiplier 是「pupil 看著 cursor 但不黏死」的關鍵。值高 = pupil 整顆飛出去（詭異），值低 = pupil 幾乎不動（沒互動感）。0.1 是 sweet spot，可以 taste 調。
+- `MAX_DISTANCE` 半徑外 pupil 復位 (0, 0) — 給角色「太遠就不理你」的個性。Cursor 靠近才上線、Cursor 離開瞬間「冷處理」，比一直追隨多了一層人格。
+- 多顆眼睛要「同步上線」：每顆眼睛獨立算自己的 pupil 方向，但**共用一個** distance 判定 — 量 cursor 到 creature 中心而不是到每顆眼睛。否則 9 顆眼睛各自 latch 上線時間差，看起來像神經錯亂。
+
+<DemoFrame title="Single eye — polar tracking + spring + radius">
+  <SingleGooglyEye />
+</DemoFrame>
+
+把游標移到眼球附近，pupil 用 spring 平滑跟著轉。游標離超過 150px，pupil 縮回正中心 — 不是慢慢縮，是直接「斷線」交給 spring 軟著陸。
+
+## 為什麼要 polar 座標
+
+直覺寫法：拿 `mousePosition.x` / `.y` 當 pupil offset，clamp 到 `[-15, 15]`：
+
+```ts
+pupil.style.transform = `translate(${clamp(mouseX, -15, 15)}px, ${clamp(mouseY, -15, 15)}px)`;
+```
+
+cursor 在右上 (x=200, y=-200)、clamp 後 pupil 位置 `(15, -15)` — 是眼球**正方形邊界的右上角**。但眼球是圓的，pupil 應該在眼球**圓周上的右上方**，距離中心剛好 15px、不是 `√(15² + 15²) ≈ 21px`。實測差 6px、視覺上 pupil 突出眼球邊緣。
+
+正確寫法是 polar 座標：
+
+```ts
+const [angle, distance] = convertCartesianToPolar(relativeX, relativeY);
+const modifiedDistance = clamp(distance * 0.1, -15, 15);
+const { x, y } = convertPolarToCartesian(angle, modifiedDistance);
+```
+
+cursor 的方向用 `angle` 留下、距離縮 0.1 倍再 clamp 到眼球半徑。轉回 cartesian 拿到的 (x, y) 永遠落在「以中心為原點、半徑 15px 的圓」上。圓形容器用圓形 clamp、不用方形 clamp。
+
+> 注意 `convertCartesianToPolar(x, y)` 回 `[angleDegrees, distance]`，**angle 在前**。寫反了 pupil 會在眼球裡跳 disco。
+
+## 為什麼是 `0.1` 倍
+
+如果直接 `modifiedDistance = clamp(distance, -15, 15)`，cursor 一靠近 pupil 就頂到邊緣 — 視覺上 pupil 永遠在邊緣繞圈，沒有「靠近 vs 遠離」的差別。
+
+縮 0.1 倍：cursor 離眼球 50px 時 pupil 偏 5px，cursor 離 150px 時 pupil 偏 15px（碰到 clamp 上限）。Pupil 偏移幅度與 cursor 距離掛鉤、有 **inverse-distance feel** — 「cursor 走得越遠、眼球越用力盯著」的感覺。
+
+值是 taste：
+
+- **太高（0.5）** → cursor 一動 pupil 就飛到邊緣，看起來像驚嚇 / 緊張，cute factor 消失
+- **太低（0.02）** → pupil 幾乎沒動，user 看不出有反應
+- **0.1** → 大多數距離都有可見回饋、極端距離才打到 clamp，最舒服
+
+## 為什麼用 `useSpring`、不是 `animate()`
+
+motion 有多種 API，這個 use case 必須用 motion value (`useSpring` / `useMotionValue`)、**不是 `animate()`**：
+
+```ts
+// ❌ 每次 pointermove 都呼 animate()
+animate(pupil, { x: targetX, y: targetY }, { type: 'spring' });
+```
+
+`animate()` 的語義是「啟動一次 transition」。連續 re-target 時 motion 內部會 cancel 舊 animation 開新的 — 在 60Hz 下一秒被 cancel-restart 60 次，sub-frame 之間斷斷續續，有時 spring 會 overshoot 又被打斷、有時直接卡住。
+
+```ts
+// ✅ 一個持續存在的 spring MotionValue
+const targetX = useMotionValue(0);
+const springX = useSpring(targetX, { stiffness: 200, damping: 20 });
+
+// pointermove handler:
+targetX.set(newX);   // spring 自動往新目標 settle
+```
+
+`useSpring` 回傳的是一個 **MotionValue** — 一個獨立的、持續存在的 spring 物理體。`set()` 改 target、spring 自己每幀往新目標收斂、沒有 cancel/restart。
+
+最後把 MotionValue 餵給 `<motion.div style={{ x: springX, y: springY }}>`，motion 內部用 `transform: translate3d(...)` 套上 — **不會觸發 React re-render**，是繞過 React reconciler 的直接 DOM mutation。1-9 顆眼睛 pointermove 60fps 不會炸 React。
+
+`SPRING_CONFIG = { stiffness: 200, damping: 20 }` 是這顆 spring 的個性：stiffness 拉力、damping 阻力。值是 taste：
+
+- **太硬（stiffness: 1000, damping: 100）** → 幾乎瞬切、看不出 spring，沒 smoothing
+- **太軟（stiffness: 50, damping: 5）** → pupil 飄飄的、跟不上 cursor、像在水裡
+- **`{ 200, 20 }`** → 跟住 cursor、有微微的 overshoot 回彈，活的感覺
+
+## `MAX_DISTANCE` 半徑：「失去興趣」
+
+```ts
+const distance = Math.sqrt(mouseX ** 2 + mouseY ** 2);
+const isTracking = distance < MAX_DISTANCE;
+if (!isTracking) {
+  targetX.set(0);
+  targetY.set(0);
+}
+```
+
+Cursor 離眼球超過 150px 直接把 target 設回 (0, 0) — spring 自己平滑收回正中央。視覺上：cursor 越靠近 → 眼球越追、超過某半徑 → 眼球「不理你了」收回正面。
+
+這個 radius gate 是「discoverable presence」的關鍵：
+
+- 沒 gate：眼球不管 cursor 在哪都盯著，視覺上像一直在 stress、不會休息
+- 有 gate：cursor 靠近才上線、cursor 走遠就 reset — 像有人格、有注意力範圍
+
+`MAX_DISTANCE` 值看 demo size 調，這顆眼球 120px、設 150px 給「眼球周圍一圈感應區」。
+
+## 多顆眼睛、一隻生物
+
+<DemoFrame title="Creature — 9 eyes synced via center distance">
+  <GooglyEyesCreature />
+</DemoFrame>
+
+3×3 grid 的 9 顆眼睛、每顆獨立看 cursor。注意整隻 creature **同時上線、同時下線** — cursor 一進感應圈 9 顆同時開始追、cursor 一離開 9 顆同時放空。
+
+### 同步是怎麼做的
+
+直覺做法：每顆眼睛都自己 `useRelativeMousePosition(eyeRef)`、自己 check `distance < MAX_DISTANCE`。問題是 9 顆眼睛各自 bounding box 不同 — cursor 從左移到右掃過 creature 時，最左邊那顆先 `distance > MAX_DISTANCE` 下線，中間那排還在追、最右邊那顆才剛上線。視覺上像神經錯亂、9 顆眼睛沒在同一個生物上。
+
+修法：**用 creature 中心**判定 on/off，每顆眼睛用 creature 中心傳入的 cursor 座標自己算 pupil 方向。
+
+```ts
+// 父層只算一次 — distance 從 cursor 到 creature 中心
+const distance = Math.sqrt(mouseX ** 2 + mouseY ** 2);
+const isTracking = distance < CREATURE_MAX_DISTANCE;
+
+GRID_OFFSETS.map(offset => (
+  <Eye
+    cursorX={mouseX}        // 這個 cursor 是相對 creature 中心
+    cursorY={mouseY}
+    isTracking={isTracking} // 全部共用這個 boolean
+    offsetX={offset.x}      // 這顆眼睛在 grid 裡的位置
+    offsetY={offset.y}
+  />
+))
+```
+
+每顆 `<Eye>` 用 `(cursorX - offsetX, cursorY - offsetY)` 算自己的 pupil 方向 — 視覺上每顆眼睛都「對準」cursor、但開關時機完全同步。一隻生物的感覺出現了。
+
+### 1 個 listener vs 9 個 listener
+
+這個 demo 用 1 個 — 父層 `useRelativeMousePosition` 監聽 `pointermove`、把 cursor 位置 props 給 9 個 child。也可以反過來每顆眼睛自己掛 listener，現代瀏覽器 9 個 vs 1 個 listener 性能無感差別。
+
+但如果擴張到 30+ 顆眼睛、或 100+ 顆 — 1 listener 的 setup 比較容易繼續 scale，只是「發 props」變便宜。再大規模（100+ 顆需要 hit-test）就該換 canvas，每幀 single render pass、不再用 React reconcile。
+
+## React 包裝小技巧
+
+每顆 `<Eye>` 內部：
+
+```ts
+const targetX = useMotionValue(0);
+const targetY = useMotionValue(0);
+const springX = useSpring(targetX, SPRING_CONFIG);
+const springY = useSpring(targetY, SPRING_CONFIG);
+
+useEffect(() => {
+  if (!isTracking || cursorX === null || cursorY === null) {
+    targetX.set(0);
+    targetY.set(0);
+    return;
+  }
+  const relativeX = cursorX - offsetX;
+  const relativeY = cursorY - offsetY;
+  const [angle, distance] = convertCartesianToPolar(relativeX, relativeY);
+  const modifiedDistance = clamp(distance * 0.1, -15, 15);
+  const { x, y } = convertPolarToCartesian(angle, modifiedDistance);
+  targetX.set(x);
+  targetY.set(y);
+}, [cursorX, cursorY, isTracking, offsetX, offsetY, targetX, targetY]);
+
+return <motion.div style={{ x: springX, y: springY }} />;
+```
+
+幾個關鍵：
+
+- **`useMotionValue` + `useSpring` 鏈**：target 是「我希望去哪裡」、spring 是「實際算出來的中間值」。Pointermove 改 target、spring 每幀算 frame value、`<motion.div>` 把 frame value 套到 transform。
+- **`useEffect` 而不是 render body**：`.set()` 是 side effect，render body 跑 = 每次 React render 都打一次（包括無關的 re-render）。放 effect 裡確保只有 deps 真的變才打。
+- **MotionValue 不參與 React state**：`<motion.div style={{ x: springX }}>` 是 motion 的 escape hatch — motion 直接訂閱 spring 的每幀值並 mutate DOM transform，**不走 React reconcile**。pointermove 60fps 不會 trigger 9 顆眼睛 60fps re-render。
+
+父層的 cursor `mousePosition` 還是 React state（`useRelativeMousePosition` 內部 `useState`），所以父層每次 pointermove 還是會 re-render 一次 + 9 顆 Eye 跑 effect。9 顆 React function 每幀執行 + setMotionValue 是夠輕的，現代瀏覽器無感。如果擴大到 50+ 顆，把 cursor 也改成 MotionValue（不 setState）會更穩。
+
+## Gotchas
+
+- **不要在 pointermove handler 裡呼 `animate()`**。`animate()` 是「一次 transition」、連續 re-target 時 cancel/restart 打架。`useSpring` 是專門給「持續 re-target」的 use case — `set()` 改 target、spring 自己 settle。
+- **Polar clamp、不是 cartesian clamp**。圓形眼球用 `clamp(distance, -15, 15)` 在 polar 空間 → pupil 永遠在圓周上。cartesian `clamp(x, -15, 15) + clamp(y, -15, 15)` 把 pupil 困在正方形、會突出眼球邊緣。
+- **`convertCartesianToPolar(x, y)` 回 `[angleDegrees, distance]`**，angle 在前。寫反了 pupil 行為會詭異。
+- **每顆眼睛要自己的 throttled bb 嗎？** 在這個 demo 我用父層 `useRelativeMousePosition(containerRef)`、9 顆眼睛從父層拿 cursor。如果走另一條路（每顆眼睛自己 hook），**每顆要 own throttle instance** — 共用一個 throttled function 會讓所有眼睛共用 cached bb，最左跟最右拿到一樣的 cursor 偏移。
+- **React state 跟 MotionValue 混用要小心**。父層 cursor 是 state（每次 pointermove re-render 一次），子層 spring 是 MotionValue（不 re-render）。1-9 顆無感、>50 顆 React reconcile 會吃幀，把 cursor 也搬到 MotionValue。
+- **`0.1` multiplier 是 taste**。0.5 太緊張、0.02 太冷淡、0.1 是 sweet spot。換 demo size 時要重調。
+- **`MAX_DISTANCE` 給 discoverable presence**。沒 gate = 眼球永遠盯、有 gate = 「靠近才上線」的人格。Cute factor 一半在這個細節。
+- **`SPRING_CONFIG` 的 stiffness/damping 是個性**。`{ 200, 20 }` 是這顆眼球的人格 — 太硬 = 瞬切沒 smoothing、太軟 = pupil 飄飄飛飛跟不上。換 demo 時重調。
+- **`prefers-reduced-motion` 在 production 要 honour**。這個 demo 為示範方便沒加；上線時偵測到 reduced motion 就把 pupil snap 到 (0, 0) 不啟動 spring，cursor 移動時保持靜態。

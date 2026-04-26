@@ -1,0 +1,178 @@
+---
+title: Ripple Button (Material-style click feedback)
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/01.01-cursor-exercises
+lessonNumber: '03-advanced-interactions/01.01-cursor-exercises-ripple'
+order: 3
+summary: '點按鈕在點擊位置生一顆會放大 + 淡出的圓 — Material Design ripple。三個重點：(1) `event.clientX - bb.left` 把座標轉成相對 button 的位置；(2) `grow` 跟 `fadeToTransparent` 拆成兩個 keyframe，cleanup 用 `animationend` + `event.animationName` 過濾，否則第一個動畫結束就把 particle 砍掉；(3) 多顆 ripple 同時跑沒問題，因為每顆是獨立 DOM node。'
+tags: [ripple, material-design, animationend, keyframes, prefers-reduced-motion]
+---
+
+import { RippleButton } from './ripple-button';
+
+## TL;DR
+
+- 點擊位置 = `event.clientX - bb.left` / `event.clientY - bb.top`，把 viewport 座標減掉 button bounding box 的 top-left 換成相對 button 的座標。Particle 用 `position: absolute` + `translate(-50%, -50%)` 讓自己的中心對齊那個點。
+- **Two keyframes, not one**：`grow`（scale 0 → 1）跟 `fadeToTransparent`（opacity → 0）拆兩個 animation 同時跑。Cleanup 用 `animationend` 但**一定要檢查 `event.animationName`**，不然先結束的 `grow` 觸發 cleanup → particle 在還沒淡掉時就被 remove，視覺上 pop 一下。
+- Multiple concurrent ripples 自然成立 — 每次 click 生一個獨立 `<span>`，互不影響。Spam click 也只是並排堆疊、各自走完自己的 lifecycle。
+- `prefers-reduced-motion: reduce` 直接 early-return 不生 particle — button 仍可點、仍可送 onClick payload，少了視覺糖。
+- Custom Bezier `cubic-bezier(0.42, 0, 0.58, 1)` 比 linear 或 easeIn 自然 — 像石頭丟進水池：一開始衝、後段慢慢散。
+
+<DemoFrame title="Ripple — 點哪裡，圓從哪裡長出來">
+  <RippleButton />
+</DemoFrame>
+
+點按鈕任意位置，一顆白色半透明圓會從點擊處放大 + 淡出。連點幾下會看到多顆 ripple 並存、各自走完自己的時間軸。
+
+## 點擊位置 → 相對座標
+
+```ts
+button.addEventListener('click', (event) => {
+  const bb = button.getBoundingClientRect();
+  const relativeX = event.clientX - bb.left;
+  const relativeY = event.clientY - bb.top;
+
+  const particle = document.createElement('span');
+  particle.classList.add('ripple');
+  particle.style.left = `${relativeX}px`;
+  particle.style.top = `${relativeY}px`;
+  button.appendChild(particle);
+});
+```
+
+`event.clientX/Y` 是相對 viewport 的座標，`bb.left/top` 是 button 在 viewport 裡的位置 — 相減後就是「在 button 內部」的座標。Particle 設 `position: absolute` 在 button 內，`left/top` 直接吃這個值。
+
+Particle CSS 還要加 `transform: translate(-50%, -50%)` — 否則 particle 的 top-left 對齊點擊點，視覺上是「圓的左上角在指尖」而不是「圓的中心在指尖」。配合 scale 動畫，translate 也要寫進 `@keyframes` 裡，scale 才有 origin。
+
+## Two keyframes, not one
+
+直覺上會把 grow + fade 寫成單一 keyframe：
+
+```css
+/* ❌ 看起來合理但會卡 */
+@keyframes ripple {
+  0%   { transform: scale(0); opacity: 0.45; }
+  100% { transform: scale(1); opacity: 0; }
+}
+```
+
+問題是 grow 跟 fade 想要不同的 timing。Grow 通常 600ms 結束（圓打開）但 fade 想 800ms 慢慢退（甚至想 delay 200ms 等 grow 跑一陣再開始淡）。塞同一個 keyframe 強迫兩者共用 duration + easing。
+
+拆兩個 keyframe，同一個 element 上 comma-separated：
+
+```css
+@keyframes grow {
+  from { transform: scale(0); }
+  to   { transform: scale(1); }
+}
+@keyframes fadeToTransparent {
+  from { opacity: 0.45; }
+  to   { opacity: 0; }
+}
+
+.ripple {
+  animation:
+    grow 600ms cubic-bezier(0.42, 0, 0.58, 1) forwards,
+    fadeToTransparent 800ms cubic-bezier(0.42, 0, 0.58, 1) forwards;
+}
+```
+
+兩個 animation 並行跑、各自有 duration / easing / delay。Element 上同時跑幾個 animation 沒問題 — CSS spec 設計就是這樣。
+
+## Cleanup：`animationend` + `animationName` 過濾
+
+```ts
+particle.addEventListener('animationend', (event) => {
+  if (event.animationName === 'fadeToTransparent') {
+    particle.remove();
+  }
+});
+```
+
+**關鍵的 `event.animationName === 'fadeToTransparent'` 檢查**。Element 上跑兩個 animation，`animationend` 事件會 fire **兩次** — 一次是 grow 結束（600ms 後），一次是 fade 結束（800ms 後）。沒有 name 過濾 = 第一次 fire 就把 particle 砍掉，user 看到的是「圓長到滿就 pop 一下消失」沒有淡出。
+
+挑 fade 那次砍是因為 fade 持續比較久，等它結束才完全沒視覺。`grow` 結束時 opacity 還在 0.4，砍掉太早。
+
+### 為什麼有人改用 `setTimeout`
+
+```ts
+// 替代方案
+setTimeout(() => particle.remove(), 800);
+```
+
+`animationend` 在 production 有兩個 finicky 的 edge case：
+
+1. **CSS Modules / styled-components 把 keyframe name 改名**。寫 `@keyframes fadeToTransparent` 在 CSS Modules 裡會變成 `_ripple-button_fadeToTransparent_3xK1q` 之類的 mangled name。`event.animationName === 'fadeToTransparent'` 永遠 false，cleanup 不跑，particle 永遠掛在 DOM 上 → memory leak。修法：用 CSS Modules 的 `:global` escape 或從 module import 拿 mangled name 比對。
+2. **Tab 切走 / element 在動畫途中 visibility 改變 → animationend 沒 fire**。Browser spec 不保證 background tab 觸發 animation event。
+
+`setTimeout` 沒這些問題、寫起來更短，但也有它自己的坑：duration 跟 CSS 寫死的數字耦合（改 CSS 要記得改 JS）、CSS animation `animation-delay` 加進去 timeout 也要跟著加。Module 1 的 takeaway 是「用 `animationend` 但要有 fallback timeout」— 兩個都掛，誰先到誰負責。
+
+這個 demo 為示範方便只用 `animationend`，因為動畫名是 React `useId()` 生的 unique scoped name、沒 CSS Modules mangle 風險。
+
+## 多顆 concurrent 的 ripple
+
+每次 click 跑這段：
+
+```ts
+const particle = document.createElement('span');
+button.appendChild(particle);
+```
+
+每顆 particle 是獨立 DOM 節點，各自有自己的 animation timeline、各自有自己的 `animationend` listener。Spam click 五次 → 五顆 particle 同時在 button 裡長 + 淡，互不影響。
+
+React 版用 state 也是同樣概念，array 裡每個 ripple 有自己的 ID + 座標：
+
+```tsx
+const [ripples, setRipples] = useState<Ripple[]>([]);
+
+function handleClick(event) {
+  const bb = event.currentTarget.getBoundingClientRect();
+  const id = nextRippleId++;
+  setRipples((prev) => [
+    ...prev,
+    { id, x: event.clientX - bb.left, y: event.clientY - bb.top },
+  ]);
+}
+```
+
+ID 用一個 module-level counter，不用 `Date.now()` — 連點兩次同一 ms 內 ID 撞號 React key 會抱怨。
+
+Cleanup 從 array filter 掉那顆：
+
+```tsx
+function handleAnimationEnd(event, id) {
+  if (event.animationName !== fadeName) return;
+  setRipples((prev) => prev.filter((r) => r.id !== id));
+}
+```
+
+## `prefers-reduced-motion` gating
+
+```ts
+button.addEventListener('click', (event) => {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  // 生 ripple...
+});
+```
+
+User 在 OS 設了 reduce motion = 跳過視覺糖。Click 事件本身仍 fire（form submit、navigation 等正事不能因為 a11y 設定而失效）— 只是不生 particle。這跟 `cursor-distance` demo 同樣的取捨：a11y 路徑 button 仍然「能用」，少了 ripple 的非必要 visual flair。
+
+## Custom Bezier — 「石頭丟進水池」
+
+```css
+animation-timing-function: cubic-bezier(0.42, 0, 0.58, 1);
+```
+
+這條 curve 開頭中等加速、收尾慢慢減速，像 ease-in-out 但前半段更猛 — 模擬石頭打到水面那瞬間的衝擊、後段散開的緩慢。Linear 太機械、easeIn 末段加速很怪、easeOut 開頭太陡。對 ripple 這種「擴散」動作，前快後慢的曲線最自然。
+
+寫死 `0.42, 0, 0.58, 1` 是 CSS spec 的 `ease-in-out` 數字 — 也可以直接寫 `ease-in-out`。手寫四個數字的好處是想微調時可以拉控制點 — 例如 `cubic-bezier(0.2, 0.8, 0.4, 1)` 給更明顯的 overshoot 感。
+
+## Gotchas
+
+- **`animationend` 對每個 animation fire 一次**。Element 上掛兩個 animation = `animationend` event fire 兩次。沒檢查 `event.animationName` 就 cleanup 會在第一個（先結束的）動畫末砍掉 particle，視覺 pop。
+- **CSS Modules / styled-components mangle keyframe name 會打爆 animationName 比對**。寫 `event.animationName === 'fadeToTransparent'` 在 CSS Modules build 後 name 變成 mangled hash，永遠不 match → cleanup 不跑 → particle 永遠存在 DOM 變 memory leak。修法：從 module import 拿真正的 name 來比對，或退回 `setTimeout` cleanup。
+- **Particle 一定要 `pointer-events: none`**。沒設的話 particle 蓋在 button 上面會吃掉後續 click 事件（particle scale 1 時 100% 蓋住點擊區），第二次 click 點不到 button 本體。
+- **Button 要 `position: relative` + `overflow: hidden`**。Relative 給 particle absolute 的定位 anchor；hidden 避免 ripple 在 scale 1 時超出 button 邊界、跑到外面汙染畫面。
+- **Particle 要 `translate(-50%, -50%)` 對齊中心**。沒寫的話 `left/top` 是 particle 的 top-left 對齊指尖、視覺上「圓的左上角在指尖」而不是「圓中心在指尖」。translate 要寫進 keyframe 裡才不會被 scale 動畫蓋掉。
+- **連點 spam 要驗 cleanup**。每顆 ripple 各自的 `animationend` 會 fire，filter by id 的 cleanup 邏輯不會打架；但如果 cleanup 寫成 `setRipples([])` 會把後生的也砍掉 — 一定要 `prev.filter((r) => r.id !== id)`。
+- **`prefers-reduced-motion` 路徑 click 仍要正常 fire**。這個 demo 只是 visual flair，reduce motion = 跳過 ripple 但 onClick handler 該 submit form 還是要送。把 `matchMedia` check 放在「生 particle」前面、不要包住整個 handler。
+- **Ripple ID 別用 `Date.now()`**。同 ms 內連點兩次會撞 React key。Module-level counter 或 `crypto.randomUUID()` 比較穩。
