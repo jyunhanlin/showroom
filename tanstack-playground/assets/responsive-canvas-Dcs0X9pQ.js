@@ -5,7 +5,7 @@ import{n as e,r as t}from"./rolldown-runtime-S-ySWqyJ.js";import{c as n,i as r,o
 `,(0,s.jsxs)(t.li,{children:[`邊界判斷如果只翻 velocity 不 clamp 位置，window 縮到 cut off 元素的瞬間 velocity 會 ping-pong 卡邊;補一句 `,(0,s.jsx)(t.code,{children:`logo.x = canvasDimensions.width - logo.size`}),` 推回畫布內。`]}),`
 `]}),`
 `,(0,s.jsx)(n,{title:`拖右下角的 resize handle (或拉視窗寬度)，emoji 會跟著重新計算邊界`,children:(0,s.jsx)(u,{})}),`
-`,(0,s.jsx)(t.h2,{children:`Canvas 為什麼一 resize 就糊`}),`
+`,(0,s.jsx)(t.h2,{children:`Why canvas blurs on resize`}),`
 `,(0,s.jsxs)(t.p,{children:[(0,s.jsx)(t.code,{children:`<canvas>`}),` 有兩套尺寸:`]}),`
 `,(0,s.jsxs)(t.ol,{children:[`
 `,(0,s.jsxs)(t.li,{children:[(0,s.jsx)(t.strong,{children:`CSS 尺寸`}),` (`,(0,s.jsx)(t.code,{children:`w-full h-[240px]`}),` 之類的 style) — 螢幕上看到多大`]}),`
@@ -26,7 +26,7 @@ import{n as e,r as t}from"./rolldown-runtime-S-ySWqyJ.js";import{c as n,i as r,o
 `,(0,s.jsxs)(t.span,{className:`line`,children:[(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`window.`}),(0,s.jsx)(t.span,{style:{color:`#6F42C1`},children:`addEventListener`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`(`}),(0,s.jsx)(t.span,{style:{color:`#032F62`},children:`'resize'`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`, update);`})]}),`
 `,(0,s.jsxs)(t.span,{className:`line`,children:[(0,s.jsx)(t.span,{style:{color:`#6F42C1`},children:`update`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`();`})]})]})})}),`
 `,(0,s.jsxs)(t.p,{children:[(0,s.jsx)(t.code,{children:`setupCanvas`}),` 多回傳一個 `,(0,s.jsx)(t.code,{children:`disposeResize`}),`，是 `,(0,s.jsx)(t.code,{children:`removeEventListener`}),` 的 wrapper，給 `,(0,s.jsx)(t.code,{children:`useEffect`}),` cleanup 用 — 不然 Strict Mode double-mount + unmount 會留 listener。`]}),`
-`,(0,s.jsx)(t.h2,{children:`為什麼 dimensions 一定要是物件`}),`
+`,(0,s.jsx)(t.h2,{children:`Why dimensions must be an object`}),`
 `,(0,s.jsxs)(t.p,{children:[(0,s.jsx)(t.code,{children:`setupCanvas`}),` 只 return 一次，但 width/height 在 resize 之後要持續更新。`]}),`
 `,(0,s.jsx)(s.Fragment,{children:(0,s.jsx)(t.pre,{className:`shiki github-light`,style:{backgroundColor:`#fff`,color:`#24292e`},tabIndex:`0`,children:(0,s.jsxs)(t.code,{children:[(0,s.jsx)(t.span,{className:`line`,children:(0,s.jsx)(t.span,{style:{color:`#6A737D`},children:`// ❌ primitive 不行`})}),`
 `,(0,s.jsxs)(t.span,{className:`line`,children:[(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`return`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:` { ctx, canvasWidth, canvasHeight };`})]})]})})}),`
@@ -39,7 +39,7 @@ import{n as e,r as t}from"./rolldown-runtime-S-ySWqyJ.js";import{c as n,i as r,o
 `,(0,s.jsx)(t.span,{className:`line`,children:(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`}`})}),`
 `,(0,s.jsxs)(t.span,{className:`line`,children:[(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`return`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:` { ctx, dimensions };`})]})]})})}),`
 `,(0,s.jsxs)(t.p,{children:[`物件是 reference type，`,(0,s.jsx)(t.code,{children:`update`}),` 改的是那塊記憶體本身，consumer 透過 `,(0,s.jsx)(t.code,{children:`canvasDimensions.width`}),` 每次讀都拿到最新值。也是為什麼 demo 的 `,(0,s.jsx)(t.code,{children:`ctx.clearRect(0, 0, canvasDimensions.width, canvasDimensions.height)`}),` 不用知道有 resize 也照樣對。`]}),`
-`,(0,s.jsx)(t.h2,{children:`Boundary 還會被打到一個坑`}),`
+`,(0,s.jsx)(t.h2,{children:`Another boundary pitfall`}),`
 `,(0,s.jsx)(t.p,{children:`直觀的寫法:撞到邊界就翻 velocity。`}),`
 `,(0,s.jsx)(s.Fragment,{children:(0,s.jsx)(t.pre,{className:`shiki github-light`,style:{backgroundColor:`#fff`,color:`#24292e`},tabIndex:`0`,children:(0,s.jsxs)(t.code,{children:[(0,s.jsxs)(t.span,{className:`line`,children:[(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`if`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:` (logo.x `}),(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`<`}),(0,s.jsx)(t.span,{style:{color:`#005CC5`},children:` 0`}),(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:` ||`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:` logo.x `}),(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`>`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:` canvasDimensions.width `}),(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`-`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:` logo.size) {`})]}),`
 `,(0,s.jsxs)(t.span,{className:`line`,children:[(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`  logo.xVelocity `}),(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`*=`}),(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:` -`}),(0,s.jsx)(t.span,{style:{color:`#005CC5`},children:`1`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`;`})]}),`

@@ -5,11 +5,11 @@ import{n as e,r as t}from"./rolldown-runtime-S-ySWqyJ.js";import{c as n,i as r,o
 `,(0,s.jsxs)(t.li,{children:[(0,s.jsx)(t.code,{children:`deltaTime`}),` 一定要 clamp 在 250ms 上限。tab 切回來時 `,(0,s.jsx)(t.code,{children:`performance.now()`}),` delta 可能是好幾秒，一次跳幾百 px 會視覺爆炸或邏輯崩潰。`]}),`
 `]}),`
 `,(0,s.jsx)(n,{title:`Delta time 版的彈跳方塊 — frame rate 換不了它的速度`,children:(0,s.jsx)(c,{})}),`
-`,(0,s.jsx)(t.h2,{children:`Frame rate 是隱形變數`}),`
+`,(0,s.jsx)(t.h2,{children:`Frame rate is the invisible variable`}),`
 `,(0,s.jsxs)(t.p,{children:[(0,s.jsx)(t.a,{href:`/wham/canvas-animation/canvas-animation`,children:`Canvas Animation`}),` 那篇的 demo 寫 `,(0,s.jsx)(t.code,{children:`box.x += box.velocity`}),`。velocity 名字是「速度」，但單位其實是 px/frame，跟 frame rate 完全綁死:`]}),`
 `,(0,s.jsxs)(t.table,{children:[(0,s.jsx)(t.thead,{children:(0,s.jsxs)(t.tr,{children:[(0,s.jsx)(t.th,{children:`螢幕`}),(0,s.jsx)(t.th,{children:`refresh rate`}),(0,s.jsxs)(t.th,{children:[(0,s.jsx)(t.code,{children:`velocity = 10`}),` 實際速度`]})]})}),(0,s.jsxs)(t.tbody,{children:[(0,s.jsxs)(t.tr,{children:[(0,s.jsx)(t.td,{children:`一般 monitor`}),(0,s.jsx)(t.td,{children:`60Hz`}),(0,s.jsx)(t.td,{children:`600 px/sec`})]}),(0,s.jsxs)(t.tr,{children:[(0,s.jsx)(t.td,{children:`MacBook ProMotion`}),(0,s.jsx)(t.td,{children:`120Hz`}),(0,s.jsx)(t.td,{children:`1200 px/sec`})]}),(0,s.jsxs)(t.tr,{children:[(0,s.jsx)(t.td,{children:`高階電競螢幕`}),(0,s.jsx)(t.td,{children:`240Hz`}),(0,s.jsx)(t.td,{children:`2400 px/sec`})]})]})]}),`
 `,(0,s.jsxs)(t.p,{children:[`同一份 code 在不同 device 上看起來完全不同步。Game dev 圈的標準解法叫 `,(0,s.jsx)(t.strong,{children:`delta time`}),`。`]}),`
-`,(0,s.jsx)(t.h2,{children:`Delta time 的算法`}),`
+`,(0,s.jsx)(t.h2,{children:`Computing delta time`}),`
 `,(0,s.jsxs)(t.p,{children:[`velocity 改寫成 px/sec:`,(0,s.jsx)(t.code,{children:`velocity: 120`}),` 表示一秒走 120 px。每幀算過了多少秒，乘上 velocity 就是這幀該移動的距離:`]}),`
 `,(0,s.jsx)(s.Fragment,{children:(0,s.jsx)(t.pre,{className:`shiki github-light`,style:{backgroundColor:`#fff`,color:`#24292e`},tabIndex:`0`,children:(0,s.jsxs)(t.code,{children:[(0,s.jsxs)(t.span,{className:`line`,children:[(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`let`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:` lastTimestamp `}),(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`=`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:` performance.`}),(0,s.jsx)(t.span,{style:{color:`#6F42C1`},children:`now`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`();`})]}),`
 `,(0,s.jsx)(t.span,{className:`line`}),`
@@ -24,11 +24,11 @@ import{n as e,r as t}from"./rolldown-runtime-S-ySWqyJ.js";import{c as n,i as r,o
 `,(0,s.jsx)(t.span,{className:`line`,children:(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`}`})})]})})}),`
 `,(0,s.jsxs)(t.p,{children:[`60Hz 上 `,(0,s.jsx)(t.code,{children:`deltaTime ≈ 0.0167`}),`，所以 `,(0,s.jsx)(t.code,{children:`120 × 0.0167 ≈ 2 px/frame`}),`。120Hz 上 `,(0,s.jsx)(t.code,{children:`deltaTime ≈ 0.00833`}),`，`,(0,s.jsx)(t.code,{children:`120 × 0.00833 ≈ 1 px/frame`}),` — frame rate 越快，每 frame 走越少，但秒積分起來都是 1 秒走 120 px。`]}),`
 `,(0,s.jsx)(t.p,{children:`換個視角:你不是在控制每幀走多少，而是控制單位時間走多少。frame rate 變成只是「採樣密度」，動畫的速度跟採樣密度脫鉤。`}),`
-`,(0,s.jsx)(t.h2,{children:`為什麼一定要 clamp`}),`
+`,(0,s.jsx)(t.h2,{children:`Why you must clamp`}),`
 `,(0,s.jsxs)(t.p,{children:[`Tab 切到背景後，瀏覽器會 throttle 或暫停 rAF;切回來時 `,(0,s.jsx)(t.code,{children:`performance.now() - lastTimestamp`}),` 可能是好幾秒甚至更久。`,(0,s.jsx)(t.code,{children:`box.x += 120 × 30 = 3600 px`}),` 一幀跳 3600 px 會直接飛出 canvas，或者 (像 rocketship 那樣的粒子系統) 一次生 30 秒份的粒子直接 OOM。`]}),`
 `,(0,s.jsx)(s.Fragment,{children:(0,s.jsx)(t.pre,{className:`shiki github-light`,style:{backgroundColor:`#fff`,color:`#24292e`},tabIndex:`0`,children:(0,s.jsx)(t.code,{children:(0,s.jsxs)(t.span,{className:`line`,children:[(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`const`}),(0,s.jsx)(t.span,{style:{color:`#005CC5`},children:` deltaTime`}),(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:` =`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:` Math.`}),(0,s.jsx)(t.span,{style:{color:`#6F42C1`},children:`min`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`(now `}),(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`-`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:` lastTimestamp, `}),(0,s.jsx)(t.span,{style:{color:`#005CC5`},children:`250`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`) `}),(0,s.jsx)(t.span,{style:{color:`#D73A49`},children:`/`}),(0,s.jsx)(t.span,{style:{color:`#005CC5`},children:` 1000`}),(0,s.jsx)(t.span,{style:{color:`#24292E`},children:`;`})]})})})}),`
 `,(0,s.jsx)(t.p,{children:`clamp 在 250ms 等於說「最壞情況當作 4fps 處理」。tab 切回來只會看到一次小跳，而不是視覺爆炸。rocketship、confetti、trails 全部都這樣寫。`}),`
-`,(0,s.jsx)(t.h2,{children:`Sub-pixel 不要 round`}),`
+`,(0,s.jsx)(t.h2,{children:`Don't round sub-pixels`}),`
 `,(0,s.jsxs)(t.p,{children:[(0,s.jsx)(t.code,{children:`120 × 0.0167 = 2.004 px`}),`，聽起來像會卡在像素邊。不會。Canvas 2D context 跟 CSS transform 一樣有 sub-pixel anti-aliasing — 方塊跨在兩 pixel 中間時，瀏覽器會把兩排 pixel 各塗一點點，視覺上看起來就是連續滑過去的。`]}),`
 `,(0,s.jsxs)(t.p,{children:[`所以 `,(0,s.jsx)(t.code,{children:`box.x`}),` 不要 `,(0,s.jsx)(t.code,{children:`Math.round`}),`。round 反而會讓速度看起來不平均 (有些 frame 走 1px、有些走 2px、有些 0px)，感官上更不順。`]}),`
 `,(0,s.jsx)(t.h2,{children:`Gotchas`}),`
