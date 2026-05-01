@@ -1,35 +1,11 @@
 import { Link, createFileRoute } from '@tanstack/react-router';
-import { NoteCard } from '~/components/note-card';
 import { courseName } from '~/notes/_courses';
-import { type NoteEntry, notes } from '~/notes/_registry';
+import { coursesInUse, notes, notesByTopic, topicsInCourse } from '~/notes/_registry';
 import { topicName, topics } from '~/notes/_topics';
 
 export const Route = createFileRoute('/')({
   component: AllNotes,
 });
-
-type CourseGroup = {
-  course: string;
-  topics: Array<{ topic: string; notes: NoteEntry[] }>;
-};
-
-function groupByCourseThenTopic(items: NoteEntry[]): CourseGroup[] {
-  const groups: CourseGroup[] = [];
-  for (const note of items) {
-    let courseGroup = groups.find((g) => g.course === note.course);
-    if (!courseGroup) {
-      courseGroup = { course: note.course, topics: [] };
-      groups.push(courseGroup);
-    }
-    let topicGroup = courseGroup.topics.find((t) => t.topic === note.topic);
-    if (!topicGroup) {
-      topicGroup = { topic: note.topic, notes: [] };
-      courseGroup.topics.push(topicGroup);
-    }
-    topicGroup.notes.push(note);
-  }
-  return groups;
-}
 
 function AllNotes() {
   if (notes.length === 0) {
@@ -43,43 +19,43 @@ function AllNotes() {
     );
   }
 
-  const grouped = groupByCourseThenTopic(notes);
+  const courseList = coursesInUse();
 
   return (
-    <section>
-      <h1 className="text-2xl font-semibold">All notes</h1>
-      <div className="mt-8 space-y-12">
-        {grouped.map(({ course, topics: courseTopics }) => (
+    <section className="space-y-12">
+      {courseList.map((course) => {
+        const topicIds = topicsInCourse(course);
+        return (
           <section key={course}>
-            <h2 className="text-xl font-semibold tracking-tight">
+            <h1 className="text-2xl font-semibold">
               <Link to="/$course" params={{ course }} className="text-gray-900 hover:text-blue-600">
                 {courseName(course)}
               </Link>
-            </h2>
-            <div className="mt-6 space-y-8">
-              {courseTopics.map(({ topic, notes: topicNotes }) => (
-                <div key={topic}>
-                  <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    <h3 className="text-base font-semibold text-gray-700">
-                      <Link to="/$course/$topic" params={{ course, topic }} className="hover:text-blue-600">
-                        {topicName(topic)}
-                      </Link>
-                    </h3>
+            </h1>
+            <div className="mt-6 space-y-3">
+              {topicIds.map((topic) => {
+                const count = notesByTopic(course, topic).length;
+                return (
+                  <Link
+                    key={topic}
+                    to="/$course/$topic"
+                    params={{ course, topic }}
+                    className="block rounded-lg border border-gray-200 p-4 hover:border-blue-500"
+                  >
+                    <div className="font-semibold text-gray-900">{topicName(topic)}</div>
                     {topics[topic]?.description && (
-                      <span className="text-sm text-gray-500">{topics[topic]?.description}</span>
+                      <div className="mt-1 text-sm text-gray-600">{topics[topic]?.description}</div>
                     )}
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {topicNotes.map((note) => (
-                      <NoteCard key={note.path} note={note} />
-                    ))}
-                  </div>
-                </div>
-              ))}
+                    <div className="mt-2 text-xs text-gray-500">
+                      {count} lesson{count === 1 ? '' : 's'}
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           </section>
-        ))}
-      </div>
+        );
+      })}
     </section>
   );
 }
