@@ -1,0 +1,39 @@
+import{a as e,r as t}from"./rolldown-runtime-BYbx6iT9.js";import{i as n,n as r,r as i}from"./lib-BI_-S7V4.js";var a=e(n(),1),o=i(),s=[`linear`,`ease-in`,`ease-out`,`ease-in-out`,`ease`],c=`oklch(0.7 0.18 200)`,l=440,u=24,d=1500;function f(){let[e,t]=(0,a.useState)(`ease-in-out`),[n,r]=(0,a.useState)(0);return(0,o.jsxs)(`div`,{className:`flex flex-col items-center gap-3`,children:[(0,o.jsx)(`style`,{children:`
+        @keyframes wham-easing-slide {
+          from { transform: translateX(0) }
+          to { transform: translateX(${l-u}px) }
+        }
+      `}),(0,o.jsx)(`div`,{className:`relative rounded-md bg-slate-900 p-3`,style:{width:l+24},children:(0,o.jsx)(`div`,{className:`relative h-12`,style:{width:l},children:(0,o.jsx)(`div`,{className:`absolute top-1/2 -translate-y-1/2 rounded-full`,style:{width:u,height:u,backgroundColor:c,animation:`wham-easing-slide ${d}ms ${e} forwards`}},`${n}-${e}`)})}),(0,o.jsxs)(`div`,{className:`flex flex-wrap gap-2 font-mono text-sm`,children:[s.map(n=>(0,o.jsx)(`button`,{type:`button`,onClick:()=>{t(n),r(e=>e+1)},className:`rounded px-3 py-1 ${n===e?`bg-slate-800 text-white`:`bg-slate-200 text-slate-900 hover:bg-slate-300`}`,children:n},n)),(0,o.jsx)(`button`,{type:`button`,onClick:()=>r(e=>e+1),className:`rounded bg-rose-500 px-3 py-1 text-white hover:bg-rose-600`,children:`replay`})]}),(0,o.jsx)(`p`,{className:`text-xs text-gray-500`,children:`起點/終點/總時間都一樣;只有「中間時間怎麼分配」變了。`})]})}function p(){let e=s.map(e=>({name:e,samples:m(e)}));return(0,o.jsx)(`div`,{className:`flex flex-col items-center gap-2`,children:(0,o.jsxs)(`svg`,{viewBox:`0 0 360 200`,width:360,height:200,className:`rounded-md bg-slate-900`,children:[(0,o.jsx)(`line`,{x1:`20`,y1:180,x2:350,y2:180,stroke:`oklch(0.4 0 0)`,strokeWidth:`1`}),(0,o.jsx)(`line`,{x1:`20`,y1:`10`,x2:`20`,y2:180,stroke:`oklch(0.4 0 0)`,strokeWidth:`1`}),(0,o.jsx)(`text`,{x:350,y:195,fill:`oklch(0.6 0 0)`,fontSize:`10`,textAnchor:`end`,children:`time →`}),(0,o.jsx)(`text`,{x:`6`,y:`12`,fill:`oklch(0.6 0 0)`,fontSize:`10`,children:`↑ progress`}),e.map((e,t)=>{let n=`oklch(0.75 0.18 ${30+t*60})`;return(0,o.jsxs)(`g`,{children:[(0,o.jsx)(`polyline`,{points:e.samples.map((t,n)=>{let r=20+n/(e.samples.length-1)*320,i=180-t*160;return`${r.toFixed(1)},${i.toFixed(1)}`}).join(` `),fill:`none`,stroke:n,strokeWidth:`2`}),(0,o.jsx)(`text`,{x:350,y:20+t*14,fill:n,fontSize:`11`,textAnchor:`end`,children:e.name})]},e.name)})]})})}function m(e){let t=[];for(let n=0;n<=60;n++){let r=n/60;t.push(h(r,e))}return t}function h(e,t){let[,n,,r]={linear:[0,0,1,1],"ease-in":[.42,0,1,1],"ease-out":[0,0,.58,1],"ease-in-out":[.42,0,.58,1],ease:[.25,.1,.25,1]}[t],i=1-e;return 3*i*i*e*n+3*i*e*e*r+e*e*e}var g=t({default:()=>y,frontmatter:()=>_}),_={title:`Timing Functions, easing curves`,sourceUrl:`https://courses.joshwcomeau.com/wham/01-particles/05-easings`,lessonNumber:`01-particles/05-easings`,order:8,summary:"同樣 0 → 100% 的位移、同樣 750ms,中間時間怎麼分配可以做出完全不同的氣質。CSS 內建 5 個關鍵字 (`linear` / `ease-in` / `ease-out` / `ease-in-out` / `ease`),底層都是 `cubic-bezier(p1x, p1y, p2x, p2y)`。",tags:[`particles`,`css`,`easing`,`animation`,`cubic-bezier`]};function v(e){let t={code:`code`,h2:`h2`,li:`li`,p:`p`,strong:`strong`,table:`table`,tbody:`tbody`,td:`td`,th:`th`,thead:`thead`,tr:`tr`,ul:`ul`,...r(),...e.components},{DemoFrame:n}=t;return n||b(`DemoFrame`,!0),(0,o.jsxs)(o.Fragment,{children:[(0,o.jsx)(t.h2,{children:`TL;DR`}),`
+`,(0,o.jsxs)(t.ul,{children:[`
+`,(0,o.jsxs)(t.li,{children:[`動畫不是只有「從哪到哪、多久」,還有「`,(0,o.jsx)(t.strong,{children:`進度怎麼分配`}),`」這個維度。`]}),`
+`,(0,o.jsxs)(t.li,{children:[`5 個內建關鍵字:`,`
+`,(0,o.jsxs)(t.ul,{children:[`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`linear`}),` — 等速,適合連續循環(旋轉、流光)。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`ease-in`}),` — 慢起快結,離場/離開螢幕用得多。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`ease-out`}),` — 快起慢結,進場/出現的標準選擇。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`ease-in-out`}),` — 兩端慢中間快,移動中的物體。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`ease`}),` — CSS 預設值,類似 `,(0,o.jsx)(t.code,{children:`ease-in-out`}),` 但更偏前傾。`]}),`
+`]}),`
+`]}),`
+`,(0,o.jsxs)(t.li,{children:[`底層都是 `,(0,o.jsx)(t.code,{children:`cubic-bezier(p1x, p1y, p2x, p2y)`}),` — 兩個控制點。`]}),`
+`]}),`
+`,(0,o.jsx)(n,{title:`Same distance, same duration, different easing`,children:(0,o.jsx)(f,{})}),`
+`,(0,o.jsx)(t.p,{children:`切換不同 timing 看看球的速度節奏 — 起點、終點、總時間都沒變,只是「過程的時間怎麼花」。`}),`
+`,(0,o.jsx)(n,{title:`Easing curves: progress over time`,children:(0,o.jsx)(p,{})}),`
+`,(0,o.jsxs)(t.p,{children:[`橫軸時間 t,縱軸 progress;`,(0,o.jsx)(t.code,{children:`linear`}),` 是直線,其他是 cubic-bezier 曲線。曲線越陡峭代表那段時間動得越快。`]}),`
+`,(0,o.jsx)(t.h2,{children:`Why it works`}),`
+`,(0,o.jsxs)(t.p,{children:[(0,o.jsx)(t.code,{children:`cubic-bezier(x1, y1, x2, y2)`}),` 是兩個控制點的三次貝茲曲線。曲線從 (0, 0) 到 (1, 1),控制點決定中段怎麼彎。`]}),`
+`,(0,o.jsxs)(t.ul,{children:[`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`linear`}),` = `,(0,o.jsx)(t.code,{children:`cubic-bezier(0, 0, 1, 1)`}),` — 控制點在直線上,曲線就是直線。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`ease-out`}),` = `,(0,o.jsx)(t.code,{children:`cubic-bezier(0, 0, 0.58, 1)`}),` — 第一個控制點貼底,起步快;第二個拉高接近終點。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`ease-in`}),` 鏡像反過來。`]}),`
+`]}),`
+`,(0,o.jsx)(t.h2,{children:`用法 cheat-sheet`}),`
+`,(0,o.jsxs)(t.table,{children:[(0,o.jsx)(t.thead,{children:(0,o.jsxs)(t.tr,{children:[(0,o.jsx)(t.th,{children:`場景`}),(0,o.jsx)(t.th,{children:`推薦`})]})}),(0,o.jsxs)(t.tbody,{children:[(0,o.jsxs)(t.tr,{children:[(0,o.jsx)(t.td,{children:`物件進場(modal、toast、tooltip)`}),(0,o.jsx)(t.td,{children:(0,o.jsx)(t.code,{children:`ease-out`})})]}),(0,o.jsxs)(t.tr,{children:[(0,o.jsx)(t.td,{children:`物件離場`}),(0,o.jsx)(t.td,{children:(0,o.jsx)(t.code,{children:`ease-in`})})]}),(0,o.jsxs)(t.tr,{children:[(0,o.jsx)(t.td,{children:`一直循環的旋轉/脈動`}),(0,o.jsx)(t.td,{children:(0,o.jsx)(t.code,{children:`linear`})})]}),(0,o.jsxs)(t.tr,{children:[(0,o.jsx)(t.td,{children:`物件位移(從 A 到 B 不消失)`}),(0,o.jsx)(t.td,{children:(0,o.jsx)(t.code,{children:`ease-in-out`})})]}),(0,o.jsxs)(t.tr,{children:[(0,o.jsx)(t.td,{children:`沒想清楚`}),(0,o.jsxs)(t.td,{children:[(0,o.jsx)(t.code,{children:`ease`}),`(CSS 預設)`]})]})]})]}),`
+`,(0,o.jsx)(t.h2,{children:`Gotchas`}),`
+`,(0,o.jsxs)(t.ul,{children:[`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsxs)(t.strong,{children:[`Hover 進場用 `,(0,o.jsx)(t.code,{children:`ease-out`}),` + 退場用 `,(0,o.jsx)(t.code,{children:`ease-in`})]}),`:`,(0,o.jsx)(t.code,{children:`transition`}),` 上同時設不同方向不太優雅,折衷用 `,(0,o.jsx)(t.code,{children:`ease-in-out`}),` 或 `,(0,o.jsx)(t.code,{children:`ease`}),`。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsxs)(t.strong,{children:[(0,o.jsx)(t.code,{children:`ease`}),` ≠ `,(0,o.jsx)(t.code,{children:`ease-in-out`})]}),`:預設 `,(0,o.jsx)(t.code,{children:`ease`}),` 偏前 — 起步比 `,(0,o.jsx)(t.code,{children:`ease-in-out`}),` 快。預設值不是中性曲線,要清楚自己用的是什麼。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsxs)(t.strong,{children:[(0,o.jsx)(t.code,{children:`linear`}),` 不是「無聊」`]}),`:循環動畫(旋轉、scrolling marquee)只能用 linear,不然每圈都會看到加速減速很怪。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.strong,{children:`超出 [0, 1] 的 cubic-bezier`}),`:`,(0,o.jsx)(t.code,{children:`cubic-bezier(0.5, -0.5, 0.5, 1.5)`}),` 之類的「彈跳」效果是合法的 — y 控制點在 0~1 之外進度會「過頭再回來」,做出 spring 預覽。`]}),`
+`]})]})}function y(e={}){let{wrapper:t}={...r(),...e.components};return t?(0,o.jsx)(t,{...e,children:(0,o.jsx)(v,{...e})}):v(e)}function b(e,t){throw Error(`Expected `+(t?`component`:`object`)+" `"+e+"` to be defined: you likely forgot to import, pass, or provide it.")}export{_ as n,g as t};

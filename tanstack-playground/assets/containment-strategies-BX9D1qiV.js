@@ -1,0 +1,30 @@
+import{a as e,r as t}from"./rolldown-runtime-BYbx6iT9.js";import{i as n,n as r,r as i}from"./lib-BI_-S7V4.js";var a=e(n(),1),o=i(),s=[{id:`naive`,label:`1. top/left only`,description:`anchored by top-left corner — overflows right & bottom`},{id:`center`,label:`2. translate(-50%, -50%)`,description:`anchored by center — symmetric, half-overflow on edges`},{id:`contained`,label:`3. translate(calc(-left), calc(-top))`,description:`dynamic offset — perfectly contained, never overflows`}];function c(e,t,n){return e===`naive`?`none`:e===`center`?`translate(-50%, -50%)`:`translate(${-n}%, ${-t}%)`}function l(){let[e,t]=(0,a.useState)(50),[n,r]=(0,a.useState)(50);return(0,o.jsxs)(`div`,{className:`flex flex-col items-center gap-4`,children:[(0,o.jsx)(`div`,{className:`grid grid-cols-1 gap-4 sm:grid-cols-3`,children:s.map(t=>(0,o.jsxs)(`div`,{className:`flex flex-col items-center gap-2`,children:[(0,o.jsx)(`p`,{className:`font-mono text-xs text-gray-700`,children:t.label}),(0,o.jsx)(`div`,{className:`relative h-32 w-32 rounded-md border border-slate-700 bg-slate-900`,children:(0,o.jsx)(`span`,{className:`absolute select-none text-2xl`,style:{top:`${e}%`,left:`${n}%`,transform:c(t.id,e,n)},children:`⭐`})}),(0,o.jsx)(`p`,{className:`text-center text-xs text-gray-500`,children:t.description})]},t.id))}),(0,o.jsxs)(`div`,{className:`grid w-full max-w-sm grid-cols-1 gap-2 font-mono text-sm`,children:[(0,o.jsxs)(`label`,{className:`flex items-center gap-3`,children:[(0,o.jsxs)(`span`,{className:`w-20`,children:[`top: `,e,`%`]}),(0,o.jsx)(`input`,{type:`range`,min:0,max:100,value:e,onChange:e=>t(Number(e.target.value))})]}),(0,o.jsxs)(`label`,{className:`flex items-center gap-3`,children:[(0,o.jsxs)(`span`,{className:`w-20`,children:[`left: `,n,`%`]}),(0,o.jsx)(`input`,{type:`range`,min:0,max:100,value:n,onChange:e=>r(Number(e.target.value))})]})]})]})}var u=t({default:()=>p,frontmatter:()=>d}),d={title:`Containment Strategies, anchor points & overflow`,sourceUrl:`https://courses.joshwcomeau.com/wham/01-particles/02-containment-strategies`,lessonNumber:`01-particles/02-containment-strategies`,order:3,summary:"只用 `top/left` 會以左上角為基準,粒子在 100% 端會溢出。三種對齊策略:左上、中心 (`translate(-50%,-50%)`)、完美包覆 (`translate(calc(-left), calc(-top))`)。",tags:[`particles`,`css`,`transform`,`anchor`]};function f(e){let t={code:`code`,h2:`h2`,li:`li`,ol:`ol`,p:`p`,strong:`strong`,ul:`ul`,...r(),...e.components},{DemoFrame:n}=t;return n||m(`DemoFrame`,!0),(0,o.jsxs)(o.Fragment,{children:[(0,o.jsx)(t.h2,{children:`TL;DR`}),`
+`,(0,o.jsxs)(t.p,{children:[(0,o.jsx)(t.code,{children:`top/left: 100%`}),` 是把元素的`,(0,o.jsx)(t.strong,{children:`左上角`}),`對齊容器右下角,所以元素會溢出半個自己的尺寸。三種解法:`]}),`
+`,(0,o.jsxs)(t.ol,{children:[`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.strong,{children:`保持原狀`}),`:有時候邊界外露反而自然(像滿天星星的視覺)。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.strong,{children:(0,o.jsx)(t.code,{children:`transform: translate(-50%, -50%)`})}),`:以中心點當錨,左右上下都對稱,但靠邊時還是會溢出半個元素。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.strong,{children:(0,o.jsx)(t.code,{children:`translate(calc(var(--left) * -1), calc(var(--top) * -1))`})}),`:依百分比動態抵消,0% 不偏移、100% 完整縮回 — 永遠在容器內。`]}),`
+`]}),`
+`,(0,o.jsx)(n,{title:`Three anchoring strategies`,children:(0,o.jsx)(l,{})}),`
+`,(0,o.jsx)(t.p,{children:`拉 slider 把星星推到 0% / 50% / 100% 比較三格的差別。`}),`
+`,(0,o.jsx)(t.h2,{children:`Why it works`}),`
+`,(0,o.jsx)(t.p,{children:`關鍵是兩種百分比的基準不同:`}),`
+`,(0,o.jsxs)(t.ul,{children:[`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsxs)(t.strong,{children:[(0,o.jsx)(t.code,{children:`top`}),` / `,(0,o.jsx)(t.code,{children:`left`}),` 的百分比`]}),` → 容器尺寸。`,(0,o.jsx)(t.code,{children:`left: 100%`}),` = 「左上角推到容器最右邊」。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsxs)(t.strong,{children:[(0,o.jsx)(t.code,{children:`transform: translate()`}),` 的百分比`]}),` → 元素自身尺寸。`,(0,o.jsx)(t.code,{children:`translateX(-50%)`}),` = 「元素向左移半個自己的寬度」。`]}),`
+`]}),`
+`,(0,o.jsxs)(t.p,{children:[`所以策略 3 的 `,(0,o.jsx)(t.code,{children:`translate(calc(-left), calc(-top))`}),` 是個聰明小把戲 — 用同一份百分比,但兩種基準互相抵消:`]}),`
+`,(0,o.jsxs)(t.ul,{children:[`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`--left: 0%`}),` → `,(0,o.jsx)(t.code,{children:`translate(0%, ...)`}),`,不抵消,星星左上角貼左邊。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`--left: 100%`}),` → `,(0,o.jsx)(t.code,{children:`translate(-100%, ...)`}),`,星星整個寬度往左拉,右邊貼齊容器右邊。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.code,{children:`--left: 50%`}),` → `,(0,o.jsx)(t.code,{children:`translate(-50%, ...)`}),`,中心對齊容器中心。`]}),`
+`]}),`
+`,(0,o.jsx)(t.p,{children:`不需要知道元素自身有多寬,就能完美包覆任意尺寸的元素。`}),`
+`,(0,o.jsx)(t.h2,{children:`Like 按鈕的選擇`}),`
+`,(0,o.jsxs)(t.p,{children:[`課程在這個情境選 `,(0,o.jsx)(t.strong,{children:`策略 2`}),`(centre anchor):粒子偶爾溢出邊界看起來更自然,但 `,(0,o.jsx)(t.code,{children:`(50%, 50%)`}),` 的粒子真的會落在按鈕正中央,不會偏右下。`]}),`
+`,(0,o.jsx)(t.h2,{children:`Gotchas`}),`
+`,(0,o.jsxs)(t.ul,{children:[`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.strong,{children:`transform 已經被別人用了怎辦?`}),` 如果粒子上還有其他 transform(例如 dispersion 章節的 `,(0,o.jsx)(t.code,{children:`translate`}),` 位移),這邊的 `,(0,o.jsx)(t.code,{children:`-50%, -50%`}),` 要疊在前面 `,(0,o.jsx)(t.code,{children:`transform: translate(-50%, -50%) translate(...)`}),`,順序很重要。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.strong,{children:`策略 3 不適合動畫`}),`:`,(0,o.jsx)(t.code,{children:`var(--left)`}),` 是 static 值。如果你打算 animate `,(0,o.jsx)(t.code,{children:`left`}),`,瀏覽器不會同步重算 transform 的 `,(0,o.jsx)(t.code,{children:`calc()`}),`,會看到反向漂移。動畫位置時改用策略 2。`]}),`
+`,(0,o.jsxs)(t.li,{children:[(0,o.jsx)(t.strong,{children:`巢狀 inset 的舊解法`}),`:把粒子放在比容器小一圈的內層 wrapper,優點是好懂,缺點是要知道粒子的固定尺寸 — 動態尺寸或多種大小時就破功。`]}),`
+`]})]})}function p(e={}){let{wrapper:t}={...r(),...e.components};return t?(0,o.jsx)(t,{...e,children:(0,o.jsx)(f,{...e})}):f(e)}function m(e,t){throw Error(`Expected `+(t?`component`:`object`)+" `"+e+"` to be defined: you likely forgot to import, pass, or provide it.")}export{d as n,u as t};
