@@ -1,0 +1,97 @@
+---
+title: View Transition Classes, group selector for VT
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/07.04-vt-classes
+lessonNumber: '03-advanced-interactions/07.04-vt-classes'
+order: 90
+summary: '`view-transition-name` 是身份(每個元素 unique),`view-transition-class` 是分類(可以同名)。前者讓瀏覽器產生 group pseudo-element,後者讓我們用一條 CSS selector 同時 style 所有 group — 不用列舉 16 個 name。'
+tags: [advanced-interactions, view-transitions, css, selector]
+---
+
+import { ClassedShuffle } from './view-transitions';
+
+## TL;DR
+
+連結遊戲那 16 個字、shuffle 那 9 個 tile 各自要有 unique `view-transition-name` 才能被瀏覽器辨識為「同一物件移到新位置」。但要對它們**統一套 CSS**(動畫長度、easing curve)就頭痛 — 一個個列名稱寫 16 個 selector 不切實際。
+
+```css
+/* 痛苦寫法 */
+::view-transition-group(item-RIB),
+::view-transition-group(item-MOTOR),
+::view-transition-group(item-MOCK),
+/* … 13 more */ {
+  animation-duration: 500ms;
+}
+```
+
+`view-transition-class` 是 syntactic sugar:
+
+```css
+.item {
+  view-transition-class: connections-item;
+}
+::view-transition-group(.connections-item) {
+  animation-duration: 500ms;
+}
+```
+
+class 不是身份,只是分類。每個 element 還是要有自己的 unique `view-transition-name`,class 只是「貼一個 tag 讓我之後好選」。
+
+<DemoFrame title="9-tile grid — class selector controls all groups at once">
+  <ClassedShuffle />
+</DemoFrame>
+
+拉 duration slider 直接改所有 tile 的動畫長度 — 一條 selector 管全部。
+
+## name vs class
+
+| | view-transition-name | view-transition-class |
+|---|---|---|
+| 用途 | 身份 → 觸發 group 建立 | 分類 → 一條 selector 同時選多個 |
+| 唯一性 | unique per element | 多元素共用 |
+| 對應 selector | `::view-transition-group(name)` | `::view-transition-group(.classname)` |
+| 必填? | ✅ 不寫就 fall back 到 root | ❌ 純 ergonomic 工具 |
+
+兩個一起寫沒衝突,反而是常見組合:
+
+```tsx
+<div
+  style={{
+    viewTransitionName: `tile-${id}`,        // 身份
+    viewTransitionClass: 'connections-tile', // 分類
+  }}
+/>
+```
+
+## `match-element` 自動命名
+
+不想手 generate unique name(尤其資料來自 DB,name 會變動)時,有個特殊 keyword:
+
+```css
+.item {
+  view-transition-name: match-element;
+  view-transition-class: connections-item;
+}
+```
+
+`match-element` 讓瀏覽器**根據元素 identity** 自動生 unique name。配合 React 的 stable key,自動對應同一個 DOM node。
+
+注意:
+- `match-element` 比較新(Chrome / Safari 2025 Q4 才齊),~86% 支援度。
+- 跨「不同元素類型」的 morph(`<button>` 跟 `<a>` 要連動)不能用 — 還是要手命名。
+
+## 怎麼判斷該不該用 class
+
+| 場景 | 建議 |
+|---|---|
+| 1~3 個 element 各自獨特行為 | 直接寫 unique name + name selector |
+| 5+ element 行為一致 | name(unique) + class(共享) |
+| 動態 list、長度未知 | name(`match-element`) + class |
+| 整頁同質 fade | `::view-transition-group(*)` 萬用 selector |
+
+## Gotchas
+
+- **class 不是觸發器**:寫了 class 但沒寫 name = 還是 fall back 到 root group。class 本身不會建 group。
+- **不能用 CSS variable 當 class 名**:跟 name 一樣,值要是 ident。動態場景要 inline style 寫死字串。
+- **selector 用 dot prefix**:`::view-transition-group(.classname)` 注意有點;沒點變成 name selector 找不到。
+- **多 class**:目前 spec 一個元素只支援一個 view-transition-class 值(不像普通 CSS class 可以堆好幾個)。要多重分類 → 多個 selector 串。
+- **`match-element` 注意 key 穩定**:React reconciliation 跟 view-transition 的 element identity 對齊靠 DOM node。component re-mount(換 key、條件 unmount)會讓 match-element 重新生 ID,動畫就壞掉。

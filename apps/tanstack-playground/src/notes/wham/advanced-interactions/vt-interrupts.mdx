@@ -1,0 +1,104 @@
+---
+title: View Transition Interrupts, hit-testing during transitions
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/07.05-vt-interrupts
+lessonNumber: '03-advanced-interactions/07.05-vt-interrupts'
+order: 91
+summary: 'VT 進行中 button 點不到 — 真實 DOM 元素被「移到」pseudo-element 渲染,連 hit-test 都跳過。`pointer-events: none` on `::view-transition` 不夠。實務 workaround:把 trigger 元素挪出 VT 範圍 / 兩個元素分工(視覺 vs 行為)/ 用前段衝刺的 easing 讓 interrupt 不那麼突兀。'
+tags: [advanced-interactions, view-transitions, hit-testing, accessibility]
+---
+
+import { VtInterruptDemo } from './view-transitions';
+
+## TL;DR
+
+VT 跑期間想點 button 觸發下一輪?**滑鼠點不到**。這是個常見且令人困惑的痛點。
+
+原因:spec 規定**參與 transition 的元素「跳過 paint 跟 hit-testing」**。元素的視覺 pixel 被搬到 `::view-transition-new` 上(不是複製,是搬),真實 DOM 上不再渲染、也不接受點擊。
+
+但鍵盤用 Tab + Enter 仍能觸發 click handler,因為 a11y tree 不受影響。問題只在 mouse hit-testing。
+
+<DemoFrame title="interrupt — drag duration up, hammer the button">
+  <VtInterruptDemo />
+</DemoFrame>
+
+把 duration 拉到 1500ms,在動畫進行中試圖快點點 next。看 interrupt 是怎樣突兀。
+
+## 三種 workaround
+
+### 1. `pointer-events: none` 不夠
+
+```css
+::view-transition { pointer-events: none; }
+```
+
+效果:`::view-transition` 自己變透明可穿透。但**底下的真實元素也仍然不接受 hit**(因為 spec 規定參與 VT 的元素跳過 hit-testing)。所以光這個不夠,但要寫 — 至少讓**沒參與 VT 的元素**(背景 link、其它 UI)能正常點。
+
+### 2. 把 trigger 拿出 VT
+
+最簡單:button 不要設 view-transition-name,別讓它參與。
+
+```css
+:root { view-transition-name: none; }
+.slideshow-img { view-transition-name: slide; }
+/* 不寫 .button */
+```
+
+副作用:button 在 transition 期間會**被 slideshow 的 pseudo-element 蓋住,看不見**。需要重新設計 layout 讓 button 不跟 slideshow 重疊(放下方/旁邊)。
+
+### 3. 視覺跟行為拆兩個元素
+
+如果設計上 button 一定要疊在 slideshow 上面:
+
+```html
+<img class="slideshow" />
+<button class="real-trigger">Next</button>      <!-- 真按鈕,沒 VT name,可點 -->
+<div class="visual-button" aria-hidden>Next</div> <!-- 假按鈕,有 VT name,可見 -->
+```
+
+```css
+.real-trigger {
+  /* 沒 view-transition-name → 不參與 VT,clickable */
+}
+.visual-button {
+  view-transition-name: btn;
+  pointer-events: none;
+  /* CSS 疊在 real button 上面相同位置 */
+}
+```
+
+複雜但可行。`aria-hidden` 確保 SR 只看到真按鈕。
+
+## interrupt 視覺品質
+
+VT 對 interrupt **不友善**:新一輪開始時,當前 transition 直接 fast-forward 到結束,然後從新狀態開始。視覺上看到「動畫被掐掉、新動畫接上」 — 不像 CSS transition 會從中段續接。
+
+兩個減輕策略:
+
+**短 duration**:< 250ms 的動畫快到使用者來不及在中段點第二次。但會犧牲動畫品質。
+
+**前段衝刺 easing**:用 `cubic-bezier(0.08, 0.25, 0, 1)` 之類超激進 ease-out — 90% 的位移在前 10–20% 時間完成。即使 interrupt 也已經到位,「掐掉」就只是掐掉一段不太重要的尾巴。
+
+## 未來
+
+兩個 spec 進展中:
+
+- **Scoped view transitions** — `element.startViewTransition(cb)` 對 subtree 而非整頁觸發 VT。讓 root 以外的部分仍可互動。Chrome 已實驗實作,在 web.dev 文章追蹤。
+- **重新啟用 hit-testing** — CSSWG issue #11596 在討論讓 ::view-transition pseudo 把點擊 delegate 回對應元素。如果通過,所有 interrupts 問題大幅緩解。
+
+## React 替代方案
+
+motion/react 的 **layout animations** (`layout` prop) 在概念上跟 VT 重疊,但 interrupt 處理優於 VT — 因為 motion 用 spring 物理串接,中斷不會 fast-forward。
+
+```tsx
+<motion.div layout layoutId="slide" />
+```
+
+對「同元素移動到新位置」場景,motion layout 比 VT 平滑。VT 的優勢:純 CSS 寫法、跨頁面 navigation 支援(後續篇章覆蓋)。
+
+## Gotchas
+
+- **a11y tree 不受影響**:keyboard + screen reader 永遠能用,但這只解決部分 user 的痛點。視障 user 用 VoiceOver 加觸控 → 仍卡住。設計上要假設 VT 進行中為「短暫無互動」。
+- **pointer-events 跟 keyboard 不對稱**:click handler 鍵盤觸發 OK,滑鼠觸發 fail。寫 a11y test 要兩種都跑過。
+- **FastForward 在 spec 是 deterministic 行為**:不要嘗試「中斷後接著跑」,VT lifecycle 本來就只支援「跳到結束 + 開新 cycle」。
+- **`prefers-reduced-motion`**:reduced 模式下動畫應該幾乎零時長(或直接 skip VT)— 沒有動畫就沒有 interrupt 問題。
+- **debug 用 long duration**:`::view-transition-group(*) { animation-duration: 80s }` 暫時改成 80 秒,慢動作觀察 hit-testing 行為。

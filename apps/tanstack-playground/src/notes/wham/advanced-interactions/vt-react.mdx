@@ -1,0 +1,124 @@
+---
+title: VT With React, manual + framework integrations
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/07.09-vt-react
+lessonNumber: '03-advanced-interactions/07.09-vt-react'
+order: 94
+summary: 'React canary 提供 `<React.ViewTransition>`,但官方版會 batch interrupt。手動寫 `document.startViewTransition(() => startTransition(() => setState(...)))` 反而能讓 interrupt 立刻接 — 自由度高。各 meta-framework(Next、TanStack Router、Astro、React Router)都有 first-class 整合。'
+tags: [advanced-interactions, react, view-transitions, routing]
+---
+
+import { ManualVTShuffle } from './view-transitions';
+
+## TL;DR
+
+在 React 應用裡用 VT 兩條路:
+
+1. **手動**:`document.startViewTransition(() => startTransition(setState))`。最大自由度,interrupts 可即時。
+2. **`<React.ViewTransition>`** (React Canary 19.3+):自動 unique name、整合 React state machine。但 interrupt 會 batch 到「動畫結束才接下一個」。
+
+由於 SPA(包括這個 TanStack Start 專案)不能用 cross-document VT,**所有 React 場景的 VT 都是 same-document**。
+
+<DemoFrame title="manual startViewTransition + interrupt-able">
+  <ManualVTShuffle />
+</DemoFrame>
+
+## 手動寫法 cheat-sheet
+
+```tsx
+function shuffle() {
+  document.startViewTransition?.(() => {
+    startTransition(() => {
+      setOrder((prev) => shuffle(prev));
+    });
+  }) ?? setOrder((prev) => shuffle(prev));
+}
+```
+
+兩層:
+
+- **`document.startViewTransition`** 是瀏覽器 API。callback 內 DOM 更新會被夾在「拍 snapshot 前後」。
+- **`startTransition`** 是 React API,告訴 React 「這個 state 變動可以低優先 batch」。VT 內配 `startTransition` 確保 React 真的在 callback 內 flush DOM(否則可能 defer 到下一輪)。
+
+兩個一起包,順序很重要:**外層 startViewTransition,內層 startTransition**。反過來會讓 React batch 到 callback 結束之後才更新,VT 拍不到變動。
+
+## React 官方 component
+
+React 19 canary 有 `<ViewTransition>` 加上 view-transition-name 自動生成:
+
+```tsx
+import { ViewTransition, startTransition } from 'react';
+
+function App() {
+  return (
+    <>
+      {words.map((word) => (
+        <ViewTransition key={word}>
+          <label>{word}</label>
+        </ViewTransition>
+      ))}
+      <button onClick={() => {
+        startTransition(() => setWords(shuffle(words)));
+      }}>shuffle</button>
+    </>
+  );
+}
+```
+
+注意:**不需要 `document.startViewTransition`** — `startTransition` 觸發後,`<ViewTransition>` 內部自動配合。
+
+但 interrupt 行為比較死:動畫進行中再點,React 會 queue 並等動畫結束後才開新一輪。Comeau 認為這對 user 不友善(快點時 user 期待立即反應)。
+
+## 一個 ViewTransition 包多個 children = 雷
+
+```tsx
+{/* ❌ 包整個 list */}
+<ViewTransition>
+  {words.map((w) => <Word key={w} word={w} />)}
+</ViewTransition>
+```
+
+`<ViewTransition>` 會給每個 child 自動 unique name,但**name 用 array index** — shuffle 後 index 0 永遠是 index 0,結果每格 cross-fade 而不是 morph。
+
+正解:每個 child 自己包一層 `<ViewTransition>`:
+
+```tsx
+{/* ✅ 每個 child 一個 */}
+{words.map((word) => (
+  <ViewTransition key={word}>
+    <Word word={word} />
+  </ViewTransition>
+))}
+```
+
+跟 React 的 `key` 規則相通 — index 當 key 是反 pattern,VT 也是。
+
+## meta-framework 整合
+
+| Framework | 設定 |
+|---|---|
+| **TanStack Router** | `Link` 元件加 `viewTransition` prop / `navigate` options 帶 `viewTransition: true` |
+| **Next.js** App Router | `next.config.js` 開 `viewTransition`,然後配 `<ViewTransition>` |
+| **React Router v7 (Framework mode)** | `<Link to="..." viewTransition>` |
+| **Astro** | 兩種模式都支援 — multi-page 用 cross-doc VT,SPA 用 same-doc |
+
+本專案 (TanStack Start SPA mode):router 改 navigate 時 `viewTransition: true` 就會包 startViewTransition,然後再加 view-transition-name 給想 morph 的元素就好。
+
+## 怎麼選 manual vs `<ViewTransition>`
+
+| | manual | `<ViewTransition>` |
+|---|---|---|
+| Interrupt | 立即接 | batch 等 |
+| React Canary | ❌ 不需要 | ✅ 需要 |
+| 自動生 name | ❌ 自己寫 | ✅ |
+| Suspense / RSC 整合 | 手動 wire | 自動 |
+| Production safe | ✅ | ⚠ canary |
+
+非 hobby project 推薦手動。等 `<ViewTransition>` 進 stable React 再評估。
+
+## Gotchas
+
+- **`startTransition` 不是 `useTransition`**:`startTransition` 是 standalone fn,沒 isPending state;`useTransition()` 回 `[isPending, startTransition]` 包同一個 API 加進 hook。VT 場景兩個都行,有 pending UI 用 hook 版。
+- **`document.startViewTransition` TS 型別**:lib.dom.d.ts 已 ship 但要求 TS 5.5+。舊版手動 declare。
+- **嚴格模式 / Strict Mode 雙重渲染**:VT 在 dev 的 strict mode 下可能 fire 兩次,看起來「動畫播兩遍」。production build 沒問題,debug 時別誤判。
+- **跨 conditional render**:if-else 切換顯示哪個 component 時,如果兩個 component 都帶同樣 view-transition-name,VT 會把它們當「同一物件 morph」 — 即使是不同 component。可以利用做「modal 從 button 展開」之類的效果。
+- **不要把 `view-transition-name` 寫在 component 外的 className 上**:CSS class selector 不支援 `view-transition-name` 動態值。React 場景幾乎都用 inline style 寫死字串。

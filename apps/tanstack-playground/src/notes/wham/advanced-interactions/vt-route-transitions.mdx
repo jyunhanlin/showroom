@@ -1,0 +1,95 @@
+---
+title: VT Cross-Document Transitions, page-to-page morph
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/07.08-vt-route-transitions
+lessonNumber: '03-advanced-interactions/07.08-vt-route-transitions'
+order: 93
+summary: 'CSS 加 `@view-transition {`{` `}`navigation: auto{`}`}` ` 兩個頁面都寫,瀏覽器在 same-origin 連結點擊時自動 trigger VT。共用 `view-transition-name` 的元素會 morph(像 hero image 從 listing 飛到 detail)。傳統 multi-page site 也能玩。'
+tags: [advanced-interactions, view-transitions, navigation, ssr]
+---
+
+import { FakeRouteTransitions } from './view-transitions';
+
+## TL;DR
+
+VT 有兩種模式:
+
+- **Same-document**:`document.startViewTransition(cb)` JS 觸發,callback 內部更新 DOM。前面所有 demo 都是這種。
+- **Cross-document**:CSS `@view-transition { navigation: auto }` 宣告,瀏覽器在 same-origin 連結點擊時自動觸發。**沒一行 JS**。
+
+兩個 HTML 頁面都加同一條:
+
+```css
+@view-transition { navigation: auto; }
+```
+
+兩頁都有 `<header class="site-header">` 都帶 `view-transition-name: site-header` → 點 link → header 自動 morph。
+
+<DemoFrame title="same-doc mock — header & main share names">
+  <FakeRouteTransitions />
+</DemoFrame>
+
+(這個 demo 用 same-document VT 模擬。真實 multi-page 設定 `@view-transition` 後,點 `<a href="/about">` 自動 trigger,不需要 setState 或 startViewTransition。)
+
+## 寫法
+
+`home.html` 跟 `about.html` 兩個檔案都這樣寫:
+
+```html
+<head>
+  <style>
+    @view-transition { navigation: auto; }
+    .site-header { view-transition-name: site-header; }
+    .main-content { view-transition-name: main-content; }
+  </style>
+</head>
+<body>
+  <header class="site-header">…</header>
+  <main class="main-content">…</main>
+</body>
+```
+
+點 `<a href="/about.html">` → 瀏覽器:
+1. 拍當前頁面 snapshot,挑出有 `view-transition-name` 的元素分組。
+2. 抓新 HTML、render。
+3. 從新頁面找對應 vt-name 的元素,接續動畫。
+
+## 限制
+
+| 限制 | 影響 |
+|---|---|
+| **same-origin only** | `joshwcomeau.com → courses.joshwcomeau.com` 不行(subdomain 不同 origin) |
+| **新頁面的 element 必須在 initial HTML** | 若 hero image 是 client-render 才出現,VT 找不到對應 → fall back 到瞬間切換 |
+| **不能跨 SPA navigation** | Next.js / React Router 都不算 cross-doc;它們是 client-side route swap → 只能用 startViewTransition |
+| **Firefox 還沒支援**(2026 春)| Chrome / Safari 已實作。81% 全域支援 |
+
+## 跟 SPA(像本專案)的關係
+
+TanStack Start SPA mode 沒做 cross-document navigation — route 切換是 client-side 改 React tree。所以 `@view-transition` 對我們**不會 trigger**。
+
+要做 SPA 內 route VT,有兩條路:
+
+1. **手動 startViewTransition**:在 router 的 navigate handler 包一層。
+2. **下一篇 [VT with React](./07.09-vt-react)**:React 19+ 有 `<ViewTransition>` element 配 startTransition,語法更乾淨。
+
+## 用例
+
+跨頁面 VT 最有 ROI 的場景:
+
+- **Hero 圖片從 listing 飛到 detail**:listing 的 thumbnail 跟 detail 的 hero 共用 vt-name → 「同一張圖片放大進場」的 native app 感。
+- **Sticky header morph**:header 高度因頁面類型不同(homepage 帶大 padding,article 緊縮),morph 過渡掩蓋 layout shift。
+- **Logo 從中央 hero 收到 corner**:landing → app 的「縮起來」過場。
+
+## Edge cases & 雷
+
+- **AdBlock 等 extension 注入會中斷 VT**:Comeau 實測 AdBlock 把 `@view-transition` 寫在外部 stylesheet 時 VT 30–40% 機率不 fire,寫在 inline `<style>` 才穩。
+- **404 / error 頁面要不要也加?** 如果加,navigate 到 broken page 仍會 trigger VT 但找不到對應 element → 部分 morph、部分 fade。看你想不想做。
+- **`prefers-reduced-motion`** 在 cross-doc VT 也適用 — 跟 same-doc 一樣,瀏覽器不會 fire VT 或會用簡化版。
+- **Render-blocking meta tag**:如果 detail page 的 hero 要等 fetch 才出現,可以用 `<link rel="expect">` 或 render-blocking 機制讓瀏覽器等到關鍵 element 進 DOM 才開始 VT。實驗中。
+
+## Gotchas
+
+- **必須兩個頁面都有 `@view-transition`**:只有 source 頁有沒有 destination 也宣告 → 不 fire。
+- **Bundler 把 CSS 拆 module**:某些 build 工具會把 critical CSS 拆走,@view-transition 變成被 lazy load → fire 時間點不對。建議放 inline `<style>`。
+- **回上一頁(back button)也算 navigation**:會 trigger 反向 VT。你的動畫設計要 in/out 兩個方向都合理。
+- **iframe 裡不行**:VT 不跨 iframe boundary。
+- **Speculation Rules API**:預先 prefetch 下一頁可以加速 cross-doc VT(因為 destination HTML 已 cached),但 prefetch 太多會浪費頻寬,設 selector 限制。

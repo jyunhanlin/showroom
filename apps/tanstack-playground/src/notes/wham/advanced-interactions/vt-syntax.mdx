@@ -1,0 +1,108 @@
+---
+title: View Transitions Syntax, startViewTransition basics
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/07.01-vt-syntax
+lessonNumber: '03-advanced-interactions/07.01-vt-syntax'
+order: 88
+summary: '`document.startViewTransition(updateDOM)` 拍兩張 snapshot 疊在頁面最上層,用 keyframe 補間。`view-transition-name` 把元素分組,`::view-transition-old/new(name)` 套自訂 keyframe。其它沒參與的元素也要有 vt name,否則會被蓋住。'
+tags: [advanced-interactions, view-transitions, css, animation]
+---
+
+import { ViewTransitionSlideshow } from './view-transitions';
+
+## TL;DR
+
+View Transition 的整個流程:
+
+1. `document.startViewTransition(callback)` — 開始一輪 transition。
+2. 瀏覽器**先拍一張快照**(整張視窗)。
+3. 跑 callback,`setState` / DOM 變動立刻 flush。
+4. 再拍一張新快照。
+5. 兩張快照疊在所有 UI 上方,用 `::view-transition-old` / `::view-transition-new` pseudo-element 渲染。預設兩張交叉淡出。
+6. 動畫完成 → pseudo-elements 移除 → 看到真實 DOM。
+
+整個過程實際 DOM 更新只發生在第 3 步,後面看到的「動畫」是 pseudo-element 的合成。
+
+<DemoFrame title="capybara-style slideshow with VT slide animation">
+  <ViewTransitionSlideshow />
+</DemoFrame>
+
+## 自訂 keyframe
+
+```css
+@keyframes exitLeft {
+  from { transform: translateX(0) }
+  to   { transform: translateX(-100%) }
+}
+@keyframes enterRight {
+  from { transform: translateX(100%) }
+  to   { transform: translateX(0) }
+}
+::view-transition-old(slide) { animation-name: exitLeft; }
+::view-transition-new(slide) { animation-name: enterRight; }
+
+.card { view-transition-name: slide; }
+```
+
+`view-transition-name` 把元素**指定一個 transition 群**。同名的 old/new pseudo-element 套同一條 keyframe。不寫 `view-transition-name` 整個 root 變成一個大群組(slide 整頁,連按鈕都跟著走)。
+
+## 旁邊元素也要有 name
+
+如果 button 沒設 `view-transition-name`,在 transition 期間整頁會被 capybara 圖蓋住,button 看不見。
+
+```css
+:root { view-transition-name: none; }
+.card { view-transition-name: slide; }
+.button { view-transition-name: btn; }
+```
+
+`:root` 把 root 的 transition 關掉(否則整頁仍是個 root group)。每個想保留可見的元素都要有自己的 name — 即使它根本沒變,VT 也會幫它 cross-fade(從相同 → 相同,看起來沒動)。
+
+## Production-ready 兩件事
+
+```ts
+function next() {
+  function updateDOM() { /* setState etc */ }
+
+  const prefersReduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (document.startViewTransition && !prefersReduced) {
+    document.startViewTransition(updateDOM);
+  } else {
+    updateDOM();
+  }
+}
+```
+
+- 沒支援 `startViewTransition` 的瀏覽器直接呼 updateDOM(感知不到動畫但仍能用)。
+- `prefers-reduced-motion` 時跳過 — 或者只在 CSS 裡用 `@media` 包自訂 keyframe,讓 transition 仍跑但只剩預設 cross-fade(本 demo 採用後者)。
+
+## Pseudo-element tree
+
+```
+::view-transition (root container)
+  ::view-transition-group(slide)
+    ::view-transition-image-pair(slide)
+      ::view-transition-old(slide)
+      ::view-transition-new(slide)
+  ::view-transition-group(btn)
+    ::view-transition-image-pair(btn)
+      ::view-transition-old(btn)
+      ::view-transition-new(btn)
+```
+
+- **group** 控整體位置/尺寸動畫(預設從 old 位置 morph 到 new 位置)。
+- **image-pair** 包 old + new。
+- **old / new** 是兩張 snapshot,可單獨套 keyframe。
+
+要 debug 的時候把 `::view-transition-group(*) { animation-duration: 80000ms }` 寫進 dev CSS,動畫慢到能用 devtools 抓 DOM。
+
+## Snapshot 不是 screenshot
+
+文字仍可選取、超連結仍可點(理論上)。瀏覽器是把元素「序列化成 painting layer」而不是 raster bitmap,所以可互動性部分保留。
+
+## Gotchas
+
+- **TypeScript 沒 type**:`document.startViewTransition` 在 lib.dom.d.ts 已支援。如果你的版本太舊要 declare:`declare global { interface Document { startViewTransition?: (cb: () => void) => { ready: Promise<void>; finished: Promise<void> } } }`
+- **Animation 期間 button 不能 click**:整輪 transition 進行時頁面被 freeze,沒辦法中斷。下一篇 [interrupts](./07.05-vt-interrupts) 處理這個。
+- **每個有 vt-name 的元素只能有一個 instance**:同 view 裡兩個元素都叫 `card` 會壞。要區分用 `view-transition-class`(下下篇)。
+- **不要每幀都 startViewTransition**:這 API 設計給「state 切換」,不是 cursor follow 那種連續動畫。call 太頻繁會 race。
+- **`mix-blend-mode: plus-lighter` 的奇怪預設**:預設 cross-fade 用 plus-lighter blend mode 避免半透明疊加變灰。寫自訂 keyframe 時可能要 override。

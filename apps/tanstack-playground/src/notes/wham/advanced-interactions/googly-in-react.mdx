@@ -1,0 +1,92 @@
+---
+title: Googly in React, component-based eye creature
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/02.03-googly-in-react
+lessonNumber: '03-advanced-interactions/02.03-googly-in-react'
+order: 84
+summary: '把多眼邏輯抽成 `<Creature>` + `<Eye>`。父元件用 `useRelativeMousePosition` 算 isWithinRange 一次,當 prop 傳給每個 Eye。每隻眼自己的 stiffness 讓視線錯落、感覺更活。'
+tags: [advanced-interactions, react, component, motion, googly]
+---
+
+import { GooglyCreature } from './googly-in-react';
+
+## TL;DR
+
+把上一篇的 vanilla DOM 寫法重構成 React 組件:
+
+- **父 `<Creature>`**:用 `useRelativeMousePosition(wrapperRef)` 算游標相對自身的位置 → 算總距離 → 給每個子 Eye `isWithinRange` boolean prop。
+- **子 `<Eye>`**:listen pointermove,用 motion value + spring 控制 pupil。`isWithinRange === false` 時直接歸零,在範圍內就根據自身 box 算方向。
+- 每隻 `<Eye>` 拿不同 `stiffness` prop,視覺上每隻反應節奏略不同 — 不再是一群一致的傀儡,有「個體感」。
+
+<DemoFrame title="9-eye creature with synchronized in-range + per-eye stiffness">
+  <GooglyCreature />
+</DemoFrame>
+
+## 元件邊界
+
+```tsx
+function Creature({ maxDistance }: { maxDistance: number }) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [mouse] = useRelativeMousePosition(wrapperRef);
+  const distance = mouse.x != null && mouse.y != null ? Math.sqrt(mouse.x ** 2 + mouse.y ** 2) : Infinity;
+  const isWithinRange = distance <= maxDistance;
+
+  return (
+    <div ref={wrapperRef} className="grid">
+      {range(9).map((i) => (
+        <Eye key={i} stiffness={STIFFNESSES[i]} isWithinRange={isWithinRange} />
+      ))}
+    </div>
+  );
+}
+```
+
+`isWithinRange` 是個 boolean、隨 mouse 跟 maxDistance 計算出來,React 自動 propagate 到所有 children。每幀重算 → 每幀 propagate(但 React 18 batching 會合進同一輪 render)。
+
+## 為什麼 stiffness 要差異化
+
+固定 `stiffness: 200` 的話,9 隻眼動作完全同步 → 看起來像 puppet。
+
+讓每隻眼有自己的 stiffness(135–245 範圍),反應慢的拖一點點,反應快的先到位 → 視覺上「群體中的個體差異」,看起來活了起來。
+
+但**範圍別差太多**:Comeau 原本嘗試 135–275 的 spread,後來縮到 175–245,因為太誇張的差距會讓有些眼明顯落後,反而像 lag bug。
+
+## Eye 內部
+
+```tsx
+function Eye({ stiffness, isWithinRange }: EyeProps) {
+  const eyeRef = useRef<HTMLDivElement>(null);
+  const rawX = useMotionValue(0);
+  const rawY = useMotionValue(0);
+  const x = useSpring(rawX, { stiffness, damping: 22 });
+  const y = useSpring(rawY, { stiffness, damping: 22 });
+
+  useEffect(() => {
+    function onMove(e) {
+      if (!isWithinRange) {
+        rawX.set(0); rawY.set(0);
+        return;
+      }
+      const box = eyeRef.current!.getBoundingClientRect();
+      // ...計算方向 + .set
+    }
+    window.addEventListener('pointermove', onMove);
+    return () => window.removeEventListener('pointermove', onMove);
+  }, [isWithinRange]);
+
+  return (
+    <div ref={eyeRef}>
+      <motion.div style={{ x, y }} />
+    </div>
+  );
+}
+```
+
+注意:每個 Eye 自己 listen 一次 pointermove。9 隻 = 9 個 listener。實測 < 20 隻無感差。要 50+ 才有必要 lift listener 到 Creature。
+
+## Gotchas
+
+- **stiffness 是 hook 參數,不能 dynamic 變動**:`useSpring(rawX, { stiffness })` 第一次 mount 時用 stiffness,之後改 prop motion 不會重建 spring。如果想 runtime 改,用 `spring.set({ stiffness: newValue })` 透過 ref 更新。
+- **distance > maxDistance 時還是要 listen**:user 移開 → 必須讓 spring 滑回 0,所以 listener 不能 unmount。但可以早期 return 跳過昂貴計算。
+- **React 18 batching**:每幀的 setState(若有用)會合批,但 motion value 完全跳過 React,直接寫 DOM。所以 spring 動畫期間不會 trigger re-render,效能比想像中好。
+- **stiffness 陣列長度要等於 eye 數**:常見 off-by-one bug 是新增第 10 隻眼忘了加新值,陣列存取 undefined → useSpring 第一次拿到 NaN → spring 卡住。寫 fallback `stiffnesses[i] ?? 200`。
+- **元件邊界考量**:Creature 也可以**完全不知道**自己有幾隻 eye(用 React.Children.map),把資料模型推到 props/context。看用例規模選擇。

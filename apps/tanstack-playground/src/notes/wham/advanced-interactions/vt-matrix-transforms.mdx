@@ -1,0 +1,98 @@
+---
+title: VT Matrix Transforms, how positions get tweened
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/07.02-vt-matrix-transforms
+lessonNumber: '03-advanced-interactions/07.02-vt-matrix-transforms'
+order: 89
+summary: 'View Transition 對「同一個 vt name 但位置/尺寸變了」的元素,瀏覽器自動產生 `transform: matrix(...)` partial keyframe — 從舊 bounding box 補間到新 bounding box。寫法只是改 layout(grid 順序、width/height),動畫自動。'
+tags: [advanced-interactions, view-transitions, css, matrix, layout]
+---
+
+import { GridShuffleVT, ResizeVT } from './view-transitions';
+
+## TL;DR
+
+VT 不只能跨頁面 cross-fade,還能處理「同一個元素在 layout 上**改位置**」 — 自動 FLIP-style 動畫。
+
+關鍵差異(對比上一篇 capybara slideshow):
+
+| | slideshow | shuffle |
+|---|---|---|
+| DOM 變動 | 改 `<img>` 的 src | 把 children 重排 |
+| 元素位置 | 沒動 | 整個 grid 變 |
+| 動畫機制 | 自訂 keyframe(slide left/right) | 瀏覽器自動產生 matrix |
+
+<DemoFrame title="3×3 grid shuffle — auto matrix transforms">
+  <GridShuffleVT />
+</DemoFrame>
+
+點 shuffle,九個方塊各自滑到新位置。我們**沒寫任何 keyframe** — 瀏覽器看 view-transition-name 還是 a/b/c/...,但每塊的 bounding box 變了,自動補間。
+
+## 內部運作
+
+把 `::view-transition-group` 的 animation-duration 拉到 120s 慢動作觀察,會發現每個 group 上有條 user-agent 自動產生的 keyframe:
+
+```css
+@keyframes -ua-view-transition-group-anim-tile-a {
+  0% { transform: matrix(1, 0, 0, 1, 16, 80); }
+  /* to 用 group 元素本身的 transform 補 */
+}
+
+::view-transition-group(tile-a) {
+  transform: matrix(1, 0, 0, 1, 291.5, 168);
+  animation-name: -ua-view-transition-group-anim-tile-a;
+}
+```
+
+幾個重點:
+
+1. **partial keyframe**:只寫 `from`,`to` 留給 group 元素的 inline-style transform。
+2. **`matrix(1, 0, 0, 1, x, y)`** 等於 `translate(x, y)`。前 4 個值是 scale/rotate/skew(這裡都是 1/0,純位移)。
+3. **每個 view-transition-name 一條獨立 keyframe**,動態生成 — 元素位置算出來就餵進去。
+
+## 連 size 也能補
+
+<DemoFrame title="resize circle via width/height">
+  <ResizeVT />
+</DemoFrame>
+
+```css
+.circle {
+  view-transition-name: circle;
+  width: 80px; height: 80px;
+}
+.circle.large { width: 220px; height: 220px; }
+```
+
+改 width/height 也會被 VT 抓到。group 的 width/height 都被算成新值,自動 transition。
+
+**重點:VT 寫法用 `width/height` 改尺寸,不要用 `transform: scale()`**:
+
+- VT 會自己加 `matrix(...)` translate 到 group 上。如果你又 scale,兩個 matrix 互相干擾,結果亂飄。
+- VT 內部 sub-pixel rendering 跟 transform: scale 不同 — 性能上沒優勢,反而增加複雜度。
+
+跟一般 CSS 動畫的「永遠用 transform」習慣**對 VT 是反向**。
+
+## Override auto keyframe
+
+可以蓋掉 user-agent keyframe:
+
+```css
+@keyframes flashOutline {
+  from { outline: 6px solid blue; }
+  to   { outline: 1px solid yellow; }
+}
+::view-transition-group(*) {
+  animation-name: flashOutline;
+  animation-duration: 1s;
+}
+```
+
+這樣會**取代**位置補間,改成 outline 變化。通常不想做(放棄 FLIP 是浪費),但對純粹色彩切換或 fade 場景可以蓋。
+
+## Gotchas
+
+- **每個 vt name 只能對應一個元素**:同一輪 view 裡兩個 tile 都叫 `tile` 會 broken。每個用 unique name(我這 demo 用 `tile-a`、`tile-b`、…)。
+- **list reorder 場景必用 unique key + unique vt-name**:用 array index 當 vt name 等於沒效果(舊新都叫 tile-0、tile-1,瀏覽器看不出哪個搬了)。穩定 id 才對。
+- **`view-transition-name` 不能用 CSS variable**:`view-transition-name: var(--name)` 不 work(spec 限制)。React 裡用 inline style 寫死字串。
+- **transform: scale() 反 pattern**:對 VT 用 width/height 改尺寸。一般 CSS 動畫的「永遠用 transform」直覺要重新校準。
+- **大量元素 VT 性能**:50+ 個元素同時 VT 會吃 GPU。實測再上 production,需要時用 `view-transition-class` 套相同設定避免重複渲染(下一篇)。

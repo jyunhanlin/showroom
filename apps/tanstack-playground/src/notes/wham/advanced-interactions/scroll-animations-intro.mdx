@@ -1,0 +1,59 @@
+---
+title: Scroll Animations Intro, scrollytelling primer
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/05-scroll-animations
+lessonNumber: '03-advanced-interactions/05-scroll-animations'
+order: 85
+summary: 'scroll 是 web 上最被當理所當然的互動,但其實是個極好的「敘事時間軸」。Scrollytelling 把內容跟 scroll progress 綁在一起,讓網頁變成 cinematic experience。但用過頭就變成 scroll-jacking,使用者失去掌控感。'
+tags: [advanced-interactions, scroll, scrollytelling, intro]
+---
+
+import { ScrollytellingDial } from './scroll-animations-intro';
+
+## TL;DR
+
+scroll 一直在我們眼前,但很少當作「設計維度」對待。Scrollytelling — 把 scroll position 當時間軸驅動內容變化 — 是個被一連串新瀏覽器 API 解鎖的領域:
+
+- `IntersectionObserver`(已成熟):元素「進入畫面」時觸發。
+- `scroll-timeline` + `view-timeline` CSS:讓 keyframe 動畫跟 scroll 綁定,純 CSS 寫。
+- `useScroll` / `scrollYProgress`(motion lib):讀 scroll 進度做任意計算。
+- `position: sticky`:把元素「黏在視窗某位置」直到滾過特定範圍 — scrollytelling 的基本布局元件。
+
+<DemoFrame title="dial through use cases">
+  <ScrollytellingDial />
+</DemoFrame>
+
+## 哪些技巧後面會看到
+
+接下來幾篇分別深入:
+
+| 技巧 | 對應 lesson |
+|---|---|
+| Scroll-driven keyframes(CSS `animation-timeline`) | [Animation Timelines](./05.01-animation-timeline) |
+| Linked timelines(多元素同步) | [Linked Timelines](./05.03-linked-timelines) |
+| Scroll-triggered(進畫面才播一次) | [Triggered Animations](./05.04-scroll-triggered-animations) |
+| Parallax 視差 | [Parallax Scrolling](./05.05-parallax) |
+| Smooth scrolling | [Smooth Scrolling](./05.06-smooth-scrolling) |
+| 「sticky blocker」trick | [Sticky Blocker](./06-sticky-trick) |
+
+## Scroll-jacking 的紅線
+
+幾個 antipatterns 會讓使用者抓狂:
+
+- **完全劫持滾動方向**:把 scroll 變成水平移動。Trackpad 還能,滑鼠輪沒辦法。
+- **scroll 速度被人為減慢**:lerp scroll position 讓網頁感覺「黏黏的」。Trackpad 螢幕本身已有慣性,再加 lerp 變兩倍延遲。
+- **scroll 進度被「卡點」**:位置只能停在預設 keyframe 段點,中間的位置會被吸過去。完全摧毀「我滑到我想看的位置」的能力。
+
+健康的 scroll-driven animation:**scroll 仍然只是 scroll**,動畫只是在 scroll 進行時順便發生,使用者隨時可以反向、加速、跳過。
+
+## A11y 第一
+
+- `prefers-reduced-motion: reduce`:scroll-driven 動畫應該 fall back 成靜態(內容直接呈現,沒有過渡)。
+- 內容**不能依賴動畫才能讀**:即使 user 跳過 scroll(用 anchor link、瀏覽器搜尋、tab 鍵),所有內容仍要可見可讀。
+- screen reader 不依賴 scroll position,所有資訊要在 DOM 裡有完整文字版本。
+
+## Gotchas
+
+- **不要監聽 `scroll` event 跑動畫**:scroll 在 trackpad / 觸控上每秒打 60–120 次。在 listener 裡做 layout reads(`getBoundingClientRect`)會卡。改用 `IntersectionObserver` 或新的 `scroll-timeline` API。
+- **跨瀏覽器一致性**:`scroll-timeline` 在 Firefox 跟 Safari 上 2025 年才成熟。Polyfill 或 fallback 要寫好。
+- **iOS Safari 的 `100vh` 雷**:scrollytelling 常用 `min-height: 100vh` 作 sticky frame,iOS 上 100vh 包含工具列高度,user scroll 時工具列收起 viewport 變高 → layout 跳。改用 `100dvh`(dynamic viewport height)。
+- **server render**:scroll position 是 client-only 概念。Hydrate 時不要依賴 scroll 才能顯示主要內容,否則 JS 還沒下載前頁面是空白。

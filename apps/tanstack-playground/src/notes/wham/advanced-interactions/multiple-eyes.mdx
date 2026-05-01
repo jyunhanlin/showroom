@@ -1,0 +1,127 @@
+---
+title: Multiple Eyes, independent vs synchronized tracking
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/02.02-multiple-eyes
+lessonNumber: '03-advanced-interactions/02.02-multiple-eyes'
+order: 83
+summary: '一個容器多隻眼。每隻獨立算距離 → 視線會「一隻一隻」進入有效範圍,生物感破功。改成「整體共享一個距離判定 + 各眼仍獨立轉向」 — 整隻生物同時感知到游標,視線同時鎖定/放手。'
+tags: [advanced-interactions, motion, cursor, googly]
+---
+
+import { MultiEyeComparison } from './multiple-eyes';
+
+## TL;DR
+
+多隻眼睛的容器(蜘蛛、Cookie Monster、五眼怪…),最直覺的實作是**讓每隻眼都跑一份獨立邏輯**:各自的 bounding box、各自的 max distance 判定。
+
+但這樣有個 immersion 問題:游標靠近時,離得近的眼先 snap 到位,遠的眼還呆呆看前方,等 cursor 進到它的範圍才開始追。視覺上「這不是一隻生物,是一群獨立的眼睛」。
+
+修法:**距離判定**(要不要追)用整隻生物的中心算;**視線方向**(往哪看)各眼仍獨立。
+
+<DemoFrame title="independent vs synchronized">
+  <MultiEyeComparison />
+</DemoFrame>
+
+## 三步進化
+
+### 1. 多隻眼的最小實作
+
+```ts
+const eyes = [...document.querySelectorAll('.eye')];
+
+eyes.forEach((eye) => {
+  const pupil = eye.querySelector('.pupil');
+  const springX = springValue(0, SPRING_CONFIG);
+  const springY = springValue(0, SPRING_CONFIG);
+  // ...每隻自己 listen pointermove + 算 box + 判斷 distance
+});
+```
+
+問題:N 隻眼 = N 個 pointermove listener。理論不效率,實測 5–10 隻無感差。
+
+### 2. 統一一個 listener,迴圈裡分別處理
+
+```ts
+const eyes = nodes.map((node) => ({
+  node,
+  pupil: node.querySelector('.pupil'),
+  getBox: throttle(() => node.getBoundingClientRect(), 500),
+  springX: springValue(0, SPRING_CONFIG),
+  springY: springValue(0, SPRING_CONFIG),
+}));
+
+window.addEventListener('pointermove', (event) => {
+  eyes.forEach((eye) => {
+    // 用 eye.getBox() 算各自的距離
+  });
+});
+```
+
+優點:單一 listener。每隻眼仍有獨立的 throttled box(不能共用!)。
+
+### 3. 同步距離判定
+
+```ts
+window.addEventListener('pointermove', (event) => {
+  const cBox = creatureBoxThrottled();
+  const cCenter = { x: cBox.left + cBox.width / 2, y: cBox.top + cBox.height / 2 };
+  const distToCreature = getDistanceBetweenPoints({ x: event.clientX, y: event.clientY }, cCenter);
+
+  eyes.forEach((eye) => {
+    if (distToCreature > MAX_DISTANCE) {
+      eye.springX.set(0);
+      eye.springY.set(0);
+      return;
+    }
+    // 在範圍內 → 各眼仍獨立計算自己的視線方向
+    const eyeBox = eye.getBox();
+    // ...用 eyeBox 算 angle + 套 spring
+  });
+});
+```
+
+關鍵:**距離判定**(activator)看整隻生物;**方向計算**(direction)看單眼。
+
+## React 對應寫法
+
+```tsx
+function MultiEyeCreature() {
+  const creatureRef = useRef<HTMLDivElement>(null);
+  const eyeRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  // 每隻眼的 raw + spring motion value
+  const rawXs = EYES.map(() => useMotionValue(0));
+  const rawYs = EYES.map(() => useMotionValue(0));
+  const xs = rawXs.map((m) => useSpring(m, SPRING_CONFIG));
+  const ys = rawYs.map((m) => useSpring(m, SPRING_CONFIG));
+
+  useEffect(() => {
+    function onMove(e) {
+      const cBox = creatureRef.current!.getBoundingClientRect();
+      const cCenter = { x: cBox.left + cBox.width / 2, y: cBox.top + cBox.height / 2 };
+      const distToCreature = getDistanceBetweenPoints({ x: e.clientX, y: e.clientY }, cCenter);
+
+      EYES.forEach((_, i) => {
+        if (distToCreature > MAX_DISTANCE) {
+          rawXs[i]!.set(0); rawYs[i]!.set(0);
+          return;
+        }
+        const eyeBox = eyeRefs.current[i]!.getBoundingClientRect();
+        // ...算 angle + 套
+      });
+    }
+    window.addEventListener('pointermove', onMove);
+    return () => window.removeEventListener('pointermove', onMove);
+  }, []);
+  // ...
+}
+```
+
+每隻眼一個 motion value pair,迴圈在同一個 effect 裡跑。
+
+## Gotchas
+
+- **不能共用 throttled box**:每隻眼座標不同,如果共用一個 throttle fn 結果回來的 box 都是同一個元素的,所有眼會看同一個方向。**每個 eye 各自一個 throttle**(雖然 throttle 是「限制呼叫頻率」,我們利用它的 cache 行為是 by-instance)。
+- **同步判定離合的 threshold 要選對**:`distToCreature > 200` 用整隻生物的中心算,所以 threshold 要比之前單眼用的 150 大,不然有些角落的眼還沒進到生物的「感知半徑」就已經失去焦點。
+- **synchronization 不適用所有場景**:如果是「一群獨立的東西」(三個按鈕的 ripple 各自獨立、九個 emoji 各自彈跳),independent 才對。判斷標準是「這些東西在敘事上是不是同一個 entity」。
+- **N 個 motion value × N 個 spring**:每隻眼 4 個 hook(2 raw + 2 spring),五隻眼 = 20 個 hook。React 規定 hook 必須**穩定 deterministic** — 不能在 conditional 裡 call。如果眼的數量會動態變,改用 ref / Map 替代 motion value 陣列。
+- **rAF 排程**:N 隻眼就有 N 倍 spring 運算。motion 內部會合批,但極端情況(50+ 眼)還是要考慮 Canvas。

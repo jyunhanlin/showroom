@@ -1,0 +1,113 @@
+---
+title: Springy Motion, smoothing cursor tracking with springs
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/02.01-springy-motion
+lessonNumber: '03-advanced-interactions/02.01-springy-motion'
+order: 82
+summary: 'cursor-driven 動畫離開「有效範圍」時直接歸零,看起來突兀。CSS transition 補不上(每幀都重啟動畫)。motion 的 motion-value + useSpring 是對的工具 — 把 raw 值套上 spring 過濾,interrupt 時保留物理慣性。'
+tags: [advanced-interactions, motion, spring, cursor, googly]
+---
+
+import { EyeComparison } from './springy-motion';
+
+## TL;DR
+
+「有限半徑的 cursor 跟蹤」(像 Comeau 部落格的 Like 按鈕)離開有效範圍時,如果用 if/else 直接歸零,瞳孔會瞬閃到中心 — 視覺斷層。
+
+三種修法只有一種對:
+
+| 修法 | 結果 |
+|---|---|
+| `transition: transform 500ms` | 每幀觸發新 transition,進入半徑時也會「拖」一下,在範圍內看起來像延遲很重 |
+| `motion.animate(pupil, {x, y}, springConfig)` 每幀呼叫 | 在 vanilla 看起來正常但**官方不保證**,React binding 已知會壞 |
+| **`useSpring` 套在 motion value 上** | 對的解,interrupt 時保留動量 |
+
+<DemoFrame title="raw assignment vs useSpring on motion-value">
+  <EyeComparison />
+</DemoFrame>
+
+把游標靠近左眼再快速移開 → 瞳孔閃回中心。
+靠近右眼再移開 → 瞳孔以 spring 物理慢慢飄回中心。
+
+## 為什麼 CSS transition 失靈
+
+`transition` 是「state A → state B」的工具。每次 `style.transform = ...` 都觸發**新一輪** transition — 中斷上一輪、從當下值跑到新目標。
+
+cursor tracking 每幀都改 transform → 每幀都中斷重啟,瀏覽器永遠在「跑剛開始一小截」。看起來既不及時(目標一直變)、又笨重(慢吞吞跟)。
+
+## Motion value 的角色
+
+`motion/react` 提供兩層抽象:
+
+1. **`useMotionValue(initial)`** — 一個可以**脫離 React 渲染管線**的響應式變數。改它的值不會 trigger re-render,但 motion 內部有訂閱機制。
+2. **`useSpring(motionValue, config)`** — 把一個 motion value 包成 spring smoothed 版本。讀寫一樣,但中間用物理積分插值。
+
+```tsx
+const rawX = useMotionValue(0);
+const x = useSpring(rawX, { stiffness: 200, damping: 20 });
+
+// 寫入 raw
+rawX.set(targetX);
+
+// 讀取 smoothed (動畫期間中間值)
+<motion.div style={{ x }} />
+```
+
+interrupt 時,spring 看到 raw 值改變,從「當下的速度跟位置」開始往新目標彈,不重置。這就是物理感。
+
+## 為什麼不用 `animate()`
+
+`animate(elem, { x, y }, springConfig)` 每次呼叫**啟動一個新動畫**。每幀呼叫 = 每幀重新啟動 spring,理論上跟 CSS transition 同樣的問題。
+
+實務上:
+- vanilla JS 在 Chrome 桌機 vermutlich 看起來正常(motion 內部有些優化補上),但 lower-spec 機器會掉幀。
+- React binding(`<motion.div animate={{ x, y }}>`) 已知會出現「卡在中段」的視覺 bug。
+
+motion 作者 Matt Perry 親口說:**用 motion value + useSpring**。
+
+## React 寫法整理
+
+```tsx
+function GooglyEye() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [mouse] = useRelativeMousePosition(ref, 250);
+  const rawX = useMotionValue(0);
+  const rawY = useMotionValue(0);
+  const x = useSpring(rawX, { stiffness: 200, damping: 20 });
+  const y = useSpring(rawY, { stiffness: 200, damping: 20 });
+
+  useEffect(() => {
+    if (mouse.x === null || mouse.y === null) return;
+    const [angle, distance] = convertCartesianToPolar(mouse.x, mouse.y);
+    if (distance <= 150) {
+      const modified = clamp(distance * 0.1, -18, 18);
+      const next = convertPolarToCartesian(angle, modified);
+      rawX.set(next.x);
+      rawY.set(next.y);
+    } else {
+      rawX.set(0);
+      rawY.set(0);
+    }
+  }, [mouse.x, mouse.y, rawX, rawY]);
+
+  return <motion.div style={{ x, y }} ... />;
+}
+```
+
+`x` / `y` 直接傳給 `motion.div` 的 `style`,motion 會訂閱 motion value 的變化,從容更新 transform。
+
+## Spring config 直覺
+
+| 參數 | 大值 | 小值 |
+|---|---|---|
+| `stiffness` | 反應快(到達目標快) | 反應慢、像在水裡 |
+| `damping` | 不彈跳、平滑停下 | 過頭、來回振盪 |
+| `mass` (預設 1) | 慢起步、慣性大 | 輕飄 |
+
+cursor follow 推薦 `stiffness: 200, damping: 20` 起跳。要更黏滯就降 stiffness、要更彈性就降 damping。
+
+## Gotchas
+
+- **`useSpring` 第一個參數是 motion value 不是純數字**:寫 `useSpring(0, ...)` 是直接 spring 一個 0,不是接 motion value。要 `useSpring(rawMotionValue, ...)`。
+- **deps 漏寫**:`useEffect(() => { ... }, [mouse.x, mouse.y])` 要把 motion value 也帶進來(雖然其實 reference 不會變,但 lint 會抱怨)。
+- **同時 spring x 跟 y**:不要兩個用同一個 spring 然後共用 stiffness/damping object — 共用沒問題,但別把 motion value 共用,x 跟 y 各自獨立。
+- **`prefers-reduced-motion` 要尊重**:cursor follow 是純 cosmetic effect。在 reduced 模式下直接停掉 listener 就好,不要 spring 過去也不要硬閃。

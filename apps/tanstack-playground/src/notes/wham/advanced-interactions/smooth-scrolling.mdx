@@ -1,0 +1,77 @@
+---
+title: Smooth Scrolling, why Lenis-style libraries are scroll-jacking
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/05.06-smooth-scrolling
+lessonNumber: '03-advanced-interactions/05.06-smooth-scrolling'
+order: 87
+summary: 'Lenis / GSAP ScrollSmoother 之類的庫把整頁的 scroll 物理重寫成「lerp 過去」 — 對 trackpad 使用者是降級體驗,對動暈症使用者是潛在誘發源。Comeau 強烈反對。`scroll-behavior: smooth` 用在 anchor jump 是合理應用。'
+tags: [advanced-interactions, scroll, scrolljacking, accessibility, opinion]
+---
+
+import { AnchorSmoothScroll } from './smooth-scrolling';
+
+## TL;DR
+
+Comeau 對「整頁 smooth scrolling」的態度: **不要做**。
+
+問題:
+- **干擾使用者輸入**:trackpad 使用者習慣兩指滑動 = 直接位移,跟拖紙片一樣即時。lerp scroll 把這個變成「滑了之後看到一段拖延的滑動」。
+- **不尊重 prefers-reduced-motion**:Lenis 的 landing page 自己沒實作這個 query,任何動暈使用者都吃不到 fallback。
+- **設計師爽,使用者不爽**:大多動機是「讓網站感覺高級」、「拿 awwwards」。代價是使用者失去對自己滾動軌跡的控制。
+
+合理應用只有一個:**anchor link 點擊**用 `scroll-behavior: smooth`。這是「單一明確跳轉」的過渡,不是把每次滾動都改寫。
+
+<DemoFrame title="legit use — anchor jump with native smooth scroll">
+  <AnchorSmoothScroll />
+</DemoFrame>
+
+點 anchor 按鈕跳到對應段落。CSS `scroll-behavior: smooth` 處理過渡,trackpad / 滾輪 scroll 仍維持原生行為。
+
+## 哪些算 Scrolljacking
+
+灰色地帶有差異,但 Comeau 的判斷標準是**「使用者用任何一種輸入方式 scroll,行為都跟其他網站一樣嗎?」**
+
+| 行為 | 算 scrolljacking? |
+|---|---|
+| 整頁 lerp(Lenis、GSAP ScrollSmoother) | ✅ 是 |
+| 滑鼠滾輪被改寫成水平移動 | ✅ 是 |
+| Scroll 觸發 sticky element(像 BBC 那種) | ❌ 不是(整體仍正常 scroll) |
+| `scroll-snap` | 介於中間 — 有人覺得有,有人覺得 sane |
+| `scroll-behavior: smooth` 在 anchor jump | ❌ 不是 |
+| 自製 carousel 攔截滑鼠事件、無底頁面 | ✅ 是 |
+
+## 為什麼 trackpad 使用者特別痛
+
+trackpad 已經有自己的物理:
+- 觸控起始 → 即時位移
+- 釋放後慣性滑行
+- 觸控停下 → 停止
+
+Lenis 在這之上再疊一層 lerp,等於兩層慣性疊加。使用者抬手了之後,系統還在 lerp 自己想出來的目標位置。**精確 scroll 變不可能**。
+
+對應的:滑鼠滾輪每次「咔噠」是離散的 N 像素位移。Lerp 把這些離散事件變成連續滑動,使用者以為的「我已經滾了 3 格」實際只滑了一半。
+
+## A11y 的硬底線
+
+`prefers-reduced-motion` 不是 polite request,是合規問題:
+
+- 動暈症(vestibular disorder)患者看到任何被人為延長的位移會誘發症狀。
+- ADHD / 自閉症光譜上的部分使用者會被視覺干擾打斷專注。
+- 部分癲癇類型對視覺位移敏感。
+
+任何「整頁感覺更滑順」的庫**必須**在 `prefers-reduced-motion: reduce` 下退化成原生 scroll。Lenis 預設沒做,要自己 wrap 條件 init。
+
+## 「老闆要我加上」怎辦
+
+Comeau 把這個比喻成「建築師應該拒絕業主要求拆掉欄杆」。實作端有專業判斷的責任。
+
+實作建議:
+- 提出反例(老設備、touchscreen、a11y 場景)。
+- 改建議「只在 anchor jump 時用 scroll-behavior: smooth」當妥協。
+- 真要全頁 lerp 至少包 `prefers-reduced-motion` 檢查。
+
+## Gotchas
+
+- **`scroll-behavior: smooth` 用在 root** (`html { scroll-behavior: smooth }`) 會影響所有 anchor 跳轉跟 `Element.scrollIntoView()`。如果你只想要某個區塊內 anchor 平滑,寫在那個 scroller container 上就好。
+- **`scrollIntoView({ behavior: 'smooth' })`** 不可中斷:user 想停下 scroll 沒辦法。如果跳轉距離很長(幾千 px),user 會被劫持幾秒。
+- **iOS Safari 的 elastic bounce** 跟 smooth scroll 互動奇怪 — 在 root 上設 `scroll-behavior: smooth` 配 elastic bounce 會出現 jitter。實測再上 production。
+- **`scroll-snap` 跟 `prefers-reduced-motion`**:現代瀏覽器在 reduce 模式下會自動退化成 instant snap(不再平滑滑到 snap point),但 jitter 行為仍在。重度滾動內容慎用。

@@ -1,0 +1,94 @@
+---
+title: Linked Timelines, animate A based on B's scroll progress
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/05.03-linked-timelines
+lessonNumber: '03-advanced-interactions/05.03-linked-timelines'
+order: 86
+summary: '進階版 scrollytelling — 元素 A 的動畫不是看自己的位置,而是看元素 B 的位置。CSS 用 `view-timeline` + `animation-timeline` + `timeline-scope` 三件套;React 用 `useScroll({ target })` 配 `useTransform`。'
+tags: [advanced-interactions, scroll, animation-timeline, view-timeline, motion]
+---
+
+import { LinkedTimelinesDemo } from './linked-timelines';
+
+## TL;DR
+
+「方塊隨自己進入畫面動」很簡單。
+
+「方塊隨**另一段內容**進入畫面動」要 cross-element 連動。經典案例:R2D3 那篇 Visual Introduction to Machine Learning — 左邊圖表跟右邊文字段落各自獨立但同步演化。
+
+兩個解法:
+- **純 CSS**:`view-timeline` 在 source 上命名、`timeline-scope` 在共同祖先上開作用域、`animation-timeline` 在 target 上引用名字。
+- **JS / motion**:`useScroll({ target: ref })` 拿 source 的 progress、`useTransform(progress, [0,1], [from, to])` 餵給 target 的任何 motion value。
+
+<DemoFrame title="left square morphs based on right paragraph's scroll progress">
+  <LinkedTimelinesDemo />
+</DemoFrame>
+
+## CSS 寫法
+
+```css
+main { timeline-scope: --content; }
+.content { view-timeline: --content; }
+.square {
+  animation-timeline: --content;
+  animation: morph both;
+  animation-range: contain;
+}
+@keyframes morph { to { border-radius: 50%; } }
+```
+
+三步驟:
+
+1. **`view-timeline: --content`** 在 source 元素上 — 建一個叫 `--content` 的命名 timeline,內容是該元素相對 viewport 的進度。
+2. **`timeline-scope: --content`** 在共同祖先上 — 把 timeline 名字「上提」,讓兄弟分支也看得到。CSS variables 預設只往下傳,需要這個 escape hatch。
+3. **`animation-timeline: --content`** 在 target 元素上 — 把動畫進度綁到那個 timeline。
+
+`animation-range: contain` 限定動畫只在 source 完整在 viewport 內時跑。預設 `cover` 是「source 第一像素進畫面就開始、最後一像素出畫面才結束」。
+
+## React + motion 寫法
+
+```tsx
+function LinkedDemo() {
+  const targetRef = useRef<HTMLDivElement>(null);
+
+  const { scrollYProgress } = useScroll({
+    target: targetRef,
+    offset: ['start end', 'end start'],
+  });
+
+  const radius = useTransform(scrollYProgress, [0, 1], ['8%', '50%']);
+
+  return (
+    <>
+      <motion.div style={{ borderRadius: radius }} />
+      <div ref={targetRef}>scroll source</div>
+    </>
+  );
+}
+```
+
+`useScroll({ target })` 自動算 target 的 progress(0 = 剛進畫面,1 = 剛離開畫面)。`offset` 客製進入/離開時機。`useTransform` 把 0~1 mapped 到任意值/單位/CSS 變數。
+
+跟 CSS 版本相比優點:
+
+- 跨瀏覽器一致(motion 內部用 IntersectionObserver fallback)。
+- 不需要 `timeline-scope`,target ref 直接傳就好。
+- 可以做非線性 mapping(`useTransform(progress, [0, 0.5, 1], [10, 20, 5])`)。
+
+缺點:多一條 JS 進 bundle,動畫期間有 React 涉入(雖然 motion value 跳過 reconciliation)。
+
+## 用例
+
+| 場景 | 適合 |
+|---|---|
+| 講解動畫(scrollytelling 文章) | linked timeline |
+| 圖表跟著段落演化 | linked timeline |
+| Hero element 跟著上方某 anchor scroll | linked timeline |
+| 元素自己淡入 | view-timeline 直接綁自己,不需 link |
+
+## Gotchas
+
+- **`timeline-scope` 瀏覽器支援**:Chrome 116+ 跟 Safari 26+。Polyfill(GoogleChromeLabs/scroll-timeline)現在不支援 timeline-scope 屬性,所以兩個元素必須在同一棵子樹下才能 work。實務常見 workaround:把 timeline-scope 換成 `scroll-timeline` + 共同 scroller。
+- **`animation-range`** 細節多:`cover`、`contain`、`entry`、`exit`、`entry-crossing`、`exit-crossing`,還能寫 percentage(`entry 25% cover 75%`)。光看名字猜不準,實測。
+- **scroller 不是 viewport**:預設 timeline 抓最近的 scrolling ancestor。在 nested overflow 容器內要明確指定 `useScroll({ container: ref })`。
+- **`offset` 字串語法**:motion 的 `['start end', 'end start']` 第一個是「target 的 start 對齊 viewport 的 end」(剛進畫面),第二個是「target 的 end 對齊 viewport 的 start」(剛離開)。CSS 的 `entry`/`exit` 是同概念,語法不同。
+- **不要把 expensive 計算放 useTransform 內**:`useTransform(p, [0,1], [a, b])` 每幀重算一次。重活包成 useMemo 或 motion value 鏈。

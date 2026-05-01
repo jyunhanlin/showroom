@@ -1,0 +1,117 @@
+---
+title: useRelativeMousePosition, packaged hook for cursor-relative coords
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/01.03-react-hooks
+lessonNumber: '03-advanced-interactions/01.03-react-hooks'
+order: 81
+summary: '把「listen pointermove + 算 bounding box + throttle + cleanup」全部包進一支 `useRelativeMousePosition(ref)` hook。回傳 `[{x, y}, boundingBox]`,x/y 是相對於元素中心的位移。'
+tags: [advanced-interactions, react, hooks, cursor, throttle]
+---
+
+import { HookDebugDisplay, HookFollowingBall } from './cursor-react-hook';
+
+## TL;DR
+
+之前每個 cursor demo 都要手動寫:
+
+- 拿 ref
+- listen pointermove
+- 在 effect 裡 throttle bounding box 計算
+- 算 mouse - center
+- cleanup listener
+
+包成一支 hook 就好:
+
+```tsx
+const ref = useRef<HTMLDivElement>(null);
+const [mouse, box] = useRelativeMousePosition(ref);
+
+// mouse.x / mouse.y 是相對 ref 中心的位移
+// box 是節流過的 DOMRect
+```
+
+(這支已經在 `~/utils/use-relative-mouse-position.ts`,本專案所有 cursor demo 都共用。)
+
+<DemoFrame title="raw values readout">
+  <HookDebugDisplay />
+</DemoFrame>
+
+<DemoFrame title="ball follows cursor with distance-based scale">
+  <HookFollowingBall />
+</DemoFrame>
+
+## Hook 內部
+
+```tsx
+function useRelativeMousePosition<T extends HTMLElement>(
+  ref: RefObject<T | null>,
+  throttleDuration = 500,
+) {
+  const [mouse, setMouse] = useState({ x: null, y: null });
+  const [box, setBox] = useState(null);
+
+  const getThrottledBox = useMemo(
+    () => throttle(() => ref.current?.getBoundingClientRect() ?? null, throttleDuration),
+    [ref, throttleDuration],
+  );
+
+  useEffect(() => {
+    function onMove(e) {
+      const bb = getThrottledBox();
+      if (!bb) return;
+      setMouse({
+        x: e.clientX - bb.left - bb.width / 2,
+        y: e.clientY - bb.top - bb.height / 2,
+      });
+      setBox(bb);
+    }
+    window.addEventListener('pointermove', onMove);
+    return () => window.removeEventListener('pointermove', onMove);
+  }, [getThrottledBox]);
+
+  return [mouse, box];
+}
+```
+
+幾個關鍵設計:
+
+1. **throttle 包在 useMemo 裡**:不然每次 re-render 都新建 throttled fn,內部計時器歸零。
+2. **ref 必須當 dep**:雖然 ref 物件本身不變,但傳進來的 ref 換了還是要重新 register。
+3. **回傳 box 給呼叫端**:有時除了 (x, y) 還要算「離某個 corner 的距離」、「相對寬度的百分比」等等,把 box 一併吐出來方便。
+4. **null 起始值**:第一次 render 時還沒 fire pointermove,給 null 讓呼叫端知道「還沒拿到」,避免錯誤計算。
+
+## 用法 cheat-sheet
+
+```tsx
+const ref = useRef<HTMLDivElement>(null);
+const [mouse, box] = useRelativeMousePosition(ref, 250);
+
+// 1. 距離中心
+const distance = Math.sqrt(mouse.x! ** 2 + mouse.y! ** 2);
+
+// 2. 角度(對 polar 系統有用)
+const angleDeg = Math.atan2(mouse.y!, mouse.x!) * 180 / Math.PI;
+
+// 3. 相對於四角(top-right corner)
+const fromTopRight = {
+  x: mouse.x! + box!.width / 2,
+  y: mouse.y! - box!.height / 2,
+};
+
+// 4. 0~1 的標準化位置(對 progress bar 之類)
+const tx = (mouse.x! + box!.width / 2) / box!.width;
+```
+
+null 安全那一段比較煩,實務上 demo 會直接用 `mouse.x ?? 0` 開始。
+
+## 為什麼把計算放回 effect 不放 render
+
+效能。如果直接在 render 時 setState,每幀 60 次 setState → 60 次 React reconciliation → 卡。
+
+但 React 18 的 automatic batching + concurrent mode 已經緩解很多。實測 60Hz pointermove → 60Hz setState 在現代機器上基本順暢。**如果是動畫期間 user 看到的東西**(像 cursor 跟隨的圖形),建議完全跳出 React 用 `ref.style.transform = ...` 直接寫,避免進 React 的渲染管線(motion / react-spring 內部就是這做法)。
+
+## Gotchas
+
+- **window scroll 期間的 stale 值**:throttle 預設 500ms。剛 scroll 完馬上動 cursor,box 是舊的、cursor 偏。用 `useEffect` 監聽 scroll 強制重算 box(用 `getThrottledBox.flush()` 立刻觸發 trailing call)。
+- **ref 傳進去後 .current 還沒 mount**:第一次 effect 跑時 box 是 null,UI 要安排「沒 box 就不渲染特效」的 fallback 路徑。
+- **不要在 hook 裡 listen 元素自己 ref.current.addEventListener**:那會錯過元素**外**的 cursor。用 `window.addEventListener` 才能在「滑鼠出元素」時也 update 到「離中心很遠的位置」。
+- **server render**:這支 hook 只能在 client 跑,用 `'use client'` 或 dynamic import。SSR render 時 mouse 是 null。

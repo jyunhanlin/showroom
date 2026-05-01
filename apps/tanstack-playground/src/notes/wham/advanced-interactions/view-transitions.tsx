@@ -24,7 +24,7 @@
  */
 
 import { shuffle } from 'lodash-es';
-import { useEffect, useRef, useState } from 'react';
+import { startTransition, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 const WORDS = [
@@ -98,7 +98,7 @@ export function VtWordShuffle() {
       applyShuffle();
       return;
     }
-    document.startViewTransition(() => {
+    document.startViewTransition!(() => {
       // flushSync is the load-bearing line: VT needs the DOM mutation to be
       // synchronous so the post-snapshot captures the new state.
       flushSync(() => applyShuffle());
@@ -235,7 +235,7 @@ export function VtSlideshow() {
     // exits to the right and the new one enters from the left.
     const direction = delta < 0 ? 'vt-slideshow-back' : '';
     document.documentElement.classList.toggle('vt-slideshow-back', direction !== '');
-    const transition = document.startViewTransition(() => {
+    const transition = document.startViewTransition!(() => {
       flushSync(() => setIndex(next));
     });
     transition.finished.finally(() => {
@@ -570,5 +570,592 @@ export function ActionDrivenDialog() {
         )}
       </div>
     </>
+  );
+}
+
+/* ── 07.01 vt-syntax: ViewTransitionSlideshow ────────────────────────────── */
+
+const VT_SYNTAX_SLIDES = [
+  { color: 'oklch(0.75 0.18 30)', label: 'one' },
+  { color: 'oklch(0.75 0.18 90)', label: 'two' },
+  { color: 'oklch(0.75 0.18 200)', label: 'three' },
+  { color: 'oklch(0.75 0.18 280)', label: 'four' },
+];
+
+export function ViewTransitionSlideshow() {
+  const [index, setIndex] = useState(0);
+  const [animMode, setAnimMode] = useState<'fade' | 'slide'>('slide');
+  const slide = VT_SYNTAX_SLIDES[index]!;
+
+  function next() {
+    function update() {
+      setIndex((i) => (i + 1) % VT_SYNTAX_SLIDES.length);
+    }
+    const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (document.startViewTransition && !prefersReduced) {
+      document.startViewTransition(update);
+    } else {
+      update();
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <style>{`
+        @keyframes wham-vt-exitLeft {
+          from { transform: translateX(0) } to { transform: translateX(-100%) }
+        }
+        @keyframes wham-vt-enterRight {
+          from { transform: translateX(100%) } to { transform: translateX(0) }
+        }
+        ::view-transition-group(wham-vt-slide) {
+          animation-duration: 500ms;
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          .wham-vt-mode-slide ::view-transition-old(wham-vt-slide) {
+            animation-name: wham-vt-exitLeft;
+          }
+          .wham-vt-mode-slide ::view-transition-new(wham-vt-slide) {
+            animation-name: wham-vt-enterRight;
+          }
+        }
+        .wham-vt-card { view-transition-name: wham-vt-slide; }
+        .wham-vt-btn { view-transition-name: wham-vt-btn; }
+      `}</style>
+      <div className={`flex flex-col items-center gap-3 wham-vt-mode-${animMode}`}>
+        <div className="overflow-hidden rounded-md bg-slate-900 p-2" style={{ width: 320 }}>
+          <div
+            className="wham-vt-card flex h-40 w-full items-center justify-center rounded font-mono text-2xl text-slate-900"
+            style={{ backgroundColor: slide.color }}
+          >
+            {slide.label}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={next}
+          className="wham-vt-btn rounded bg-rose-500 px-4 py-2 font-mono text-sm text-white hover:bg-rose-600"
+        >
+          next →
+        </button>
+      </div>
+      <div className="flex items-center gap-3 font-mono text-sm">
+        <label className="flex items-center gap-1">
+          <input type="radio" checked={animMode === 'slide'} onChange={() => setAnimMode('slide')} /> slide
+        </label>
+        <label className="flex items-center gap-1">
+          <input type="radio" checked={animMode === 'fade'} onChange={() => setAnimMode('fade')} /> default cross-fade
+        </label>
+      </div>
+      <p className="text-xs text-gray-500">
+        slide 模式套自訂 keyframe;fade 模式留瀏覽器預設(就是兩張 snapshot 各自 fade)。
+      </p>
+    </div>
+  );
+}
+
+/* ── 07.02 vt-matrix-transforms: GridShuffleVT, ResizeVT ─────────────────── */
+
+const VT_GRID_ITEMS = [
+  { id: 'a', label: 'A', color: 'oklch(0.78 0.18 30)' },
+  { id: 'b', label: 'B', color: 'oklch(0.78 0.18 80)' },
+  { id: 'c', label: 'C', color: 'oklch(0.78 0.18 130)' },
+  { id: 'd', label: 'D', color: 'oklch(0.78 0.18 200)' },
+  { id: 'e', label: 'E', color: 'oklch(0.78 0.18 260)' },
+  { id: 'f', label: 'F', color: 'oklch(0.78 0.18 320)' },
+  { id: 'g', label: 'G', color: 'oklch(0.78 0.1 60)' },
+  { id: 'h', label: 'H', color: 'oklch(0.78 0.1 240)' },
+  { id: 'i', label: 'I', color: 'oklch(0.78 0.18 0)' },
+];
+
+export function GridShuffleVT() {
+  const [order, setOrder] = useState(VT_GRID_ITEMS);
+
+  function reshuffle() {
+    function update() {
+      setOrder((prev) => shuffle(prev));
+    }
+    if (document.startViewTransition) {
+      document.startViewTransition(update);
+    } else {
+      update();
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <style>{`
+        ::view-transition-group(wham-vt-tile-a),
+        ::view-transition-group(wham-vt-tile-b),
+        ::view-transition-group(wham-vt-tile-c),
+        ::view-transition-group(wham-vt-tile-d),
+        ::view-transition-group(wham-vt-tile-e),
+        ::view-transition-group(wham-vt-tile-f),
+        ::view-transition-group(wham-vt-tile-g),
+        ::view-transition-group(wham-vt-tile-h),
+        ::view-transition-group(wham-vt-tile-i) {
+          animation-duration: 600ms;
+        }
+      `}</style>
+      <div className="grid grid-cols-3 gap-2 rounded-md bg-slate-900 p-3">
+        {order.map((item) => (
+          <div
+            key={item.id}
+            className="flex h-16 w-16 items-center justify-center rounded-md font-mono text-xl font-bold text-slate-900"
+            style={
+              {
+                backgroundColor: item.color,
+                viewTransitionName: `wham-vt-tile-${item.id}`,
+              } as React.CSSProperties
+            }
+          >
+            {item.label}
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={reshuffle}
+        className="rounded bg-slate-800 px-3 py-1 font-mono text-xs text-white hover:bg-slate-700"
+      >
+        shuffle
+      </button>
+      <p className="text-xs text-gray-500">
+        每個 tile 自己 view-transition-name → 瀏覽器自動產生 matrix() keyframe 把它從舊位置滑到新位置。
+      </p>
+    </div>
+  );
+}
+
+export function ResizeVT() {
+  const [large, setLarge] = useState(false);
+
+  function toggle() {
+    function update() {
+      setLarge((v) => !v);
+    }
+    if (document.startViewTransition) {
+      document.startViewTransition(update);
+    } else {
+      update();
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <style>{`
+        ::view-transition-group(wham-vt-resize) { animation-duration: 700ms; }
+      `}</style>
+      <div className="flex h-72 w-72 items-center justify-center rounded-md bg-slate-900">
+        <div
+          className="rounded-full"
+          style={
+            {
+              backgroundColor: 'oklch(0.78 0.18 200)',
+              width: large ? 220 : 80,
+              height: large ? 220 : 80,
+              viewTransitionName: 'wham-vt-resize',
+            } as React.CSSProperties
+          }
+        />
+      </div>
+      <button
+        type="button"
+        onClick={toggle}
+        className="rounded bg-slate-800 px-3 py-1 font-mono text-xs text-white hover:bg-slate-700"
+      >
+        toggle size
+      </button>
+      <p className="text-xs text-gray-500">改 width / height,VT 自動內插尺寸 — 不需要 transform: scale()。</p>
+    </div>
+  );
+}
+
+/* ── 07.04 vt-classes: ClassedShuffle ────────────────────────────────────── */
+
+const VT_CLASS_COLORS = [
+  'oklch(0.78 0.18 30)',
+  'oklch(0.78 0.18 60)',
+  'oklch(0.78 0.18 90)',
+  'oklch(0.78 0.18 130)',
+  'oklch(0.78 0.18 170)',
+  'oklch(0.78 0.18 210)',
+  'oklch(0.78 0.18 250)',
+  'oklch(0.78 0.18 290)',
+  'oklch(0.78 0.18 330)',
+];
+
+type VtClassTile = { id: string; color: string };
+
+const VT_CLASS_ITEMS: VtClassTile[] = Array.from({ length: 9 }, (_, i) => ({
+  id: `t${i}`,
+  color: VT_CLASS_COLORS[i]!,
+}));
+
+export function ClassedShuffle() {
+  const [order, setOrder] = useState<VtClassTile[]>(VT_CLASS_ITEMS);
+  const [duration, setDuration] = useState(600);
+
+  function reshuffle() {
+    function update() {
+      setOrder((prev) => shuffle(prev));
+    }
+    if (document.startViewTransition) document.startViewTransition(update);
+    else update();
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <style>{`
+        ::view-transition-group(.wham-vt-class-tile) {
+          animation-duration: ${duration}ms;
+          animation-timing-function: cubic-bezier(0.6, 0, 0.2, 1);
+        }
+      `}</style>
+      <div className="grid grid-cols-3 gap-2 rounded-md bg-slate-900 p-3">
+        {order.map((tile) => (
+          <div
+            key={tile.id}
+            className="h-16 w-16 rounded-md"
+            style={
+              {
+                backgroundColor: tile.color,
+                viewTransitionName: `wham-vt-classed-${tile.id}`,
+                viewTransitionClass: 'wham-vt-class-tile',
+              } as React.CSSProperties
+            }
+          />
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-3 font-mono text-sm">
+        <button
+          type="button"
+          onClick={reshuffle}
+          className="rounded bg-slate-800 px-3 py-1 text-white hover:bg-slate-700"
+        >
+          shuffle
+        </button>
+        <label className="flex items-center gap-2">
+          <span>duration: {duration}ms</span>
+          <input
+            type="range"
+            min={150}
+            max={2000}
+            step={50}
+            value={duration}
+            onChange={(e) => setDuration(Number(e.target.value))}
+          />
+        </label>
+      </div>
+      <p className="text-xs text-gray-500">
+        9 個 tile 各自有 unique name(t0..t8),但都共用 `view-transition-class: wham-vt-class-tile` — 一條 selector
+        控全部。
+      </p>
+    </div>
+  );
+}
+
+/* ── 07.05 vt-interrupts: VtInterruptDemo ────────────────────────────────── */
+
+const VT_INT_SLIDES = [
+  { color: 'oklch(0.75 0.18 30)', label: 'one' },
+  { color: 'oklch(0.75 0.18 90)', label: 'two' },
+  { color: 'oklch(0.75 0.18 200)', label: 'three' },
+  { color: 'oklch(0.75 0.18 280)', label: 'four' },
+];
+
+const VT_INT_FAST_EASE = 'cubic-bezier(0.08, 0.25, 0, 1)';
+
+export function VtInterruptDemo() {
+  const [index, setIndex] = useState(0);
+  const [duration, setDuration] = useState(1500);
+  const [aggressiveEase, setAggressiveEase] = useState(true);
+  const slide = VT_INT_SLIDES[index]!;
+
+  function next() {
+    function update() {
+      setIndex((i) => (i + 1) % VT_INT_SLIDES.length);
+    }
+    if (document.startViewTransition) document.startViewTransition(update);
+    else update();
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <style>{`
+        ::view-transition { pointer-events: none; }
+        ::view-transition-group(wham-vt-int-slide) {
+          animation-duration: ${duration}ms;
+          animation-timing-function: ${aggressiveEase ? VT_INT_FAST_EASE : 'ease'};
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          ::view-transition-old(wham-vt-int-slide) {
+            animation-name: wham-vt-int-exitLeft;
+          }
+          ::view-transition-new(wham-vt-int-slide) {
+            animation-name: wham-vt-int-enterRight;
+          }
+        }
+        @keyframes wham-vt-int-exitLeft {
+          from { transform: translateX(0) } to { transform: translateX(-100%) }
+        }
+        @keyframes wham-vt-int-enterRight {
+          from { transform: translateX(100%) } to { transform: translateX(0) }
+        }
+      `}</style>
+      <div className="flex flex-col items-center gap-3">
+        <div className="overflow-hidden rounded-md bg-slate-900 p-2" style={{ width: 320 }}>
+          <div
+            className="flex h-32 w-full items-center justify-center rounded font-mono text-xl text-slate-900"
+            style={
+              {
+                backgroundColor: slide.color,
+                viewTransitionName: 'wham-vt-int-slide',
+              } as React.CSSProperties
+            }
+          >
+            {slide.label}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={next}
+          className="rounded bg-rose-500 px-4 py-2 font-mono text-sm text-white hover:bg-rose-600"
+        >
+          next →
+        </button>
+      </div>
+      <div className="grid w-full max-w-md grid-cols-1 gap-2 font-mono text-sm">
+        <label className="flex items-center gap-2">
+          <span className="w-32">duration: {duration}ms</span>
+          <input
+            type="range"
+            min={150}
+            max={2000}
+            step={50}
+            value={duration}
+            onChange={(e) => setDuration(Number(e.target.value))}
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={aggressiveEase} onChange={(e) => setAggressiveEase(e.target.checked)} />
+          aggressive ease-out(前段衝完,interrupt 比較不刺眼)
+        </label>
+      </div>
+      <p className="text-xs text-gray-500">
+        把 duration 拉到 1500ms,連點 next。aggressive ease 開的時候 interrupt 沒這麼明顯;關掉看起來像「動畫被掐掉」。
+      </p>
+    </div>
+  );
+}
+
+/* ── 07.06 vt-different-elements: NavUnderlineVT ─────────────────────────── */
+
+const VT_DE_TABS = ['home', 'gallery', 'about', 'contact'];
+
+export function NavUnderlineVT() {
+  const [active, setActive] = useState(VT_DE_TABS[0]!);
+
+  function jumpTo(tab: string) {
+    function update() {
+      setActive(tab);
+    }
+    if (document.startViewTransition) document.startViewTransition(update);
+    else update();
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <style>{`
+        ::view-transition-group(wham-vt-de-underline) {
+          animation-duration: 500ms;
+          animation-timing-function: cubic-bezier(0.25, 0.65, 0, 1);
+        }
+        ::view-transition-old(wham-vt-de-underline),
+        ::view-transition-new(wham-vt-de-underline) {
+          height: 3px;
+        }
+        .wham-vt-de-link {
+          position: relative;
+          padding: 8px 12px;
+          color: oklch(0.95 0.02 280);
+          font-weight: 600;
+        }
+        .wham-vt-de-link.active::after {
+          content: '';
+          position: absolute;
+          left: 8px;
+          right: 8px;
+          bottom: 0;
+          height: 3px;
+          border-radius: 2px;
+          background: oklch(0.85 0.18 60);
+          view-transition-name: wham-vt-de-underline;
+        }
+      `}</style>
+      <nav className="flex gap-2 rounded-md bg-slate-900 p-2">
+        {VT_DE_TABS.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => jumpTo(tab)}
+            className={`wham-vt-de-link ${active === tab ? 'active' : ''}`}
+          >
+            {tab}
+          </button>
+        ))}
+      </nav>
+      <p className="text-xs text-gray-500">
+        active 那欄的 ::after 一直被建立/銷毀(不同 DOM 節點),但共用 `view-transition-name` → VT
+        把它們當「同一個東西移到新位置」處理。
+      </p>
+    </div>
+  );
+}
+
+/* ── 07.08 vt-route-transitions: FakeRouteTransitions ────────────────────── */
+
+const VT_ROUTE_PAGES = {
+  home: {
+    title: 'Home',
+    body: 'Welcome to my site. 滾動 / 點擊上面的 nav,header 會 morph 過去。',
+  },
+  about: {
+    title: 'About',
+    body: 'About 頁面。Header 從上一頁的位置滑過來,因為兩頁的 site-header 共用 view-transition-name。',
+  },
+  blog: {
+    title: 'Blog',
+    body: 'Blog 頁面。每次切換 main-content cross-fade,site-header 仍是同一個 VT 群組。',
+  },
+} as const;
+
+type VtRoutePageKey = keyof typeof VT_ROUTE_PAGES;
+
+export function FakeRouteTransitions() {
+  const [page, setPage] = useState<VtRoutePageKey>('home');
+
+  function navigate(target: VtRoutePageKey) {
+    function update() {
+      setPage(target);
+    }
+    if (document.startViewTransition) document.startViewTransition(update);
+    else update();
+  }
+
+  const current = VT_ROUTE_PAGES[page];
+
+  return (
+    <div className="flex flex-col gap-3">
+      <style>{`
+        ::view-transition-group(wham-vt-route-header) {
+          animation-duration: 450ms;
+          animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+        }
+        ::view-transition-group(wham-vt-route-main) {
+          animation-duration: 350ms;
+        }
+      `}</style>
+      <div
+        className="flex items-center gap-4 rounded-md bg-slate-900 px-4 py-3"
+        style={{ viewTransitionName: 'wham-vt-route-header' } as React.CSSProperties}
+      >
+        <span className="font-mono text-sm text-amber-300">josh.dev</span>
+        <nav className="flex gap-3">
+          {(Object.keys(VT_ROUTE_PAGES) as VtRoutePageKey[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => navigate(key)}
+              className={`text-sm ${page === key ? 'font-bold text-white' : 'text-gray-400 hover:text-white'}`}
+            >
+              {key}
+            </button>
+          ))}
+        </nav>
+      </div>
+      <article
+        className="rounded-md bg-slate-100 p-4"
+        style={{ viewTransitionName: 'wham-vt-route-main' } as React.CSSProperties}
+      >
+        <h2 className="text-lg font-bold text-slate-900">{current.title}</h2>
+        <p className="mt-2 text-sm text-slate-700">{current.body}</p>
+      </article>
+      <p className="text-xs text-gray-500">
+        {
+          '這裡是 same-document 模擬。換成多頁網站只要在 CSS 加 `@view-transition { navigation: auto }`,瀏覽器自動 trigger 真實 cross-document VT。'
+        }
+      </p>
+    </div>
+  );
+}
+
+/* ── 07.09 vt-react: ManualVTShuffle ─────────────────────────────────────── */
+
+const VT_REACT_COLORS = [
+  'oklch(0.78 0.18 30)',
+  'oklch(0.78 0.18 70)',
+  'oklch(0.78 0.18 110)',
+  'oklch(0.78 0.18 160)',
+  'oklch(0.78 0.18 210)',
+  'oklch(0.78 0.18 260)',
+  'oklch(0.78 0.18 300)',
+  'oklch(0.78 0.18 340)',
+];
+
+type VtReactTile = { id: string; color: string };
+
+const VT_REACT_ITEMS: VtReactTile[] = Array.from({ length: 8 }, (_, i) => ({
+  id: `t${i}`,
+  color: VT_REACT_COLORS[i]!,
+}));
+
+export function ManualVTShuffle() {
+  const [order, setOrder] = useState<VtReactTile[]>(VT_REACT_ITEMS);
+
+  function reshuffle() {
+    function update() {
+      startTransition(() => {
+        setOrder((prev) => shuffle(prev));
+      });
+    }
+    if (document.startViewTransition) document.startViewTransition(update);
+    else update();
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <style>{`
+        ::view-transition-group(.wham-vt-react-tile) {
+          animation-duration: 500ms;
+          animation-timing-function: cubic-bezier(0.35, 0.5, 0, 1);
+        }
+      `}</style>
+      <div className="grid grid-cols-4 gap-2 rounded-md bg-slate-900 p-3">
+        {order.map((tile) => (
+          <div
+            key={tile.id}
+            className="h-14 w-14 rounded-md"
+            style={
+              {
+                backgroundColor: tile.color,
+                viewTransitionName: `wham-vt-react-${tile.id}`,
+                viewTransitionClass: 'wham-vt-react-tile',
+              } as React.CSSProperties
+            }
+          />
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={reshuffle}
+        className="rounded bg-slate-800 px-3 py-1 font-mono text-xs text-white hover:bg-slate-700"
+      >
+        shuffle
+      </button>
+      <p className="text-xs text-gray-500">
+        手動 startViewTransition + startTransition,interrupt 可中斷(快速狂點 shuffle 看效果)。
+      </p>
+    </div>
   );
 }

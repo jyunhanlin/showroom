@@ -1,0 +1,79 @@
+---
+title: Cursor Tracking Perf, throttle the expensive part
+sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/01.02-perf-optimizations
+lessonNumber: '03-advanced-interactions/01.02-perf-optimizations'
+order: 80
+summary: '`getBoundingClientRect()` 對 DOM 是個小但實在的支出(~1–3ms)。每幀打 60 次會吃掉預算。最佳解不是 cache 一次(scroll 就破),也不是 listen scroll/resize(觸發頻率一樣高),而是 `throttle` 那一行 — 滑鼠仍每幀更新位置,bounding box 用 stale 值。'
+tags: [advanced-interactions, performance, throttle, getBoundingClientRect, cursor]
+---
+
+import { CursorPerfDemo } from './cursor-perf';
+
+## TL;DR
+
+每次 `pointermove` 都打 `getBoundingClientRect()`,在低階機器上單次 1~3ms。每秒 60 幀 → 60~180ms 預算就被它吃掉,動畫變卡。
+
+三種策略:
+
+| 策略 | 缺點 |
+|---|---|
+| 一次 cache(load 時算) | scroll 後座標變,完全失準 |
+| 監聽 scroll / resize 重算 | 那兩個事件也打超頻,沒省 |
+| **throttle 那一行** | stale value 在 250ms 內可能稍偏,99% 場景無感 |
+
+`throttle` 那條的好處:**滑鼠 UI 仍每幀更新**(60Hz),只有 bbox 計算被抑制到 N ms 一次。視覺上完全察覺不到。
+
+```ts
+import { throttle } from 'lodash-es';
+
+const getThrottledBox = throttle(() => socket.getBoundingClientRect(), 250);
+
+window.addEventListener('pointermove', (e) => {
+  const box = getThrottledBox();   // <-- 250ms 內回傳 stale 值
+  // ...每幀都跑,但這條不會吃 DOM
+});
+```
+
+<DemoFrame title="cursor scale — drag throttle slider, watch call counter">
+  <CursorPerfDemo />
+</DemoFrame>
+
+throttle = 0 → 計數狂飆;throttle = 250ms → 每秒 +4 而已。視覺上 ball 縮放感受沒差。
+
+## 為什麼 cache 一次不夠
+
+```ts
+const box = socket.getBoundingClientRect();  // page load 時算
+// ...
+window.addEventListener('pointermove', (e) => {
+  // 用 box 算 — scroll 之後就錯位
+});
+```
+
+`getBoundingClientRect` 回傳的是 **viewport 座標**,不是 document 座標。scroll 一動,元素在 viewport 內的位置就變了,但 cache 沒更新 → cursor effect 整片偏移。
+
+scroll/resize 也會讓元素在 viewport 內位移(rezize 時 layout 變化),所以 cache 失效不只是 scroll。
+
+## 為什麼 listen scroll/resize 沒省
+
+scroll event 在 trackpad / 觸控螢幕能每秒打到 60–120 次。listen 後重算 bbox 就是把 cost 從 pointermove 搬到 scroll — 一樣多。
+
+throttle 是真正解法 — **限制單位時間內的呼叫數**,跟事件來源無關。
+
+## throttle 跟 debounce 的差別
+
+| | throttle | debounce |
+|---|---|---|
+| 行為 | 每 N ms 最多一次 | 停止觸發後 N ms 才 fire |
+| 用途 | 持續流(scroll、move、resize) | 終態(input、search、resize 完成後) |
+| 第一次 | 立刻 | 等 N ms |
+
+cursor tracking 永遠用 throttle。
+
+## Gotchas
+
+- **throttle 必須提到外部 scope**:寫成 `addEventListener('pointermove', throttle(handler, 250))` — 但每次 effect re-run 會生新 throttled fn,計時器重置。應該:`const throttled = useMemo(() => throttle(fn, ms), [ms])` 在 effect 外。
+- **stale bbox 的 edge case**:user 剛 scroll 完立刻 hover element,250ms 內 bbox 還是舊值。距離計算偏一點點 — 對 cursor effect 99% 看不出來,但對 hit-testing(pixel-precise drag&drop)不能用 throttle。
+- **throttle 的 leading vs trailing**:`throttle(fn, 250, { leading: true, trailing: true })` 是 lodash 預設。leading=true 第一次呼叫立刻觸發;trailing=true 最後一次時序也會 fire。對 bbox 場景兩個都要,因為剛開始 hover 跟最後停下都要算對。
+- **不要 throttle pointermove 本身**:cursor 跟手指的視覺反饋越即時越好。被 throttle 過的 cursor 會很笨重。
+- **`useMemo(() => throttle(fn, ms), [ms])`**:在 React 裡這樣包,fn 改變也要進 deps,不然 stale closure 抓到舊變數。
