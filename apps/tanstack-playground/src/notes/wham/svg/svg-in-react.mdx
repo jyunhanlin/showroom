@@ -1,0 +1,97 @@
+---
+title: SVGs in React, JSX as dynamic SVG markup
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/11-svg-in-react
+lessonNumber: '02-svg/11-svg-in-react'
+order: 94
+summary: 'JSX 把「在 markup 裡邊算邊產 SVG」變得很自然 — 把 props 餵進 `range().map(...)` 噴 N 個 `<circle>` / `<path>`,每個的尺寸/顏色/dash 都當場算。比 vanilla JS 用 `createElementNS` 簡潔不只一個量級。'
+tags: [svg, react, jsx, generative]
+---
+
+import { ConcentricCirclesGenerator } from './svg-in-react';
+
+## TL;DR
+
+SVG 元素本身的 attribute 全部是「位置/尺寸 → 視覺」的數學關係。在 React 裡,JSX 讓你**直接在 markup 內**做這些計算 — 不用先 setup 一個物件、再轉成 attribute string、再插入 DOM。
+
+```tsx
+{range(3, 32, 3).map((radius, index) => {
+  const circumference = 2 * Math.PI * radius;
+  const numOfDashes = Math.round(index + 3);
+  const dashSize = circumference / (numOfDashes * 2);
+  return (
+    <circle
+      cx={32} cy={32} r={radius}
+      fill="none"
+      stroke={`hsl(${240 + index * 8}deg 80% 70%)`}
+      strokeDasharray={dashSize.toFixed(2)}
+    />
+  );
+})}
+```
+
+<DemoFrame title="dynamic concentric circles — sliders drive SVG props">
+  <ConcentricCirclesGenerator />
+</DemoFrame>
+
+## 為什麼 JSX 適合 SVG
+
+1. **公式/變數隨手用**:`r={radius}` 直接套變數,vanilla 要 `setAttribute('r', radius)`。
+2. **range / map 模式自然**:N 圈、N 條線、N 個粒子,`array.map(...)` 直接吐 children。
+3. **沒有 namespace 雷**:`document.createElement('circle')` 在 vanilla JS 會建出 HTML circle 不是 SVG circle,要用 `createElementNS('http://www.w3.org/2000/svg', 'circle')`。React 自動處理 namespace。
+4. **conditional rendering 直觀**:`{shouldShow && <path .../>}` vs vanilla 的 `if (shouldShow) container.appendChild(...)`。
+
+## Dash 拼成完整環的數學
+
+dashed circle 想看起來連續,**dash 長度跟周長必須整除**:
+
+```ts
+const circumference = 2 * Math.PI * radius;
+const numOfDashes = 6;  // 6 dash + 6 gap
+const dashSize = circumference / (numOfDashes * 2);
+// strokeDasharray={dashSize}
+```
+
+`numOfDashes * 2` 是因為 dash + gap 是兩段。`strokeDasharray="X"` 沒寫第二個值時,瀏覽器把它當「dash X、gap X」。
+
+如果 dashSize 沒對齊周長,最後一段會被截短或拉長,看起來破碎。
+
+## camelCase vs hyphenated
+
+JSX 裡 SVG attribute 大部分跟 HTML / SVG 規範一致,但有幾個要轉 camelCase:
+
+| SVG 原生 | JSX |
+|---|---|
+| `stroke-width` | `strokeWidth` |
+| `stroke-dasharray` | `strokeDasharray` |
+| `clip-path` | `clipPath` |
+| `xlink:href` | `xlinkHref`(已被 `href` 取代) |
+| `viewBox` | `viewBox`(就這個維持原樣) |
+
+特例多,寫 `stroke-width` 在 JSX 不會炸但會 warning。
+
+## 跟 vanilla JS 比
+
+vanilla 版本要做同一件事大概長這樣:
+
+```ts
+const svg = document.querySelector('svg');
+range(3, 32, 3).forEach((radius, index) => {
+  const circle = document.createElementNS(SVG_NS, 'circle');
+  circle.setAttribute('cx', '32');
+  circle.setAttribute('cy', '32');
+  circle.setAttribute('r', String(radius));
+  circle.style.stroke = `hsl(${240 + index * 8}deg 80% 70%)`;
+  // ... 一直設下去
+  svg.appendChild(circle);
+});
+```
+
+行數翻倍、每個 attribute 都要 stringify、forEach 而不是 map(沒 return)。在「動態產生大量 SVG」這個情境,JSX 體驗顯著好。
+
+## Gotchas
+
+- **不要在 JSX 屬性裡放函式呼叫副作用**:`r={updateCounter()}` 之類會在每次 render 被 call,嚴重會造成無限重 render。值要從 props/state 算,純函數。
+- **Boolean 屬性**:HTML 的 `disabled` 是 boolean,SVG 沒有對應 — `pointer-events="none"` 是字串。React 不會幫你轉。
+- **inline `style` 物件 key 也是 camelCase**:`style={{ strokeWidth: 2, fillOpacity: 0.07 }}` 而不是字串連接。
+- **大型 SVG 一次 mount 上千個 children 會慢**:超過 500 元素考慮 Canvas / WebGL,React 的 reconciliation 會吃 frame。
+- **`key` 一樣重要**:動態加減 SVG children 時要給 stable key,不然 React 會 reuse 錯位置的元素,動畫跳動。

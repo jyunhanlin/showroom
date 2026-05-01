@@ -1,0 +1,93 @@
+---
+title: The Wide World of SVG, filters / gradients / patterns / textPath
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/11-others
+lessonNumber: '02-svg/11-others'
+order: 93
+summary: 'SVG 還有四個常被遺忘的工具:`<filter>`(底層的 CSS filter)、`<linearGradient>`(SVG 元素不能用 CSS gradient,只能這個)、`<pattern>`(平鋪)、`<textPath>`(沿曲線排字)。'
+tags: [svg, filter, gradient, pattern, text-path]
+---
+
+import { FilterDropShadowDemo, LinearGradientDemo, PatternDemo, TextPathDemo } from './wide-world';
+
+## TL;DR
+
+CSS 的 `filter: blur(...)` / `drop-shadow(...)` 其實底下都是 SVG filter。SVG 直接用 `<filter>` element 寫,自由度高很多 — 但學習曲線陡。Gradient / Pattern / TextPath 同樣 SVG 自己一套,跟 CSS 完全分離。
+
+## Filter — `<feDropShadow>` 是內建捷徑
+
+```svg
+<filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+  <feDropShadow dx="2" dy="4" stdDeviation="4" />
+</filter>
+<circle filter="url(#shadow)" .../>
+```
+
+<DemoFrame title="feDropShadow — dx/dy/blur sliders">
+  <FilterDropShadowDemo />
+</DemoFrame>
+
+`<filter>` 自身有預設的 `x/y/width/height: -10% / 120%`,**任何超出 filter 邊界的 pixel 都會被 clip**。模糊或 shadow 容易被切掉,記得手動把 filter 範圍開大(課程例 `-100% 300%`)。
+
+更進階的 filter 用 chain:`feGaussianBlur` → `feOffset` → `feMerge` 自己疊出 drop shadow(在 `feDropShadow` 出現之前的標準做法)。但 `feDropShadow` 90%+ 瀏覽器支援度,直接用就好。
+
+## Linear Gradient
+
+CSS 的 `linear-gradient()` 不能用在 SVG fill 上 — SVG 自己一套:
+
+```svg
+<defs>
+  <linearGradient id="g" x1="0" y1="0" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="hsl(200 100% 90%)" />
+    <stop offset="100%" stop-color="hsl(245 100% 50%)" />
+  </linearGradient>
+</defs>
+<rect fill="url(#g)" .../>
+```
+
+<DemoFrame title="linearGradient — angle slider rotates the gradient line">
+  <LinearGradientDemo />
+</DemoFrame>
+
+CSS 用「角度」、SVG 用「兩點定義的線段」(x1, y1 → x2, y2)。stops 沿著這條線分佈。觀念跟 Figma 的 gradient handle 一致。
+
+## Pattern — 平鋪
+
+```svg
+<pattern id="grid" width="4" height="4" patternUnits="userSpaceOnUse">
+  <path d="M 0,0 L 4,0 L 4,4" stroke="white" />
+</pattern>
+<rect fill="url(#grid)" .../>
+```
+
+<DemoFrame title="pattern — repeating ⌐ shape across the rect">
+  <PatternDemo />
+</DemoFrame>
+
+`patternUnits="userSpaceOnUse"` 讓 pattern 內部用跟 viewBox 一樣的座標(預設是 0~1 normalized,常常算錯)。比起 CSS 的 `background-repeat`,SVG pattern 可以套在任意 shape 的 fill,還能用整套 SVG 工具(stroke / gradient / animation)。
+
+## Text on a path
+
+```svg
+<defs>
+  <path id="curve" d="M 30,120 Q 250,20 470,120" />
+</defs>
+<text>
+  <textPath href="#curve">curved text</textPath>
+</text>
+```
+
+<DemoFrame title="textPath — type follows curve">
+  <TextPathDemo />
+</DemoFrame>
+
+實際上是 web 上**唯一**做曲線文字的方法。但有兩個雷:
+- 字超過 path 長度會被截掉。
+- 沒辦法自動 fit — 要手調 `font-size` / `letter-spacing`。
+
+## Gotchas
+
+- **Filter 預設 clip 邊界**:模糊量超過 `-10%/120%` 一定要手動加大,不然看起來好像沒模糊到。
+- **Gradient / pattern 必須在 `<defs>`** 才會被 `url(#id)` 找到。雖然有時候在 SVG 任意位置也能 work,但 stricter 的瀏覽器會拋掉。
+- **SVG filter 會建立 stacking context**,堆疊順序會改變,跟 z-index 互動要注意。
+- **font-size px vs rem**:SVG `text` 用 `font-size: 84` 是 viewBox px,不是螢幕 px。SVG 的最外 `<svg>` 用 rem 大小才能讓字隨使用者放大字級調整。
+- **textPath 的 `startOffset`**:預設文字從 path 起點開始排,可以用 `startOffset="50%"` 讓字置中於 path,但要算長度。

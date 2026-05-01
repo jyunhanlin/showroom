@@ -1,0 +1,103 @@
+---
+title: React Spring, dedicated spring physics library
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/11.03-react-spring
+lessonNumber: '02-svg/11.03-react-spring'
+order: 97
+summary: '`@react-spring/web` 比 motion 更專注 — 只做 spring 物理,但做得很好。`useSpring` / `useTrail` / `clamp` 是它的招牌。對中斷的處理優於 motion;render 不經過 React,動畫期間不會觸發 re-render。'
+tags: [svg, react, react-spring, spring, animation-library]
+---
+
+import { PathSpringDemo, NumberRollSpring, ClampToggleDemo, TrailDemo } from './react-spring';
+
+## TL;DR
+
+- React Spring 跟 motion/react 解同一個問題,但**只專注在 spring 物理**。bundle 約 19kb,比 motion 的 30kb 小。
+- 不同術語:`stiffness` → `tension`、`damping` → `friction`。一樣的物理,只是命名。
+- 招牌功能:**`clamp`**(動畫到目標值就停止,不彈回去)、**`useTrail`**(staggered animations,免手算 delay)。
+- 中斷處理(動畫進行中改目標)比 motion 更平滑,保持物理慣性。
+
+<DemoFrame title="path morph — same as motion lesson but with react-spring">
+  <PathSpringDemo />
+</DemoFrame>
+
+```tsx
+import { animated, useSpring } from '@react-spring/web';
+
+const spring = useSpring({
+  d: hover ? 'M 4,16 Q 16,28 28,16' : 'M 4,16 Q 16,16 28,16',
+  config: { tension: 250, friction: hover ? 28 : 6 },
+});
+
+<animated.path d={spring.d} />
+```
+
+## 數字插值 — `.to(...)`
+
+React Spring 真正擅長的是**任何屬性都能 spring 過去**,包括純數字:
+
+<DemoFrame title="number roll — random target on click">
+  <NumberRollSpring />
+</DemoFrame>
+
+```tsx
+const spring = useSpring({ value: target, config: { tension: 150, friction: 50 } });
+<animated.span>{spring.value.to((v) => Math.round(v).toString())}</animated.span>
+```
+
+`spring.value` 不是普通數字 — 是個 `SpringValue` 物件,每幀更新自己。`.to(fn)` 取當下插值通過 fn 處理。**動畫期間 React 不會 re-render**(state 全部脫離 React 自己管,直接寫 DOM),所以即使每秒 60 幀也不影響應用其他部分。
+
+## clamp — 防止穿過終點
+
+<DemoFrame title="dismiss with clamp — toggle the checkbox">
+  <ClampToggleDemo />
+</DemoFrame>
+
+```tsx
+const spring = useSpring({
+  transform: `scale(${open ? 1 : 0})`,
+  config: { tension: 250, friction: 10, clamp: !open },
+});
+```
+
+`scale(0 → 1)` 配低 friction 會過頭再回來 — 對放大進場是 feature。但消失時(scale → 0),如果穿過 0 變負值,會看到 box **整個翻面**。
+
+`clamp: true` 讓動畫**到達目標就停**,不再振盪。用 `clamp: !open` 只在消失方向開啟,放大時保留彈跳。
+
+## useTrail — staggered animations
+
+<DemoFrame title="trail — N elements with cascading lag">
+  <TrailDemo />
+</DemoFrame>
+
+```tsx
+const trails = useTrail(5, {
+  transform: `translateY(${up ? -36 : 0}px)`,
+  config: { tension: 250, friction: up ? 10 : 30 },
+});
+{trails.map((style, i) => <animated.div style={style} key={i} />)}
+```
+
+每個 ball 的物理 spring 都「跟著前一個」 — 第一顆領先、後面 cascade。比 motion 用 `delay: i * 0.05` 漂亮,因為 motion 是**固定延遲**,連續快點 click 會看到動畫殘影排隊;react-spring 的 trail 是**物理串聯**,中斷時整個 chain 順著重算。
+
+## 跟 motion 對比
+
+| | motion | react-spring |
+|---|---|---|
+| Bundle | ~30kb | ~19kb |
+| 範圍 | 大(layout, gestures, scroll, drag) | 窄(only springs) |
+| API | declarative `<motion.X>` | hook + `<animated.X>` |
+| 中斷 | OK 但有時看得到瑕疵 | 自然 |
+| `clamp` | 沒對等(`restSpeed/restDelta` 接近但不直觀) | ✅ |
+| 數字插值 + 渲染 | 要 ref + onUpdate hack | `.to()` 直接拿 |
+| layout animation | ✅(killer feature) | ❌ |
+| gesture (drag) | ✅ | ❌(可配 `@use-gesture`) |
+
+兩個都很強。Comeau 自己**兩個都用** — 大型 layout / gesture 用 motion,純數值 spring + trail 用 react-spring。配 lazy load 兩個都能塞。
+
+## Gotchas
+
+- **`spring.value` 不是 number**:console.log 會看到 SpringValue 物件,不是當下值。要 `.get()` 取最新或 `.to(fn)` 接 derived。
+- **`config.duration` 跟 spring 不能混用**:設了 duration 會 fall back 成 tween,放棄 spring。要嘛 spring 要嘛 tween。
+- **string 內含數字會被 parse**:`'scale(0)'` → `'scale(1)'`,react-spring 會找出 0/1 內插。但 `'rgb(255, 0, 0)' → 'rgb(0, 0, 255)'` 也能,雖然中段一樣會在 RGB 空間跑(灰色 dead zone,跟 css transition 一樣的問題)。
+- **`useSpring` deps**:跟其他 hook 不同,不需要 dependency array,自動偵測值變化。但 `config` 物件每次 render 新建會被視為變化 — 用 useMemo 包或寫成 stable ref。
+- **server-side**:`@react-spring/web` SSR 友善,但動畫值在 server 是初始值;client 接管後才開始動。

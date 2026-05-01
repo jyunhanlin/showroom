@@ -132,6 +132,9 @@ importers:
       '@mdx-js/rollup':
         specifier: ^3.1.1
         version: 3.1.1(rollup@4.60.2)
+      '@react-spring/web':
+        specifier: ^10.0.3
+        version: 10.0.3(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       '@tanstack/react-router':
         specifier: ^1.168.23
         version: 1.168.24(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
@@ -1210,6 +1213,12 @@ packages:
 
   '@react-spring/types@10.0.3':
     resolution: {integrity: sha512-H5Ixkd2OuSIgHtxuHLTt7aJYfhMXKXT/rK32HPD/kSrOB6q6ooeiWAXkBy7L8F3ZxdkBb9ini9zP9UwnEFzWgQ==}
+
+  '@react-spring/web@10.0.3':
+    resolution: {integrity: sha512-ndU+kWY81rHsT7gTFtCJ6mrVhaJ6grFmgTnENipzmKqot4HGf5smPNK+cZZJqoGeDsj9ZsiWPW4geT/NyD484A==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   '@react-three/drei@10.7.7':
     resolution: {integrity: sha512-ff+J5iloR0k4tC++QtD/j9u3w5fzfgFAWDtAGQah9pF2B1YgOq/5JxqY0/aVoQG5r3xSZz0cv5tk2YuBob4xEQ==}
@@ -5103,6 +5112,15 @@ snapshots:
       three: 0.184.0
 
   '@react-spring/types@10.0.3': {}
+
+  '@react-spring/web@10.0.3(react-dom@19.2.5(react@19.2.5))(react@19.2.5)':
+    dependencies:
+      '@react-spring/animated': 10.0.3(react@19.2.5)
+      '@react-spring/core': 10.0.3(react@19.2.5)
+      '@react-spring/shared': 10.0.3(react@19.2.5)
+      '@react-spring/types': 10.0.3
+      react: 19.2.5
+      react-dom: 19.2.5(react@19.2.5)
 
   '@react-three/drei@10.7.7(@react-three/fiber@9.6.0(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.184.0))(@types/react@19.2.14)(@types/three@0.184.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.184.0)':
     dependencies:

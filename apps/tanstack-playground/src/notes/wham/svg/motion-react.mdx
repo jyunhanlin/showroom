@@ -1,0 +1,94 @@
+---
+title: motion/react, animating SVG paths in React
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/11.02-motion-react
+lessonNumber: '02-svg/11.02-motion-react'
+order: 96
+summary: '`motion/react` 把任何 HTML/SVG 元素變成可動畫版本(`motion.div` / `motion.path` / `motion.circle`)。`animate` prop 改值就 spring 過去。`<motion.path animate={{ d }}>` 能在不同 SVG path 之間平滑內插 — vanilla CSS 做不到。'
+tags: [svg, react, motion, spring, path-morph]
+---
+
+import { PlayPauseMorph, SpringDamping } from './motion-react';
+
+## TL;DR
+
+- `motion.path` 是 `path` 的加強版,可以在 `d` 字串之間插值。CSS `transition: d` 早期不存在,Motion 跑邏輯插補。
+- `transition: { type: 'spring', stiffness, damping }` 讓所有屬性走 spring 物理 — 比 cubic-bezier 自然。
+- `motion.X` 的 `X` 不是真的有定義 — 是 JS Proxy 攔截 property access,任意 tag 都能變 motion 版(雖然絕大多數場景不需要)。
+
+<DemoFrame title="play / pause icon morph (spring)">
+  <PlayPauseMorph />
+</DemoFrame>
+
+## 基本用法
+
+```tsx
+import { motion } from 'motion/react';
+
+<motion.path
+  initial={false}
+  animate={{ d: playing ? PAUSE_PATH : PLAY_PATH }}
+  transition={{ type: 'spring', stiffness: 280, damping: 22 }}
+/>
+```
+
+- `initial={false}` 跳過 mount 進場動畫(否則第一次 render 會從某個 default 跑到目標,常常會看到「咻」進場)。
+- `animate={{ ... }}` 是「目標值」 — 改變時 motion 會自動補間。
+- `transition` 控時序 — 預設是 ease,加 `type: 'spring'` 變成物理彈簧。
+
+## Spring 物理直覺
+
+<DemoFrame title="hover smile — tweak stiffness / damping">
+  <SpringDamping />
+</DemoFrame>
+
+| 參數 | 直覺 | 大值 | 小值 |
+|---|---|---|---|
+| `stiffness` | 彈簧硬度 | 反應快、動得猛 | 慢慢飄 |
+| `damping` | 阻尼(摩擦) | 一次到位、不彈 | 過頭來回多次 |
+| `mass` | 質量(預設 1) | 慢起步、慣性大 | 輕飄 |
+
+設計 toast、modal、interactive feedback 用「stiffness 200~300、damping 20~30」是 sane default。
+
+## Path 內插的限制
+
+Motion 在兩個 path 之間做 segment-by-segment 比對。能順利內插的條件:
+- **command 對齊**:都是 `M L L Z` 或都是 `M Q Q Z`,個數相同。
+- **point 數一致**:不要一個 7 點、一個 9 點。
+- **同向**:順時針對順時針,反向會「翻轉」過去。
+
+不一致時 motion 會盡量處理但會看到怪變形。最穩的做法:設計時就把所有 path 規格統一(同樣 N 個 control points,只變化座標)。
+
+## Proxy 黑魔法
+
+```tsx
+<motion.fsjfkdsjfs>This works?!</motion.fsjfkdsjfs>
+```
+
+`motion` 不是有 hard-code 列表的物件,而是個 ES Proxy。任何 property access 都會被攔下來生個包裝過的 component。所以技術上可以用任意 tag(雖然瀏覽器照樣把它當 unknown element 對待)。styled-components 也用同樣手法。
+
+## 其他常用 features
+
+- `whileHover` / `whileTap` / `whileFocus` — declarative hover/press states,不用自己管 state。
+- `drag` — 內建拖拽,自動處理 pointer events 跟 momentum。
+- `useScroll` / `useTransform` — scroll-based animation。
+- `layout` prop — 自動 FLIP animation 當 element 位置/大小改變。
+
+`layout` 對 SVG 用處不大(SVG 沒 layout 系統),但對 HTML 是改變思路的功能 — flexbox / grid 變動 children 順序時自動補進出動畫。
+
+## Bundle size
+
+motion 約 30kb gzipped。對只用一兩處的場景算貴 — 可以考慮 lazy import:
+
+```tsx
+const Motion = lazy(() => import('motion/react').then((m) => ({ default: m.motion })));
+```
+
+或者拿 vanilla 的 `motion` 函數(`motion('selector', ...)`)替代 — 同個 lib 的非 React API,bundle 更小。
+
+## Gotchas
+
+- **`initial={false}` 不寫 → on-mount 動畫**:會從某個推測的 from 值跑到 animate 值。第一次 render 看起來怪。
+- **Spring 對 number 而非 string**:`width: '100px'` 不會 spring,要 `width: 100`。例外是有單位的特殊屬性(`d`、`transform`)Motion 自己處理。
+- **多個 prop 同時改用同一條 transition**:`animate={{ x: 100, opacity: 0 }}` 套 spring 時兩個 prop 各自獨立彈簧,不會同步。
+- **AnimatePresence 包 conditional render**:component unmount 時想播 exit animation 必須用 `<AnimatePresence>` 包,不然元素瞬間消失。
+- **跟 React strict mode**:Motion 12 已經處理 double-invoke,但 bundle 較舊版要驗證。

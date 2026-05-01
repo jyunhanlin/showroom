@@ -1,0 +1,89 @@
+---
+title: My Favourite Pattern, springs as design tokens
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/08.04-favourite-pattern
+lessonNumber: '02-svg/08.04-favourite-pattern'
+order: 90
+summary: '把 spring 當 design token — 3~4 個全域 spring + 對應 duration,80% 場景共用。`@supports` 兼容 cubic-bezier fallback,避免 linear() 在舊瀏覽器無聲失敗。`/* prettier-ignore */` 防止 Prettier 把 linear() 拆成 30 行。'
+tags: [svg, css, spring, linear, design-tokens]
+---
+
+import { SpringTokenPlayground } from './favourite-pattern';
+
+## TL;DR
+
+逐個動畫都自己生 `linear()` 是大坑 — bundle 變大、視覺不一致。Comeau 的最佳實踐:
+
+1. **Spring as token**:`html` 上掛 3~4 條 `--spring-smooth` / `--spring-bounce` / `--spring-snappy`,80% 場景共用,20% 才寫 one-off。
+2. **Duration 跟 spring 綁在一起**:`--spring-bounce-time: 1200ms`。每條 spring 都是設計給特定 duration 的,別獨立調。
+3. **`@supports` 包 modern 版**,fallback 用 cubic-bezier — CSS variables 會混淆「declaration valid 嗎」的判斷,duplicate declarations 那招對 `linear()` 失效。
+4. **`/* prettier-ignore */`** 防止 Prettier 把一行 30 個值的 linear() 拆成 30 行。
+
+<DemoFrame title="three spring tokens — same distance, different feel">
+  <SpringTokenPlayground />
+</DemoFrame>
+
+## 寫法骨架
+
+```css
+html {
+  --spring-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-smooth-time: 800ms;
+
+  @supports (animation-timing-function: linear(0, 1)) {
+    /* prettier-ignore */
+    --spring-smooth: linear(0, 0.012 1.2%, 0.092 3.5%, ..., 1);
+  }
+}
+
+.toast {
+  transition: transform var(--spring-smooth-time) var(--spring-smooth);
+}
+```
+
+`@supports` 區塊只在瀏覽器懂 `linear(0, 1)` 才會 apply。在裡面 override 就好,不需要重寫 `--spring-smooth-time`。
+
+## 為什麼不能 duplicate declaration
+
+對 `oklch` / `color-mix` 之類有「不認得會丟掉整條」的特性,duplicate declaration 是常見 fallback 招:
+
+```css
+.elem {
+  color: hsl(340 100% 55%);   /* fallback */
+  color: oklch(0.66 0.3 11);  /* 新瀏覽器 */
+}
+```
+
+但如果用 var:
+
+```css
+.elem {
+  transition: transform 1200ms cubic-bezier(...);
+  transition: transform 1200ms var(--spring-bounce);  /* var 內含 linear() */
+}
+```
+
+舊瀏覽器**不會**掉到第一條 — 因為它 syntactically 看 `var(--anything)` 永遠合法,不去解 var 裡面是什麼。第二條贏,但解出來是它不認得的 `linear(...)`,結果動畫整條 invalid → 沒動。
+
+`@supports` 是唯一能正確分流的工具。
+
+## 80/20 — 何時要 one-off
+
+當 token 配不上情境時,可以單獨寫個 bespoke linear()。例如做 toast notification 想要「彈出 → 短停 → 收回去」的吐司機節奏 — 通用 token 達不到。
+
+底線:全域 token 用率要 80%+。低於這個值,代表 token 設計沒對到產品的動態語言,該調 token 而不是寫一堆 one-off。
+
+## Spring 的常見 3 種預設
+
+| Token | 用途 | 特性 |
+|---|---|---|
+| `smooth` | 進場、退場、小型 transition | 略過頭一點點再回來,不誇張 |
+| `bounce` | 強調的成功反饋(like、checkmark、彈跳) | 過頭明顯、回彈幾次 |
+| `snappy` | hover、focus、quick toggle | 短(~200ms)、單向、近似 ease-out |
+
+## Gotchas
+
+- **手寫 `linear()` 自殺路線**:絕對用 [Easing Wizard](https://easingwizard.com/) 拉 stiffness / damping,直接複製 string。沒人能手調 30 個百分比點。
+- **Prettier 會拆 linear() 換行**:加 `/* prettier-ignore */` 在 `linear(` 前面。Eslint 的 `prettier/prettier` 規則也要排除這幾行。
+- **Token 單位要全寫**:`--spring-smooth-time: 800ms` 不要只寫 `800` — 後面 `transition: ... var(--spring-smooth-time)` 不會自動補單位,會 invalid。
+- **動畫長度跟 spring shape 連動**:把 1200ms 的 spring 套進 300ms 的動畫 = 看到的是 spring 起頭那一截,沒有彈跳感。要嘛換 spring 要嘛接受看不到後段。
+- **不要動畫 spring 的數值**:`linear(...)` 內的點不能 transition。spring 是個 timing function,不是個值。

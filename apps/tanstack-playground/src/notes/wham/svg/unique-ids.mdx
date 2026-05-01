@@ -1,0 +1,102 @@
+---
+title: Unique IDs, useId() for SVG masks/gradients/uses
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/11.01-unique-ids
+lessonNumber: '02-svg/11.01-unique-ids'
+order: 95
+summary: 'SVG `<mask>` / `<linearGradient>` / `<use>` 全部靠 `id` 互相連結。React component 重複 mount 會撞 id,結果所有 instance 共用第一個的設定。`React.useId()` 就是為了這種情況設計的 — SSR 安全、stable 值。'
+tags: [svg, react, useId, ssr]
+---
+
+import { IdCollisionDemo } from './unique-ids';
+
+## TL;DR
+
+SVG 的 mask、gradient、pattern、use、filter 全部靠 id 字串串起來。React 把 component 多次 mount 時,**每個 instance 的 markup 內 id 都長一樣** — 結果所有 mask 都連到第一個出現的那個,後面的 props 變化全部失效。
+
+修法:`React.useId()` 包進 component,生成 SSR-stable 的 unique id。
+
+```tsx
+function MoonCutout({ offsetX }) {
+  const id = useId();
+  const maskId = `${id}-moon-mask`;
+  return (
+    <svg viewBox="0 0 80 80">
+      <defs>
+        <mask id={maskId}>...</mask>
+      </defs>
+      <circle mask={`url(#${maskId})`} ... />
+    </svg>
+  );
+}
+```
+
+<DemoFrame title="hard-coded id vs useId — three moons">
+  <IdCollisionDemo />
+</DemoFrame>
+
+上面三顆 cutout 看起來一樣是因為它們都連到同一個 `<mask id="moon-mask">`(瀏覽器抓到第一個就停)。下面三顆各自有 unique id,所以 props 真的生效。
+
+## 為什麼不能 `Math.random()`
+
+```tsx
+const [id] = useState(() => Math.random().toString(36));
+```
+
+兩個問題:
+1. **包含 `.`**:HTML id 不接受小數點,直接 invalid。
+2. **SSR hydration mismatch**:server 跑出 `0.4128...`,client 跑出 `0.7233...`,React 比對發現 markup 不同 → hydration error。
+
+`crypto.randomUUID()` 解決 illegal char 但 SSR mismatch 還在。
+
+## `useId()` 的設計
+
+React 18+ 的 `useId()`:
+
+- **SSR 安全**:server 跟 client 用同一個 deterministic counter,輸出一致。
+- **每個 component instance 獨立**:重複 mount 同一個 component,id 會遞增。
+- **bizarre 字符 `«r0»`**:故意挑很少跟現有 id 撞名的 unicode brackets。看起來很怪但完全合法。
+- **不能直接拿來當 id**:推薦做 prefix。`${id}-mask`、`${id}-gradient`,因為 component 內可能要多個 unique id。
+
+## 一個 useId 包多個 id
+
+```tsx
+function ComplexShape() {
+  const id = useId();
+  const maskId = `${id}-mask`;
+  const gradId = `${id}-grad`;
+  const filterId = `${id}-filter`;
+
+  return (
+    <svg>
+      <defs>
+        <mask id={maskId}>...</mask>
+        <linearGradient id={gradId}>...</linearGradient>
+        <filter id={filterId}>...</filter>
+      </defs>
+      <rect mask={`url(#${maskId})`} fill={`url(#${gradId})`} filter={`url(#${filterId})`} />
+    </svg>
+  );
+}
+```
+
+只 call 一次 `useId()`,後面用字串拼。比 call 多次更省 — call 多次每個都會佔一個 React id slot。
+
+## 適用範圍
+
+下面這些都需要 unique id 才能在 component 多次 mount 時穩定:
+
+- `<mask>` → 用 `mask="url(#id)"` 引用
+- `<clipPath>` → `clip-path="url(#id)"`
+- `<linearGradient>` / `<radialGradient>` → `fill="url(#id)"`
+- `<pattern>` → `fill="url(#id)"`
+- `<filter>` → `filter="url(#id)"`
+- `<symbol>` / `<defs>` 的內容 → `<use href="#id">`
+- `<textPath href="#id">`
+- aria 的 `aria-labelledby` / `aria-describedby`
+
+## Gotchas
+
+- **不要把 `id` 字串硬寫在 `defs` 跟引用兩處**:必然會打錯。一個變數兩邊讀。
+- **Conditional render 後 id 會重排**:Parent 多 mount 一個前面的 child,後面所有 component 的 useId 值都會位移 — 但每個 component 還是各自唯一,沒影響。
+- **server-side first paint 看不到 mask?** SSR 經常因為 CSS 載入順序漏掉 mask 套用,跟 useId 無關 — 通常是 `<style>` 在 `<svg>` 後才解析。確認 stylesheet 順序。
+- **storybook / 測試環境**:某些 snapshot 工具會抓不住 useId 生成的隨機值,要 mock。React 18 的 useId 在 strict mode 下穩定。

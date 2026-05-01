@@ -1,0 +1,95 @@
+---
+title: SVG Masks, white shows / black hides
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/10-masks
+lessonNumber: '02-svg/10-masks'
+order: 92
+summary: '`<mask>` 用一張黑白圖當遮罩 — 白色保留、黑色切掉、灰色半透明。比 `<clipPath>` 強的地方:可以做月牙(挖洞)、可以對 stroke 起作用、可以做漸變遮罩。'
+tags: [svg, mask, clip-path, defs]
+---
+
+import { CrescentMoonMask, MaskVsClipPath } from './masks';
+
+## TL;DR
+
+把一個圓形遮罩偏一點點蓋上去 → 月牙。SVG mask 裡的填色決定 alpha:
+
+- **白色** → 完整保留
+- **黑色** → 完全切掉
+- **灰色** → 半透明(亮度直接對應 alpha)
+
+mask 裡的 shape 都是工具,**不會被畫到畫面上**,只用來決定主 shape 哪些 pixel 顯示。
+
+```svg
+<svg viewBox="0 0 80 80">
+  <defs>
+    <mask id="moon">
+      <rect width="80" height="80" fill="white" />     <!-- 預設保留全部 -->
+      <circle cx="60" cy="20" r="30" fill="black" />   <!-- 偏右上的圓挖掉 -->
+    </mask>
+  </defs>
+  <circle cx="40" cy="40" r="30" fill="hotpink" mask="url(#moon)" />
+</svg>
+```
+
+<DemoFrame title="crescent moon mask — drag to slide cutout">
+  <CrescentMoonMask />
+</DemoFrame>
+
+cutout circle 從 0% 灰到 100% 灰可以做出半透明月色。
+
+## Mask vs ClipPath
+
+`<clipPath>` 也能切割,但限制多。
+
+| | `<mask>` | `<clipPath>` |
+|---|---|---|
+| 半透明 | 灰階 → alpha | 二元(顯示 or 不顯示) |
+| stroke 可當遮罩 | ✅ | ❌ 永遠用 fill |
+| 漸變 / 圖片當遮罩 | ✅ | ❌ |
+| 性能 | 略貴(raster ops) | 較快(向量裁切) |
+| 月牙(部分減去) | ✅ 多個 shape 疊起來 | ❌ 沒辦法「除了」這塊 |
+
+<DemoFrame title="同一條 squiggly,mask 看得到、clipPath 消失">
+  <MaskVsClipPath />
+</DemoFrame>
+
+## 為什麼放在 `<defs>`
+
+```svg
+<defs>
+  <mask id="...">...</mask>
+</defs>
+```
+
+對 `<mask>` 而言,放不放 `<defs>` 都不會被畫出來。但 `<defs>` 是「非可視元素的固定家」 — `<symbol>`、`<linearGradient>`、`<filter>` 都需要放裡面才不會誤畫。把所有非 UI 的東西塞 `<defs>` 比較好整理 — 一眼看清「上半部是工具,下半部是真實畫面」。
+
+## 動畫場景
+
+mask 裡的元素**也是 SVG element** — 一樣可以套 CSS / 用 JS 改:
+
+```css
+mask circle.cutout {
+  fill: white;
+  transition: fill 500ms, cx 500ms;
+}
+svg:hover mask circle.cutout {
+  fill: black;
+  cx: 60px;
+}
+```
+
+hover 時 cutout 從白(完整月)→ 黑(月牙)+ 位置漂移 → 看起來像月相切換。
+
+## 實際應用
+
+- **月相 / 表情切換**:cookie monster 的 cookie 一口口被咬。
+- **彈跳氣球破裂**:上一章 like 按鈕的「圓圈炸開」效果用 mask 加放大可以做出真的破裂感(像氣球而不是淡出)。
+- **進度條切片**:用矩形 mask 配合 width animation,做出「填滿」效果。
+- **scroll-driven reveal**:配合 `<linearGradient>` 當 mask,gradient 的 stop 隨 scroll 移動 → 文字逐字 reveal。
+
+## Gotchas
+
+- **mask 預設不畫**:如果 `<mask>` 內什麼都沒有,套用後**目標 shape 會整個消失**(等同全黑遮罩)。要記得先放白色 rect 蓋全範圍。
+- **userSpaceOnUse vs objectBoundingBox**:預設 `<mask>` 是 `objectBoundingBox` — 內部座標是 0-1 normalized。一般直覺是 `<mask maskUnits="userSpaceOnUse">` 讓 px 跟 viewBox 一致。Comeau 例子全部用 user space,我們也跟。
+- **mask 內的 stroke 厚度被 mask 自己 viewBox 影響**:如果 `<mask>` 大小跟 SVG 不一致,stroke 寬會跑掉。
+- **chrome/safari 對 mask 的 GPU 加速**:複雜 mask + transform animation 在某些 GPU 上會掉 fps。複雜 mask 動畫測過再上 production。

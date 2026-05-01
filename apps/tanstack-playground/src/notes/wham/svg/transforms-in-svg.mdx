@@ -1,0 +1,92 @@
+---
+title: Transforms in SVG, transform-origin pitfalls
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/09-transforms-in-svg
+lessonNumber: '02-svg/09-transforms-in-svg'
+order: 91
+summary: 'SVG 元素的 `transform-origin` 預設是參考 viewBox 而不是元素自己的 box。`transform-origin: center` 會繞 viewBox 中心,不是元素中心。修法:用具體 px 值對應元素的座標。多元素共用 origin → 包進 `<g>`。'
+tags: [svg, css, transform, transform-origin]
+---
+
+import { CenterOriginQuirk, GroupRotation } from './transforms-in-svg';
+
+## TL;DR
+
+CSS 裡 `transform-origin: center` 對一般 HTML 元素是「繞自己中心」,但對 SVG 元素**所有人都共享一個 reference box** — viewBox 本身。所以一個寫在 `(150, 100)` 的 `<text>` 套 `transform-origin: center` 會跑去繞 viewBox 中心,看起來像被甩出去。
+
+修法:用 px 值,對齊元素自己的座標。
+
+```svg
+<text x="150" y="100"
+  style="transform: rotate(35deg); transform-origin: 150px 100px;">
+```
+
+<DemoFrame title="text rotation — wrong vs right origin">
+  <CenterOriginQuirk />
+</DemoFrame>
+
+橘點是元素的 (x, y)。左邊繞了 viewBox 中心會把 text 甩出去,右邊正確繞自身原點。
+
+## 為什麼這樣設計
+
+CSS 規範規定 `transform-origin` 的百分比是相對於 element 的 **reference box**。HTML 元素的 reference box 是它的 border-box,所以 50% 50% 永遠對。但 SVG 元素的 reference box 是包含它的 `<svg>` 的 viewBox,**所有 SVG 子元素共用同一個 reference box**,沒辦法逐元素改。
+
+所以對 SVG 用百分比/keyword 都會繞 viewBox 中心。要繞自己,得用絕對座標。
+
+## 不同元素的對齊規則
+
+| 元素 | 定位點 | transform-origin 寫法 |
+|---|---|---|
+| `<circle>` | `(cx, cy)` 中心 | `cx px cy px` |
+| `<ellipse>` | `(cx, cy)` 中心 | `cx px cy px` |
+| `<text>` | `(x, y)`(基線左) | `x px y px` |
+| `<rect>` | `(x, y)` 左上角 | `x + width/2 px, y + height/2 px` |
+| `<path>` / `<polygon>` / `<polyline>` | 由 path data 決定 | 自己算 bounding box 中心 |
+
+對 path 系列,「中心」要看你的內容。可以用 `getBBox()` 算或者建立 shape 時手動算。
+
+## `<g>` 群組
+
+多個 shape 想一起轉(像時鐘指針的三個元素、機器手臂的多段連桿),包進 `<g>` 然後對 group 套 transform 就好:
+
+```svg
+<g style="transform: rotate(45deg); transform-origin: 125px 125px;">
+  <polygon ... />
+  <rect ... />
+  <polyline ... />
+</g>
+```
+
+`<g>` 是 SVG 版的 `<div>` — 沒有視覺,只是把子元素歸類。transform 會繼承給所有 children。
+
+<DemoFrame title="three shapes, one rotating <g>">
+  <GroupRotation />
+</DemoFrame>
+
+## React 裡的常見模式
+
+座標跟 transform-origin 重複是個煩,但在 React 裡用同一個變數就解了:
+
+```tsx
+function RotatableLabel({ angle }: { angle: number }) {
+  const x = 150;
+  const y = 100;
+  return (
+    <text x={x} y={y} style={{ transform: `rotate(${angle}deg)`, transformOrigin: `${x}px ${y}px` }}>
+      Hello
+    </text>
+  );
+}
+```
+
+## Gotchas
+
+- **vector-effect: non-scaling-stroke 仍然繞 viewBox**:即使線寬不被 transform 影響,scale/rotate 的 origin 還是按 transform-origin 的規則。
+- **`transform-box: fill-box`** 是 SVG 限定的解(等同 HTML 的 border-box)— 把 reference box 從 viewBox 換成元素自己的 bounding box。瀏覽器支援度比較新但已 90%+:
+  ```css
+  .elem {
+    transform-origin: center;
+    transform-box: fill-box;
+  }
+  ```
+- **rect 的中心算錯就甩飛**:常見 bug 是 `transform-origin: ${x}px ${y}px` 寫成左上角;如果預期是中心要寫 `${x + w/2}px ${y + h/2}px`。
+- **動態 viewBox 改變了 reference box**:如果動畫期間 viewBox 大小變,所有用百分比 origin 的元素旋轉中心會跟著飄。avoid。
