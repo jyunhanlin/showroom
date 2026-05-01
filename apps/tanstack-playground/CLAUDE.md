@@ -15,7 +15,7 @@ TanStack Start (SPA mode) notes site for Josh W Comeau's Whimsical Animations (W
 - Co-locate any React demo as `<slug>.tsx` in the same folder
 - Frontmatter schema: `src/notes/_schema.ts`
 
-**Ordering gotcha:** `orderKey` in `_registry.ts` is `parseInt(lessonNumber, 10)` — only leading digits count. Lessons both prefixed `04-` (e.g. `04-rocketship`, `05-transforms`) collide on `4` and fall back to `slug.localeCompare`. When the leading integer collides with a sibling note, set an explicit `order: N` in frontmatter.
+**Ordering:** Two-tier sort in `_registry.ts`. Primary `chapterKey` = `parseInt(lessonNumber, 10)` (e.g. `01-particles/...` → `1`) — keeps notes from the same chapter clustered. Secondary `orderKey` = explicit `order` if set, else falls back to leading-int again. Tie-break by `slug.localeCompare`. Add `order: N` in frontmatter only to disambiguate **within** a chapter; it no longer overrides chapter ordering.
 
 ## Canvas demos
 

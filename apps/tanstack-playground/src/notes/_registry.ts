@@ -53,6 +53,15 @@ function buildEntries(): NoteEntry[] {
   return entries.toSorted(compareEntries);
 }
 
+function chapterKey(entry: NoteEntry): number {
+  const { lessonNumber } = entry.frontmatter;
+  if (lessonNumber) {
+    const leading = parseInt(lessonNumber, 10);
+    if (!Number.isNaN(leading)) return leading;
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
 function orderKey(entry: NoteEntry): number {
   const { order, lessonNumber } = entry.frontmatter;
   if (typeof order === 'number') return order;
@@ -64,6 +73,8 @@ function orderKey(entry: NoteEntry): number {
 }
 
 function compareEntries(a: NoteEntry, b: NoteEntry): number {
+  const chapterDiff = chapterKey(a) - chapterKey(b);
+  if (chapterDiff !== 0) return chapterDiff;
   const diff = orderKey(a) - orderKey(b);
   if (diff !== 0) return diff;
   return a.slug.localeCompare(b.slug);

@@ -1,6 +1,18 @@
 export type TopicMeta = { name: string; description?: string };
 
 export const topics: Record<string, TopicMeta> = {
+  particles: {
+    name: 'Particles',
+    description: 'DOM particle systems, easings, polar coords, lerp',
+  },
+  svg: {
+    name: 'SVG',
+    description: 'primitives, paths, animation, springs & easings',
+  },
+  'advanced-interactions': {
+    name: 'Advanced Interactions',
+    description: 'cursor tracking, clip-path, scroll & view transitions',
+  },
   'canvas-animation': {
     name: 'Canvas Animation',
     description: 'rAF loop, deltaTime, velocity-based animation',
@@ -8,18 +20,6 @@ export const topics: Record<string, TopicMeta> = {
   'motion-and-react': {
     name: 'Motion + React',
     description: 'motion/react library, layout & exit animations',
-  },
-  'advanced-interactions': {
-    name: 'Advanced Interactions',
-    description: 'cursor tracking, clip-path, scroll & view transitions',
-  },
-  svg: {
-    name: 'SVG',
-    description: 'primitives, paths, animation, springs & easings',
-  },
-  particles: {
-    name: 'Particles',
-    description: 'DOM particle systems, easings, polar coords, lerp',
   },
 };
 
