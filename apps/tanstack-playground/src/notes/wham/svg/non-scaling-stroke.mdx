@@ -1,0 +1,85 @@
+---
+title: Non-Scaling Stroke, fix the squashed-stroke bug
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/02.02-scaling-stroke
+lessonNumber: '02-svg/02.02-scaling-stroke'
+order: 2.02
+summary: 'preserveAspectRatio="none" 拉伸 SVG 時 stroke 也會被同方向擠扁，垂直線變超細、水平線不變。CSS vector-effect non-scaling-stroke 把 stroke 移到 transform 之後算，stroke-width 永遠是 screen pixel。'
+tags: [svg, vector-effect, stroke, scaling]
+---
+
+import { NonScalingStrokeToggle } from './non-scaling-stroke';
+
+## TL;DR
+
+- `preserveAspectRatio="none"` 拉伸內容時，stroke 也跟著被同方向 squash — 寬度被壓 20% 時垂直線只剩 1/5 粗，水平線不受影響，整張 SVG 線條粗細不一致。
+- `vector-effect: non-scaling-stroke` 是 CSS 解法，把 stroke 的繪製順序挪到 transform 之後，stroke-width 永遠以 screen pixel 為單位，不被 stretch 影響。
+- 用法：`svg * { vector-effect: non-scaling-stroke }`，套整個 SVG 即可。
+- 副作用：原本 stroke-width 是「viewBox 內部單位」，現在變「絕對 px」— 同一個 icon 在 24px 跟 240px 的 stroke 都會是 2px 粗，icon 看起來會「變細」當尺寸變大時。
+- 所以這不是無腦套用：stretch 用的 illustration 套；icon 通常不要套。
+
+<DemoFrame title="Toggle vector-effect — drag width slider, watch the strokes">
+  <NonScalingStrokeToggle />
+</DemoFrame>
+
+## 為什麼會有這 bug
+
+```html
+<svg viewBox="0 0 100 100" preserveAspectRatio="none" width="20" height="100">
+  <line x1="50" y1="10" x2="50" y2="90" stroke="green" stroke-width="6" />
+  <line x1="10" y1="50" x2="90" y2="50" stroke="green" stroke-width="6" />
+</svg>
+```
+
+viewBox 是 100×100，但元素被擠成 20×100（寬度 20%）。SVG 內部所有座標跟著 transform：
+
+- 垂直線：x 座標被壓到 1/5，但因為線本身是垂直的、x 沒長度，看不出來。stroke-width 是「往垂直線兩側水平方向的厚度」，水平方向被壓 1/5，所以 6px stroke 變 1.2px → **超細**。
+- 水平線：x 座標被壓 1/5，y 不變。線長度變短，但 stroke-width 是「往水平線兩側垂直方向的厚度」，垂直沒被壓，所以 6px 維持 6px → **正常**。
+
+結果整張 SVG 兩個方向粗細不一致。Demo 左邊（default）拖 width slider 到很窄就看得出來：水平線粗、垂直線細。
+
+## vector-effect 改變 paint order
+
+```css
+svg * {
+  vector-effect: non-scaling-stroke;
+}
+```
+
+這個 CSS property 改變了 stroke 的繪製順序：
+
+- Default：先 paint stroke（在 viewBox 內部座標）→ 再套用 transform 拉伸 → stroke 也被拉
+- non-scaling-stroke：先套用 transform → 再 paint stroke（直接在 screen pixel 上）→ stroke 維持規定的粗度
+
+從 viewBox 拉到 DOM 的 transform 不影響 stroke。stroke-width: 6 永遠是 6px screen pixel，不管 viewBox 怎麼被拉。
+
+Demo 右邊（vector-effect 開啟）就算 width 拉到 60px，垂直線跟水平線都維持 6px 粗。
+
+## Tradeoff: icon 通常不要套
+
+```html
+<svg viewBox="0 0 24 24" width="32" height="32">
+  <line x1="5" y1="7" x2="19" y2="7" stroke-width="2" />
+</svg>
+```
+
+Hamburger icon 在 32×32 渲染時，`stroke-width="2"` 在 viewBox 內部 = 24 之中佔 1/12 = 2.67px。當這個 icon 渲染在 256×256，內部 2 單位被放大成 ~21px，stroke 跟著變粗 — **這是要的行為**，icon 越大 stroke 越粗才比例協調。
+
+如果套了 `vector-effect: non-scaling-stroke`：
+
+- 24×24 → stroke 是 2 screen px ≈ 1/12 寬
+- 256×256 → stroke 還是 2 screen px ≈ 1/128 寬，看起來超細
+
+所以 icon 通常**不要**套。要套的場合是「stretch 用的 illustration」（swoop divider、hero banner），那種設計上希望 stroke 粗度恆定的。
+
+## 該套還是不套的判斷
+
+- ✅ **要套**：preserveAspectRatio="none" stretch；stroke 粗度設計上要絕對固定（dashboard 邊框、loading bar）
+- ❌ **不套**：icon（不同尺寸渲染但比例一致）；illustration 沒 stretch
+- 🤔 **看情況**：響應式 chart — 通常 axis line 要 1px 不變（套），但 data line / area 要跟著 zoom（不套）
+
+## Gotchas
+
+- **JSX 是 camelCase: `vectorEffect="non-scaling-stroke"`**。value 必須是 `"non-scaling-stroke"`、`"none"`、`"non-scaling-size"` 等其中一個字串。
+- **可以放 inline `style` 或 attr 或 CSS class** — 三種都認。慣用 CSS class 套 `svg * { vector-effect: non-scaling-stroke }` 比較好維護。
+- **dash pattern 不受影響** — `stroke-dasharray` 的數值在 non-scaling-stroke 下還是 viewBox 單位。dash 跟 gap 在 stretched SVG 還是會被 squash 視覺長度，這 vector-effect 解不了。
+- **這招在 Comeau 課裡標榜「絕招」**，他從 Rich Harris (Svelte 作者) 學到的，1995 spec 就有但極少人知道。`overflow: visible` 跟它合稱 SVG 兩大隱形 quality-of-life CSS。

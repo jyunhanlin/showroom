@@ -1,0 +1,96 @@
+---
+title: viewBox, the camera into an infinite SVG canvas
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/02-viewbox
+lessonNumber: '02-svg/02-viewbox'
+order: 2
+summary: 'viewBox 把 SVG 內部座標系從 DOM pixel 解耦。四個數字 = 鏡頭 (x, y) + 鏡頭看的範圍 (width, height)。沒它 SVG 寫死像素，有它就 scale 到任何尺寸都銳利。'
+tags: [svg, viewbox, scaling]
+---
+
+import { ViewboxPanZoom, IconScale } from './viewbox';
+
+## TL;DR
+
+- `viewBox="x y width height"` — 四個數字，前兩個是「鏡頭位置」（看 infinite canvas 的哪個原點），後兩個是「鏡頭看多大範圍」（zoom 程度）。
+- 沒 viewBox 時，`<rect width="100">` 的 100 等於 100px DOM pixel；有 viewBox 後 100 變成「viewBox 內部座標 100 單位」，跟 DOM 尺寸解耦。
+- 同一個 SVG 可以渲染在 16px、64px、256px 任何尺寸都銳利，因為 vector format 是 mathematical instructions，不是 pixel raster。
+- Icon 慣例：`viewBox="0 0 24 24"`（Lucide / Heroicons / Feather 都用 24）。所有 icon 共用同一個 viewBox 等於有統一的 mental model。
+- Practical limit：SVG 數學上能無限放大，但設計上 16×16 的 icon 拉到 256×256 還是會看起來太簡陋，要重新設計而不是直接 scale。
+
+<DemoFrame title="viewBox pan & zoom — same SVG element, different framing">
+  <ViewboxPanZoom />
+</DemoFrame>
+
+## viewBox 解開了 pixel 綁定
+
+```html
+<svg width="300" height="220">
+  <circle cx="150" cy="110" r="60" />
+</svg>
+```
+
+`cx="150"` 在這裡是 150 個 DOM pixel。如果 `<svg>` 的 CSS 寬度被改成 150px，circle 不會跟著縮小，會被裁掉一半。
+
+```html
+<svg width="300" viewBox="0 0 300 220">
+  <circle cx="150" cy="110" r="60" />
+</svg>
+```
+
+加上 `viewBox` 後，內部 `cx="150"` 變成「viewBox 內部 150 單位」，跟 SVG 元素的 DOM 寬度解耦。SVG 元素變 150px wide → 整張 SVG 縮一半，circle 也縮一半，比例維持。
+
+這就是 SVG 名字裡 **S**calable 的由來 — viewBox 在的時候才真的 scalable。
+
+## 四個數字的意義
+
+`viewBox="x y width height"` 兩兩拆解：
+
+- **(x, y)** — 鏡頭原點。把鏡頭往右移 50 (`viewBox="50 0 300 300"`) 看起來像所有東西往左移 50；像滑鼠拖捲畫面。
+- **(width, height)** — 鏡頭看多大範圍。`viewBox="0 0 150 150"` 把 300×300 的 SVG 縮成只看 150×150 範圍 → 視覺上 zoom in 2×。
+
+Demo 上面的 slider：拖 `x` / `y` 改鏡頭位置，那個 200×200 的 rect 在畫面上左右上下移；拖 `size` 改鏡頭範圍，rect 看起來變大或變小（其實 rect 沒動，是鏡頭縮放）。
+
+無限延伸：SVG 內部座標系沒邊界。可以把東西放在 `(1000000, -500000)`，永遠在那裡，只是 viewBox 沒看到而已。
+
+## Icon 用統一的 24×24 viewBox
+
+```html
+<svg viewBox="0 0 24 24" width="32" height="32">
+  <line x1="5" y1="7" x2="19" y2="7" />
+  <line x1="5" y1="12" x2="19" y2="12" />
+  <line x1="5" y1="17" x2="19" y2="17" />
+</svg>
+```
+
+24×24 是 icon 界的事實標準（Lucide、Heroicons、Feather、Tabler 都用）。為什麼選 24 而不是 16 或 32？
+
+- 24 大到能塞進 stroke + 留白餘裕，又小到所有座標都是 1 位數或 2 位數整數，好讀
+- 縮到 16×16 顯示時，瀏覽器自動處理；放到 64×64 也照舊
+- 多個 icon 共用 mental model：「中間軸是 12」、「內邊距大概 5」 — 跟其他 icon 編輯時可以直接借鑑
+
+`width` / `height` 沒寫上 viewBox 還是有效的，純看外層 CSS 控制實際尺寸。
+
+<DemoFrame title="Same icon, four sizes — vector stays crisp">
+  <IconScale />
+</DemoFrame>
+
+四個尺寸（24 / 48 / 96 / 192）的同一個 hamburger icon。線條粗細、長度、位置都按比例放大，沒有任何 raster 模糊。
+
+## Pan/zoom 的實用性其實不高
+
+slider 雖然展示了 viewBox 的彈性，但實務上幾乎不會動 viewBox 數值 — 大多數時候它是寫死的常數，整張 SVG 設計時就決定好。
+
+少數真的會動 viewBox 的場景：
+
+- 大張 dashboard / chart 想要「導覽」式 zoom in 到某區
+- Map-like SVG 拿 viewBox 當 viewport 做 pan/zoom 互動
+- Animation：tween viewBox 數值做電影鏡頭推拉
+
+絕大多數場合（icon、illustration、UI element）寫一次設定後就不再動。
+
+## Gotchas
+
+- **JSX 是 camelCase: `viewBox`，不是 `viewbox`**。`viewbox`（全小寫）會被 React render 成 lowercase attribute，但 SVG spec 要求 camelCase — DevTools 看不到差別但實際 attr 沒被 SVG engine 認得。React 18+ 會 warn。
+- **`width` / `height` 跟 viewBox 的 aspect ratio 不同**會自動 letterbox（後一課 aspect-ratio 講）。要 stretch 用 `preserveAspectRatio="none"`。
+- **viewBox 跟 CSS `width`/`height` 不衝突**。viewBox 控制內部座標系，CSS 控制元素 DOM 尺寸，兩者獨立。
+- **沒 viewBox 也能畫 SVG**，但失去 scale 能力。學習時 Comeau 故意一開始不講 viewBox 簡化心智模型，正式 production 99% 都會寫 viewBox。

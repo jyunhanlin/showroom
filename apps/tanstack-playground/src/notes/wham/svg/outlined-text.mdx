@@ -1,0 +1,88 @@
+---
+title: Outlined Text, paint-order flips stroke and fill
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/01.03-outlined-text
+lessonNumber: '02-svg/01.03-outlined-text'
+order: 1.03
+summary: 'stroke 走中線會把字身吃掉一半看起來擠。paint-order 把 stroke 先畫 fill 蓋上去，相當於只留外側。HTML 版本是 -webkit-text-stroke + paint-order。'
+tags: [svg, text, paint-order, text-stroke]
+---
+
+import { OutlinedText } from './outlined-text';
+
+## TL;DR
+
+- `<text>` 跟其他 SVG primitive 一樣接 `stroke`，但因為 stroke 走中線，描邊會吃掉字身一半，視覺上很擠。
+- `paint-order: stroke fill` 翻轉繪製順序：先畫 stroke、再畫 fill 蓋掉內側那半 — 效果就是 outline 只留在字外側，字身保持原寬度。
+- 同樣的招數在 HTML 也通：`-webkit-text-stroke` + `paint-order: stroke fill`。webkit 前綴連 Firefox 也吃。
+- 配 `stroke-linejoin="round"` 可以做出圓潤的外框，這是 HTML 的 `-webkit-text-stroke` 做不到的差別點。
+
+<DemoFrame title="paint-order toggles outline behaviour — drag slider for stroke width">
+  <OutlinedText />
+</DemoFrame>
+
+## Stroke 走中線在字上的副作用
+
+`<text fill="black" stroke="green" stroke-width="3">Hello</text>` — 因為 stroke 一半往內、一半往外，3px stroke 等於把字身往內削 1.5px。粗度越大字越被吃，最後只剩描邊看不到字本體。
+
+```html
+<text stroke="hotpink" stroke-width="6">Hello</text>
+```
+
+實用門檻：stroke-width 大於 ~2px 且字重不夠粗時，default order 看起來就會擠。
+
+## paint-order: stroke fill 是反直覺的招
+
+```css
+text {
+  fill: var(--page-bg);     /* 跟背景同色 */
+  stroke: hotpink;
+  stroke-width: 8px;
+  paint-order: stroke fill; /* 先 stroke 再 fill */
+}
+```
+
+- 先畫 stroke（8px 寬，一半外一半內）
+- 再畫 fill 在最上層 — fill 蓋住內側那半 stroke
+- 視覺結果：stroke 看起來只在字外側，fill 區域跟原本一樣完整
+
+Demo 裡左邊（default order）跟右邊（paint-order: stroke fill）對照看，左邊字身被吃掉、右邊字身飽滿。
+
+`paint-order` 從 SVG 的繪製順序規範來，現在被 CSS 借過來用在 HTML，瀏覽器支援 ~97%（2026/04）。Demo 用相同字體相同 size 雙寫對比，純讀 prose 不容易感受差別。
+
+## 圓角 outline = paint-order + linejoin: round
+
+`stroke-linejoin: round` 讓字母轉角圓潤；配上 `paint-order: stroke fill` 才會看到效果（default order 下圓角 stroke 被 fill 蓋掉，看不出來）。
+
+```css
+text {
+  fill: var(--page-bg);
+  stroke: goldenrod;
+  stroke-width: 8px;
+  paint-order: stroke fill;
+  stroke-linejoin: round;
+}
+```
+
+這是 SVG 比 HTML 的 `-webkit-text-stroke` 多出來的能力 — HTML 版本沒有對應 `linejoin` 的設定，outline 必定是 sharp corner。要圓潤外框就用 SVG。
+
+## HTML 版本：-webkit-text-stroke
+
+```css
+h1 {
+  -webkit-text-stroke: 6px hotpink;
+  color: var(--page-bg);
+  paint-order: stroke fill;
+}
+```
+
+- `-webkit-text-stroke` 給字加描邊，連 Firefox 也認 webkit 前綴（不是 webkit 系都吃）
+- 沒前綴的 `text-stroke` 反而沒人實作
+
+`paint-order` 對 HTML 文字的支援只有 ~88%（2026/04），低於 SVG 場合的 ~97%。fallback 體驗是 stroke 走中線把字吃掉，要嘛把 stroke-width 設得很小（3px 以下還勉強可讀），要嘛接受 ~10% 使用者看到擠版。
+
+## Gotchas
+
+- **JSX 用 camelCase**：`paintOrder="stroke fill"`、`strokeLinejoin="round"`。整串 `"stroke fill"` 是 SVG 規範允許的多值寫法，不要拆成兩個 prop。
+- **fill 必須跟背景同色才有 outline-only 效果**。透明 fill (`fill="transparent"` 或 `fill-opacity="0"`) 會讓 stroke 內側透出去看到後面的東西，不是「只留外側」的觀感。
+- **`-webkit-text-stroke` 在 paint-order 不支援的瀏覽器會把字吃掉**。設計時想想 fallback：stroke-width 越大 fallback 越糟，~10% 使用者會看到擠版，可考慮 `@supports (paint-order: stroke fill)` 包裝較粗的描邊。
+- **`stroke-linejoin: round` 對 HTML `-webkit-text-stroke` 沒效**。要圓潤 outline 必須用 SVG `<text>`。

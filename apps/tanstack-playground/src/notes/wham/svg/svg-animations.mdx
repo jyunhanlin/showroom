@@ -1,0 +1,132 @@
+---
+title: SVG Animations, what CSS can transition and what it can't
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/04-animated-svgs
+lessonNumber: '02-svg/04-animated-svgs'
+order: 4
+summary: 'Presentational attr (stroke-*, fill-*) 可以 CSS transition，因為它們本來就是 CSS property。Geometry attr 看 spec：rect.x、circle.r、ellipse.ry 進到 CSS 可動，line.x1 / polygon.points 沒進 CSS 不能動。<path> d 在 Chrome/FF 可以 (用 path() 函式)，Safari 不支援。'
+tags: [svg, animation, css-transition, path-morph]
+---
+
+import { HoverStrokeMorph, PathMorph } from './svg-animations';
+
+## TL;DR
+
+- **Presentational 全可動**：`stroke`、`stroke-width`、`stroke-dasharray`、`fill`、`opacity`、`stroke-linecap` 全部可以走 CSS transition / keyframes。它們本來就是 CSS property，CSS engine 認得。
+- **Geometry 看狀況**：
+  - 進到 CSS 的 → 可動（`<rect>` 的 `x`/`y`/`width`/`height`、`<circle>` 的 `r`/`cx`/`cy`、`<ellipse>` 的 `rx`/`ry`）
+  - 沒進 CSS 的 → 不可動（`<line>` 的 `x1`/`y1`/`x2`/`y2`、`<polygon>`/`<polyline>` 的 `points`）
+- **`<path>` 的 `d` attribute**：要用 CSS `path()` 函式包字串。Chrome / Firefox / Edge 通；**Safari 不支援**（~79% support）。
+- 跨瀏覽器要 morph path → 用 JS library（下一課的 Motion）。
+- **morph 兩個 path 必須指令數量跟順序一致**：兩條 `M ... C ...` 可以 tween，`M ... C ...` 換成 `M ... L ...` 不能 tween（指令類型不同）。
+
+<DemoFrame title="Hover transitions on multiple stroke properties">
+  <HoverStrokeMorph />
+</DemoFrame>
+
+## Presentational attr 直接寫 CSS
+
+```css
+circle {
+  stroke: hsl(45deg 100% 50%);
+  stroke-width: 6px;
+  stroke-dasharray: 20, 14;
+  stroke-linecap: butt;
+  transition:
+    stroke 1200ms,
+    stroke-width 900ms,
+    stroke-dasharray 1500ms,
+    stroke-linecap 1000ms;
+}
+```
+
+每個 stroke property 都可以獨立指定 duration / easing。`stroke-linecap` 切換時其實是 step transition（butt → round 沒中間態），但動畫仍然會「卡住」當前狀態到 duration 結束才換 — 視覺上像 delay。
+
+CSS 直接吃，inline `<circle stroke="...">` 也吃，CSS 贏 inline。
+
+## Geometry attr 兩種命運
+
+```svg
+<ellipse rx="30" ry="30" cx="50" cy="50" />
+```
+
+```css
+ellipse { transition: ry 300ms; }
+button:hover ellipse { ry: 10px; }  /* ✅ 可動 */
+```
+
+`ellipse` 的 `ry` 進到 CSS spec → 用 CSS 改 + transition 可以 tween。
+
+```svg
+<line x1="4" y1="4" x2="20" y2="20" />
+```
+
+```css
+button:hover line { x1: 20px; y1: 4px; }  /* 🛑 沒效 */
+```
+
+`<line>` 的 `x1`/`y1`/`x2`/`y2` 沒進 CSS spec，DevTools 會 warn 「property 不認識」。要動 line 端點：
+
+- 改用 `<path d="M ...">` 替代 `<line>`，d 可以動（看下節）
+- 或在 JS 裡直接改 attribute
+
+## `<path d>` morph：CSS path() 跟它的 Safari 黑洞
+
+```css
+path { transition: d 300ms; }
+button:hover path {
+  d: path('M 20,50 C 80,0 140,100 180,50');
+}
+```
+
+Chrome / Firefox / Edge：works（~79% 全球 support 2026/04）。
+
+Safari：完全 noop。`d:` 跟 `transition: d` 都被 ignore，沒任何錯誤訊息也沒 tween。
+
+<DemoFrame title="d morph via CSS — Safari users see a snap, others see a tween">
+  <PathMorph />
+</DemoFrame>
+
+要在 Safari 也通：用 Motion library（下一課），它在 JS 裡逐 frame interpolate 並更新 `d` attribute，繞過 CSS path() 的支援問題。
+
+## morph 兩個 path 必須指令一致
+
+```svg
+<!-- ✅ 兩條都是 M + C，可以 tween -->
+M 20,50 C 80,50 140,50 180,50
+M 20,50 C 80,0 140,100 180,50
+
+<!-- 🛑 一條 M + L，一條 M + C，無法 tween -->
+M 20,50 L 180,50
+M 20,50 C 80,0 140,100 180,50
+```
+
+瀏覽器在 morph 時 tween 數字，但前提是兩個 path 結構相同（指令類型、數量、順序都一致）。
+
+實務：Figma 設計 morph 動畫時，把 keyframe paths 都用相同 command 結構準備好。需要 tween 從直線到曲線時，把直線寫成「control points 跟兩端共線的 cubic Bezier」（`M 0,50 C 60,50 120,50 180,50`），這樣兩端都是 M+C 結構。
+
+## SMIL 是另一條路（但不建議）
+
+SVG 內建一個動畫 mini-language 叫 SMIL：
+
+```svg
+<path>
+  <animate attributeName="d" begin="hover.mouseover" dur="300ms" values="M ...; M ..." fill="freeze" />
+</path>
+```
+
+優點：不需要 JS、event 直接綁 SVG node。
+
+缺點：
+
+- 1990s 技術，準 deprecated 多年
+- event 不 bubble，互動稍微複雜就要手刻（demo 顯示 hover 自己 flicker 因為 event 重新 trigger）
+- 學習 SMIL DSL 的 ROI 低
+
+Comeau 結論：除非你需要「使用者關掉 JS 還能動」這種極端場景，否則用 CSS / Motion 就好，不要碰 SMIL。
+
+## Gotchas
+
+- **JSX 在 className 寫 CSS d morph 比較尷尬**：`group-hover:[d:path('M_20,50_...')]` 用 Tailwind 的 attribute selector 寫，空格用底線替代（Tailwind v4 的解析）。
+- **transition: d 對 Safari 是 noop**，不會 console warn。寫了測試只在 Chrome 跑會誤以為 cross-browser。
+- **stroke-dasharray transition 在不同 dash 數量間不平滑**：從 `"10,10"` morph 到 `"10,5,10,5"` 會跳，因為 dash array length 不同。同 length 才能 interpolate。
+- **CSS keyframes 對 SVG 跟 HTML 一樣** — `@keyframes` 內可以動所有上述能動的 property。`animation-iteration-count: infinite` 加 stroke-dashoffset 就是 marching ants 效果。

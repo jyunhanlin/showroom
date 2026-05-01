@@ -13,6 +13,10 @@ export const topics: Record<string, TopicMeta> = {
     name: 'Advanced Interactions',
     description: 'cursor tracking, clip-path, scroll & view transitions',
   },
+  svg: {
+    name: 'SVG',
+    description: 'primitives, paths, animation, springs & easings',
+  },
 };
 
 export function topicName(id: string): string {

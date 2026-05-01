@@ -1,0 +1,76 @@
+---
+title: PathStepper, parsing path syntax in your head
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/03.03-pathstepper
+lessonNumber: '02-svg/03.03-pathstepper'
+order: 3.03
+summary: '課程在這節塞了一個 minigame 練習認 path syntax。我這裡用 baseball cap (M L A 三步) 做 step-through 示範，重點在「讀 path 字串時心中的腳本」— 從哪起、往哪畫、終點落在哪。'
+tags: [svg, path, syntax, parsing]
+---
+
+import { CapStepThrough } from './pathstepper';
+
+## TL;DR
+
+- 課程這節是個 minigame（PathStepper），不會在筆記裡複刻 — 練習平台特定，不是技術概念。
+- 真正能帶走的 takeaway：**讀 path 字串的心智腳本**。每個指令在腦中走一次「從現在的位置 → 終點是哪 → 中間怎麼走」。
+- Baseball cap 的 path 是個經典範例：`M 2,10 L 14,10 A 4,4 0 0 0 6,10` — 三個指令完成一頂帽子。
+- 心中讀法：「筆抬到左下 → 直線往右畫底邊 → 從右邊用半徑 4 的圓弧繞回左邊偏內側」。
+- Path 沒寫 `Z` 是因為帽子前緣不需要從 (6,10) 再連回 (2,10) — 那條會穿過底邊重畫。
+
+<DemoFrame title="Baseball cap, three commands at a time">
+  <CapStepThrough />
+</DemoFrame>
+
+## 拆解 Cap 的 3 個指令
+
+```svg
+<path d="
+  M 2,10
+  L 14,10
+  A 4,4 0 0 0 6,10
+"/>
+```
+
+**Step 1: `M 2,10`**
+
+- 抬筆移到 (2, 10)。SVG 的座標系 y 往下，所以 y=10 是中下方。
+- 沒畫任何東西。
+
+**Step 2: `L 14,10`**
+
+- 從 (2, 10) 畫直線到 (14, 10)。同一個 y、x 從 2 到 14 = 水平往右 12 單位。
+- 帽子底邊完成。
+
+**Step 3: `A 4,4 0 0 0 6,10`**
+
+- 從現在位置 (14, 10) 畫弧到 (6, 10)。
+- `rx=4`、`ry=4` → 圓形 arc，半徑 4。
+- `rotation=0` → 圓不需要旋轉。
+- `large-arc-flag=0` → 走短路（不繞遠）。
+- `sweep-flag=0` → 逆時鐘繪製（從右往左往上繞回左下偏內）。
+- 結果是個半圓罩在底邊上 — 帽冠。
+
+從 (14, 10) 到 (6, 10) 距離是 8，半徑 4 剛好等於距離一半 → 唯一一個 fit 的圓 → sweep-flag 兩種值看起來會「翻轉」帽冠在底邊上面或下面。`0` 在上、`1` 在下。
+
+## 讀 path 的心理腳本
+
+實務上看到一段陌生的 SVG path，腦中的步驟：
+
+1. **找 M** — 起點在哪？沒 M 就是無效 path
+2. **掃指令類型** — 主要是 L、Q、C、A 還是混用？混用越多越複雜
+3. **追終點** — 每個指令的終點 = 下一個指令的起點，沿著串走一遍位置
+4. **判斷是不是封閉** — 結尾有 Z 嗎？fill 想呈現什麼形狀？
+
+熟練之後不需要每行細看，瞄一眼 M 跟 Z 就知道大概形狀。Figma export 的長 path 通常很難肉眼解析，這時依賴 `getTotalLength()` 跟 `getPointAtLength()` 之類 DOM API 抽取資訊比較實際。
+
+## Cap path 為什麼沒 Z
+
+`Z` 會把當前位置跟 sub-path 起點 (2, 10) 連起來。但弧的終點是 (6, 10)，距離起點 (2, 10) 4 單位，連 Z 會在底邊上重畫一條 4 單位長的線 — 跟原本底邊重疊。
+
+不寫 Z 視覺上一樣（fill 自動補虛擬連線），且 stroke 不會在底邊有奇怪 overlay。實作 path 時記得「需不需要 Z」要看 stroke 預期效果，不是反射動作。
+
+## Gotchas
+
+- **這節只是 minigame，沒有新概念**。心智模型已經在 paths / path-commands / arcs 三節建立完，直接跳過也沒差。
+- **看 minify 的 path 不要硬解**。貼進線上 SVG path editor (yqnn.github.io/svg-path-editor 之類) 會幫你美化跟視覺化每個指令。
+- **path 內的座標可以負數或超出 viewBox**。看到 `M -100,500` 別怕，只是落在 viewBox 外，照樣參與後續指令的計算。

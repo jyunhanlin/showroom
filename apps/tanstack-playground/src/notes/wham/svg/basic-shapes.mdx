@@ -1,0 +1,91 @@
+---
+title: SVG Basic Shapes, seven primitives with their own rules
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/01-basic-shapes
+lessonNumber: '02-svg/01-basic-shapes'
+order: 1
+summary: 'line / rect / circle / ellipse / polyline / polygon / text 是 SVG 專屬的 primitive。stroke 永遠走中線、0 size 整顆消失、CSS 那套 pill trick 失效，regular polygon 沒有內建要靠三角函數。'
+tags: [svg, primitives, polygon, text-anchor]
+---
+
+import { ShapeGallery, RegularPolygon } from './basic-shapes';
+
+## TL;DR
+
+- SVG 自帶七種 primitive (`<line>`、`<rect>`、`<circle>`、`<ellipse>`、`<polyline>`、`<polygon>`、`<text>`)，跟 HTML 完全不通用 — `<svg>` 裡塞 `<div>` 不會渲染，反之亦然。
+- `stroke` 永遠以 path 為中線往兩側畫，不能設 inside/outside。`stroke-width=10` 的 100px 矩形實際視覺寬度是 110px。
+- 0-size 的 shape 會直接消失，不會退化成一條線。沒有「把 `width=0` 當分隔線用」的 hack。
+- CSS `border-radius: 9999px` 的 pill trick 在 SVG 失效；`rx="9999"` 會被 clamp 到 width/2，結果是橢圓不是膠囊。
+- 正多邊形沒有專屬 primitive，得自己用三角函數算點。
+
+<DemoFrame title="The seven SVG primitives at a glance">
+  <ShapeGallery />
+</DemoFrame>
+
+## SVG primitives 不是 HTML element
+
+`<svg>` 開啟一個獨立的 namespace，裡面只能放 SVG primitive。HTML 那套 `<div>`、`<p>`、`<span>` 進去會被瀏覽器當作 unknown element，CSS layout 也走不通。反過來把 `<rect>` 放在 `<svg>` 之外也是 noop。
+
+實務上的影響：寫 illustration/data viz 時，整個 markup 都得用 SVG primitive。需要文字就用 `<text>`，不能用 `<p>`；需要區塊分群就用 `<g>`，不能用 `<div>`。這個切換比想像中容易忘記。
+
+## Stroke 走中線，不是 border
+
+```html
+<rect x="0" y="0" width="100" height="100" stroke="green" stroke-width="10" />
+```
+
+實際視覺占地是 110×110，因為 5px 內、5px 外。CSS border 預設算在 box 外（content-box）或內（border-box），SVG 沒這選項。
+
+對 layout 計算的影響：要算「視覺邊界」永遠記得加 `strokeWidth / 2`。Demo 裡 `<line>` 從 `(20,30)` 畫到 `(80,110)`，`strokeWidth=5`，左上角離 SVG 邊界其實只剩 `20 - 2.5 = 17.5px` 的空白。
+
+`stroke-linejoin` (miter/round/bevel) 跟 `stroke-linecap` (butt/round/square) 也只在連續 path 上有意義 — 這就是為什麼 `<polyline>` 不只是「多個 `<line>` 的語法糖」，因為五段獨立 `<line>` 沒辦法共享 corner styling。
+
+## 0-size = 整顆消失
+
+把 `width="0"` 設給 `<rect>`，整個矩形（連 stroke）一起消失。早期瀏覽器有歧義（stroke 可能還會留下），但近年規範統一了：geometric primitive 退化到 0 維度就完全不畫。所以「width=0 拿來當分隔線」這種偷吃步走不通，要分隔線就老實畫 `<line>`。
+
+## Pill trick 在 SVG 失效
+
+CSS 那招 `border-radius: 9999px` 在 SVG 對應到 `rx="9999"`，但 SVG 的規範是 `rx` 會被 clamp 到 `width / 2`、`ry` 被 clamp 到 `height / 2` — 兩者各自 clamp 到一半之後就退化成橢圓，不會像 CSS 那樣自動偵測「最短邊」做膠囊。
+
+但這在 SVG 不算問題：HTML 元素是動態尺寸，所以才需要超大值「保險」；SVG primitive 永遠有明確的 pixel 尺寸，直接寫 `rx={width / 2} ry={width / 2}` 就有膠囊（用 width 的一半，不是各自的一半，這樣兩端才是半圓）。
+
+## Regular polygon 要靠 trig
+
+SVG 沒有 `<regular-polygon sides={6}>` 這種 primitive，正六邊形/正八邊形得自己算 N 個點繞著圓周分布。基本公式：
+
+```ts
+const rotationOffset = numOfSides % 2 === 0 ? Math.PI / numOfSides : 0;
+const angle = (index * 2 * Math.PI) / numOfSides - Math.PI / 2 + rotationOffset;
+const x = cx + RADIUS * Math.cos(angle);
+const y = cy + RADIUS * Math.sin(angle);
+```
+
+三件事在發生：
+
+1. `(index * 2 * Math.PI) / numOfSides` — 把 `2π` 切成 N 等分，每個 index 拿一份角度
+2. `- Math.PI / 2` — SVG 角度 0 在 3 點鐘方向（往右），減 90° 把起點轉到 12 點鐘（往上），三角形才會尖角朝上
+3. `rotationOffset` — 偶數邊（六邊形、八邊形）再多旋轉半個 step，這樣底邊是平的、不是尖的
+
+<DemoFrame title="Regular polygon — slider 控制 numOfSides，看 trig 走過去">
+  <RegularPolygon />
+</DemoFrame>
+
+注意 N=3、N=4、N=5 (奇數) 跟 N=6、N=8、N=10 (偶數) 在底部的差異：奇數會有一個尖角朝下，偶數是一條平的底邊。這就是 `rotationOffset` 在處理的事。
+
+## text-anchor & dominant-baseline 取代 CSS text-align
+
+`<text>` 完全不吃 CSS `text-align` / `vertical-align`，要用 SVG 自己的：
+
+- `text-anchor="start | middle | end"` — 文字在 `x` 座標的水平錨點
+- `dominant-baseline="auto | middle | hanging"` — 文字在 `y` 座標的垂直錨點
+
+兩個都 default 到「左上角」（嚴格說是 `start` + `auto`，後者大致對應 baseline 落在 `y`）。所以 `<text x="100" y="100">` 預設文字會出現在 (100, 100) **的右上方**（因為 baseline 在 100，往上才是字身），這跟 HTML 直覺反過來。
+
+Gallery demo 裡的 "Aa" 同時設了 `textAnchor="middle"` 跟 `dominantBaseline="middle"`，讓文字真的置中在 `(650, 70)`。
+
+## Gotchas
+
+- **JSX 用 camelCase 寫 SVG attribute**：`strokeWidth`、`textAnchor`、`dominantBaseline`、`fontSize`，不是 kebab-case。課程 playground 是純 HTML/SVG 所以用 kebab-case；Demo 是 React JSX，必須轉。
+- **`points` 屬性吃白空白超寬鬆**：`"60,100 100,180"` 跟 `"60,100,100,180"` 都 work，逗號跟空白可以混用。Demo 跟著課程慣例用 `x,y x,y`。
+- **`<text>` 不會自動換行**。多行文字要嘛多個 `<text>` 各自定位，要嘛 `<tspan dy="1.2em">` 手動下移。
+- **Regular polygon 的 `points.join(' ')` 不需要尾隨換行或逗號**。SVG parser 看到無效字元會 silently 忽略 path，整個 polygon 消失 — 拼字串時要留意。

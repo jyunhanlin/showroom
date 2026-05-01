@@ -1,0 +1,113 @@
+---
+title: Strokes & Fills, presentational attrs are CSS in disguise
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/01.01-strokes-and-fills
+lessonNumber: '02-svg/01.01-strokes-and-fills'
+order: 1.01
+summary: 'SVG 的 fill / stroke / stroke-width / stroke-dasharray 全部都是 CSS property 的另一個寫法。default fill 是黑色 (line 除外)，stroke-dasharray + dashoffset 是後面 self-drawing 的基礎。'
+tags: [svg, stroke, fill, dasharray]
+---
+
+import { CapsAndJoins, DashPlayground } from './strokes-and-fills';
+
+## TL;DR
+
+- Presentational attribute (`fill`、`stroke`、`stroke-width`、`stroke-dasharray`...) 其實是 CSS property — `<rect stroke="red">` 跟 `rect { stroke: red }` 等價，CSS rule 還會 win 過 inline attribute。
+- Default `fill` 是純黑（連 `<polyline>` 都會被填滿，只有 `<line>` 不會）。Dark mode 不會自動翻白，要自己處理。`fill="none"` 也可以塞在 parent `<svg>` 上 inherit 下去，跟 CSS color inheritance 一樣。
+- `currentColor` 把 `fill` / `stroke` 綁到 `color` 屬性，icon 跟周圍文字同步色用這招。
+- `stroke-linecap` (butt/round/square) 控制端點，`stroke-linejoin` (miter/round/bevel) 控制轉角；miter 在銳角會自動 fallback 到 bevel。
+- `stroke-dasharray` 接受多組 dash/gap 數值；`stroke-dashoffset` 把 pattern 在 path 上滑動 — 後面 self-drawing 用的就是這對 knob。
+
+<DemoFrame title="Caps & joins reference">
+  <CapsAndJoins />
+</DemoFrame>
+
+## Presentational attr 是 CSS 的偽裝
+
+Inline 寫 `<circle fill="dodgerblue">` 跟 CSS 寫 `circle { fill: dodgerblue }` 結果一樣，兩者衝突時 CSS 贏。這意味：
+
+- **CSS transition 對 SVG attr 有效**（presentational 那群）。`stroke-dasharray` 改數值會 tween，這是 self-drawing trick 能用 CSS 做的根因。
+- **inline attr 在 React 比較順手**，因為可以直接 `<circle fill="..." />` 傳 prop（用 React state 算出顏色字串塞進去），不需要透過 className 跟 CSS 兩段繞；`stroke-width` 動態調整也是 attribute 寫法比較直覺。
+- **geometry attr (x/y/cx/cy/r/d) 大多沒進到 CSS spec**，這些 transition 不到，要在 JS 裡更新 attr 或用 motion library — 在 SVG Animations 那課會講。
+
+## 預設 fill 是黑色，要記得關掉
+
+```html
+<svg width="200" height="200">
+  <circle cx="100" cy="100" r="40" />
+</svg>
+```
+
+沒指定 `fill`，這個圓會被填成黑色。SVG 把 fill default 設成 `black`，連 `<polyline>` 也會被當作 closed shape 填起來（只有 `<line>` 例外，因為它沒厚度可以填）。
+
+實務上幾乎都要寫明 fill：要嘛指定顏色，要嘛 `fill="none"`。最省事的是把 `fill="none"` 設在 parent `<svg>` 上，因為 fill 跟 CSS color 一樣會 inherit：
+
+```html
+<svg fill="none" stroke="currentColor">
+  <circle cx="100" cy="100" r="40" />
+  <rect x="20" y="20" width="160" height="160" />
+</svg>
+```
+
+整個 SVG 內部都是空心 + 跟著文字色描邊，icon 包這層後幾乎不需要再寫 fill / stroke。
+
+## stroke-linecap & stroke-linejoin
+
+`linecap` 影響 path 端點（line 兩端、polyline 開頭結尾）：
+
+- `butt` (default) — 端點切齊 path 座標
+- `round` — 端點長半圓，視覺長度比實際 path 多 `strokeWidth / 2`
+- `square` — 端點長方塊，也比實際 path 多 `strokeWidth / 2`
+
+`linejoin` 影響 polyline / polygon 連接處：
+
+- `miter` (default) — 尖角；瀏覽器看角度太銳會自動切到 bevel 防止戳出 SVG
+- `round` — 圓角
+- `bevel` — 削角
+
+要強制保留銳 miter 角可以調 `stroke-miterlimit`（值越大 fallback 越晚發生），但 99% 場合直接用 `round` 比較友善。
+
+## Dash + offset 是 self-drawing 的鋪陳
+
+```html
+<polyline stroke-dasharray="20,10" stroke-dashoffset="0" />
+```
+
+`stroke-dasharray` 是逗號（或空白）分隔的長度陣列，循環畫過整個 path：
+
+- `"20,10"` — 20px 實線、10px 空白、循環
+- `"6,4,6,20"` — 36px 一個 cycle 的複合 pattern
+
+`stroke-dashoffset` 把整個 dash pattern 沿著 path 推開 N px。乍看沒用，但搭配大的 gap (`stroke-dasharray="100,9999"`) + offset 動畫，可以做出「一段亮線繞著 path 跑」的效果 — self-drawing trick 跟 loading spinner 都是這招的延伸。
+
+`stroke-linecap="round"` + dash 長度 0 還可以做出**圓點 pattern**：
+
+```html
+<circle stroke-dasharray="0,30" stroke-linecap="round" />
+```
+
+每個 0px dash 被 round cap 撐開成一顆圓，配上 30px gap 就是等距圓點環。
+
+<DemoFrame title="Dash + offset playground">
+  <DashPlayground />
+</DemoFrame>
+
+拖 `dash` / `gap` / `offset` 三個 slider 體會：
+
+- `gap` 拉到 0 = 實線
+- `dash` 拉到 0 + linecap=round = 圓點（demo 預設 linecap=round 就是為了這個）
+- `offset` 平移整個 pattern；配合 CSS keyframes 把 offset 從大到 0 跑就是 self-drawing
+
+## Gotchas
+
+- **`fill-opacity` / `stroke-opacity` 跟 alpha channel 等價**：`fill="hsl(0deg 100% 50% / 0.25)"` 跟 `fill="red" fill-opacity="0.25"` 同效果。Tailwind / 動態色用 alpha 寫法比較合，靜態用 -opacity attribute 也 OK。
+- **`overflow: visible` 對 SVG 要手動開**：strokes 走中線，shape 貼到 viewBox 邊緣時會被裁掉一半 stroke。HTML 預設 visible，SVG 預設 hidden，反過來。
+- **`stroke-dasharray` 的逗號跟空白可以混用**：`"100,450"`、`"100 450"`、`"100, 450"` 都通。Spec 偏好逗號，但跟著 codebase 風格走就好。
+- **JSX 寫 dash 字串時記得用 template literal**：
+
+  ```tsx
+  // ✅ 正確 — 結果是 strokeDasharray="20,10"
+  <polyline strokeDasharray={`${dashLength},${gapLength}`} />
+
+  // 🛑 錯誤 — number 加 number 變算術，結果是 strokeDasharray="30"
+  <polyline strokeDasharray={dashLength + ',' + gapLength} />
+  ```

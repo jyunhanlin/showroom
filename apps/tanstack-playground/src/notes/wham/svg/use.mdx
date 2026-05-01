@@ -1,0 +1,107 @@
+---
+title: <use>, the SVG template-and-clone pattern
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/06-use
+lessonNumber: '02-svg/06-use'
+order: 6
+summary: '<defs> 放 template (id 標記)、<use href="#id"> 抓出 N 個 clone。Geometry attribute 必須在 template 上，presentational 可以在 clone 上覆寫。SSR 時減少 HTML 重複，big path 場景省 KB；變化用 transform 處理，不是直接覆蓋 geometry。'
+tags: [svg, use, defs, template]
+---
+
+import { RainbowArc } from './use';
+
+## TL;DR
+
+- `<defs>` 是 SVG 的「head」— 放定義不畫，子元素必須有 `id`。
+- `<use href="#some-id">` 像 doppelgänger，把 referenced 元素的 geometry 抄一份來繪製。Presentational attribute (stroke、fill、opacity) 可以在 `<use>` 上覆寫。
+- 5 條 dasharray pattern 不同的彩虹條共用同一個 path data，不需要重複 5 次 `d="..."`。SSR HTML 大小直接砍 80%。
+- **Geometry 必須定義在 template 上**：`<circle id="t" cx cy r>` template 必須完整，`<use href="#t" r="40">` 想覆蓋 r 沒效（任何瀏覽器）。
+- 想讓 clone 大小不同：用 `transform: scale()`，不是改 geometry attribute。
+
+<DemoFrame title="5 條彩虹 stripe 共用一個 <path>">
+  <RainbowArc />
+</DemoFrame>
+
+## 不用 use 的痛苦
+
+```svg
+<svg>
+  <path stroke="red"    stroke-dasharray="100,100" d="M 20,100 A 40,40 0 0 1 180,100 Z" />
+  <path stroke="green"  stroke-dasharray="80,100"  d="M 20,100 A 40,40 0 0 1 180,100 Z" />
+  <path stroke="pink"   stroke-dasharray="30,30"   d="M 20,100 A 40,40 0 0 1 180,100 Z" />
+  <path stroke="purple" stroke-dasharray="20,60"   d="M 20,100 A 40,40 0 0 1 180,100 Z" />
+  <path stroke="blue"   stroke-dasharray="20,120"  d="M 20,100 A 40,40 0 0 1 180,100 Z" />
+</svg>
+```
+
+`d="M 20,100 A 40,40 0 0 1 180,100 Z"` 重複 5 次。簡單 path 還好，Figma export 的 200+ 字 path 重複 5 次就是 SSR HTML 暴增 1KB。
+
+React 把 d 抽成變數可以解 source size，但 SSR render 出來的 HTML 還是 5 個 `d="..."` — 因為 `<path d>` 不能 reference variable。
+
+## defs + use 解法
+
+```svg
+<svg>
+  <defs>
+    <path id="rainbow-template" d="M 20,100 A 40,40 0 0 1 180,100 Z" />
+  </defs>
+
+  <use href="#rainbow-template" stroke="red"    stroke-dasharray="100,100" />
+  <use href="#rainbow-template" stroke="green"  stroke-dasharray="80,100" />
+  <use href="#rainbow-template" stroke="pink"   stroke-dasharray="30,30" />
+  <use href="#rainbow-template" stroke="purple" stroke-dasharray="20,60" />
+  <use href="#rainbow-template" stroke="blue"   stroke-dasharray="20,120" />
+</svg>
+```
+
+`d=""` 只出現一次。SSR HTML 5 個 `<use>` 各自 ~50 bytes，比 5 個 full path 省 ~80%。
+
+`<defs>` 內部的元素**不會被繪製**，純粹當定義。畫面上看到的是 `<use>` clone。
+
+## Geometry vs Presentational 的合併規則
+
+```svg
+<defs>
+  <circle id="t" cx="100" cy="100" r="20" />
+</defs>
+<use href="#t" r="40" />  <!-- 🛑 r 改不了 -->
+```
+
+`<use>` 對 referenced 元素的 attribute 合併規則：
+
+- **Geometry attribute** (`cx`、`cy`、`r`、`x`、`y`、`width`、`height`、`d`) 必須在 template 上完整定義。`<use>` 上的同名 attribute **被忽略**。
+- **Presentational attribute** (`stroke`、`fill`、`stroke-width`、`opacity`...) 可以在 `<use>` 上覆寫。如果 template 也有，`<use>` 贏。
+- **Class、style** 也是 presentational 範疇，可以在 `<use>` 上加。
+
+直覺上應該全部都能覆寫，但規範刻意把 geometry 鎖在 template — 違反這條會在不同瀏覽器表現不同（Chrome 接受、Safari 不接受），所以「不是不工作而是不要做」。
+
+## 想讓 clone 大小不同 → 用 transform
+
+```svg
+<defs>
+  <circle id="t" cx="100" cy="100" r="20" />
+</defs>
+<use href="#t" fill="red"    style="transform: scale(2.5); transform-origin: 100px 100px" />
+<use href="#t" fill="orange" style="transform: scale(2);   transform-origin: 100px 100px" />
+<use href="#t" fill="yellow" style="transform: scale(1.5); transform-origin: 100px 100px" />
+```
+
+`transform-origin` 設在 template 中心 (100, 100)，scale 後 circle 中心保持原位，半徑視覺上隨 scale 倍數。
+
+要平移用 `transform: translate(x, y)`，旋轉用 `transform: rotate(degree)`。Geometry 全部透過 transform 處理。
+
+## use 對動畫的好處
+
+每個 `<use>` 是獨立 DOM node，可以各自綁 CSS 動畫 / event listener。Demo 裡 5 條 stripe 各自跑不同速度的 `stroke-dashoffset` 動畫，但 `d` 共用同一個 — 改 d 一次 5 條同時動。
+
+實務：
+
+- icon system 把所有 icon path 放 `<defs>`，頁面用 `<use href="#icon-foo">` reference — 整頁只有一份 path data
+- spritesheet pattern：external SVG file 內 `<defs>` 一堆，HTML 端 `<use href="sprite.svg#icon-foo">` 跨檔 reference
+
+## Gotchas
+
+- **`<defs>` 不必 unique**，但 `id` 必須 unique 在整個 document。複用同 `id` 的話 `<use href="#id">` 只會抓第一個。
+- **Cross-document `<use>` 受 CORS 限制**：`<use href="https://other-domain.com/sprite.svg#icon">` 在 production 通常不通，要嘛同 origin 要嘛 inline。
+- **`<defs>` 跟普通 `<g>` 的差別**：兩者都不直接繪製內容，但 `<g>` 內的元素**會被繪製**（`<g>` 只是分組）；`<defs>` 內的元素**不繪製**。
+- **`<use>` 在 React 寫法**：`<use href="#id" />`。XLink 那套舊寫法 `xlinkHref` 在 React 19 已 deprecated，用 `href` 即可。
+- **CSS class 套到 `<use>` clone 上要看內外規則**：直接 `<use class="foo">` 通；想 style template 內子元素得用 `<use class="foo"><circle class="bar" /></use>` 之類更精細結構，因為 use 是 shadow tree 不直接吃 outer CSS。

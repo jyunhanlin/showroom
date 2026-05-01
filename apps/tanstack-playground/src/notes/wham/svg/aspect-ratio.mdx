@@ -1,0 +1,107 @@
+---
+title: Aspect Ratio, preserveAspectRatio is SVG's object-fit
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/02.01-aspect-ratio
+lessonNumber: '02-svg/02.01-aspect-ratio'
+order: 2.01
+summary: 'SVG 元素跟 viewBox 比例不同時預設會 letterbox，preserveAspectRatio="none" 強制 stretch。Swoop divider 跟 hero banner 那種會 squash 的 SVG 全靠這招，配 min-width + overflow:hidden 防止過度壓縮。'
+tags: [svg, aspect-ratio, preserve, stretch]
+---
+
+import { AspectRatioToggle, SwoopStretch } from './aspect-ratio';
+
+## TL;DR
+
+- SVG 元素的 CSS `width` × `height` 跟 `viewBox` 算出來的比例不同時，預設會 letterbox（內容維持 viewBox 比例，多出的空間留白）— 行為跟 `<img>` 的 `object-fit: contain` 像。
+- `preserveAspectRatio="none"` 強制 stretch，內部 shape 隨 SVG 元素 squash/squish，行為像 `object-fit: fill`。
+- Swoop divider、hero banner 這種「跨整個 viewport 寬」的 SVG 一定要 `preserveAspectRatio="none"`，不然 viewport 拉寬時 SVG 不會跟著拉。
+- 過度壓縮會難看：給 SVG 設 `min-width`，parent 用 `overflow: hidden` + `display: flex` + `justify-content: center` 讓 SVG 在小螢幕從兩側溢出而不是整個被擠扁。
+
+<DemoFrame title="Default vs preserveAspectRatio='none' — drag width slider">
+  <AspectRatioToggle />
+</DemoFrame>
+
+## Default 行為：保持 viewBox 比例
+
+```html
+<svg viewBox="0 0 300 200" width="600" height="200">
+  <circle cx="150" cy="100" r="60" />
+</svg>
+```
+
+viewBox 是 3:2，元素被設成 3:1（600×200）。SVG 怎麼處理？
+
+預設 (`preserveAspectRatio="xMidYMid meet"`) 的策略：
+
+1. 維持 viewBox 內容的 3:2 比例
+2. 在較窄那邊（這裡是 height）填滿，較寬那邊出現留白
+3. 內容置中
+
+結果：日本國旗居中，左右兩邊各留白約 150px。Demo 上方 checkbox 打勾的就是這狀態 — 拖 width slider，旗子保持 3:2 比例置中，滑到寬螢幕兩邊就出現空白。
+
+## "none" 強制 stretch
+
+```html
+<svg viewBox="0 0 300 200" preserveAspectRatio="none">
+```
+
+打勾改成 unchecked → 旗子被拉成元素的 3:1 比例，圓變橢圓。
+
+何時要 stretch？最典型的是 hero banner / section divider 那種「橫貫整個 viewport」的 SVG：
+
+- Viewport 從手機 320px 到桌機 1920px 都要支援
+- 設計上希望 SVG 跟著 viewport 寬度拉伸，高度維持
+- 維持 viewBox 比例的話，桌機端會有大量上下留白，或 SVG 必須跟著高度被拉得超大
+
+`preserveAspectRatio="none"` 解這個 — SVG 寬度跟 viewport 走，高度維持 fixed 值。
+
+## 但太擠就難看了
+
+```html
+<style>
+  .swoops-wrapper {
+    display: flex;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .swoops {
+    width: 100%;
+    height: 200px;
+    min-width: 450px;
+  }
+</style>
+```
+
+平緩的 swoop 在 1920px 寬看起來好看，但 viewport 縮到 320px 寬被同等比例壓扁，整條曲線變得很陡。Comeau 形容像「toboggan ride 變成 black diamond ski cliff」。
+
+解法是 fixed `min-width` + parent `overflow: hidden`：
+
+- SVG 寬度 100% 跟 viewport 走（在 desktop 正常 stretch）
+- 但有 min-width 兜底，SVG 不能小於該寬度
+- viewport 比 min-width 小時 SVG 兩側溢出 parent
+- parent `overflow: hidden` 把溢出的部分裁掉
+- `display: flex` + `justify-content: center` 讓溢出對稱（不是只往右溢）
+
+<DemoFrame title="min-width 兜底，溢出由 parent 裁掉">
+  <SwoopStretch />
+</DemoFrame>
+
+拖 `CSS width` 模擬 viewport 縮小；`min-width` slider 看 swoop 何時開始溢出。`min-width: 0` 等於沒兜底，可以看到 SVG 真的會被擠到變形。
+
+## viewport 比例算式
+
+`<svg viewBox="0 0 W h">` 跟 element 的 CSS 寬高比較：
+
+- `widthRatio = elementWidth / W`
+- `heightRatio = elementHeight / h`
+- `meet`（default）取較小的 ratio → 內容 fits within，多餘留白
+- `slice` 取較大的 ratio → 內容 fills entire，多餘部分裁掉
+- `none` 直接拉伸，不管比例
+
+`xMidYMid meet` 是預設值，意思「水平中、垂直中、用 meet」。要改成靠左對齊就 `xMinYMid meet`，靠右 `xMaxYMid meet`。
+
+## Gotchas
+
+- **JSX 是 camelCase: `preserveAspectRatio`**。值是字串 `"none"` 或 `"xMidYMid meet"`，整串包在引號裡。
+- **`preserveAspectRatio="none"` 會拉變 stroke 粗細**：水平方向拉寬時垂直線變細、水平線不變，視覺上不協調。下一課 non-scaling-stroke 用 `vector-effect` 修這個。
+- **`min-width` 設得太大會在 mobile 出 horizontal scroll**。一定要有 parent `overflow: hidden` 兜著，否則整個頁面會橫向捲動。
+- **Tailwind 沒有 `preserveAspectRatio` utility**。要嘛 inline attribute，要嘛 className 加 `[preserveAspectRatio:none]`（attribute selector）— 後者語法偏門，inline 比較直觀。

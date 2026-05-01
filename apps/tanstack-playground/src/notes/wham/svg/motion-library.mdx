@@ -1,0 +1,118 @@
+---
+title: Motion Library, JS-side path morph that ships everywhere
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/04.01-motion
+lessonNumber: '02-svg/04.01-motion'
+order: 4.01
+summary: 'Motion (Motion.One + Framer Motion 合一) 的 animate(elem, { d }) 用 JS 逐 frame 內插 path d，繞過 Safari 對 CSS path() 的不支援。要自己手動 check prefers-reduced-motion，library 不會自動關。'
+tags: [svg, motion, animation, path-morph]
+---
+
+import { SwoopButton } from './motion-library';
+
+## TL;DR
+
+- `import { animate } from 'motion'` — Motion 的 imperative API。Cross-browser 包含 Safari。
+- `animate(domNode, { d: 'M ...' }, { duration: 0.3 })` — 三個參數：DOM 節點、目標屬性、options。
+- Motion 在 JS 裡逐 frame 算 interpolated 值，更新 attribute。CSS `path()` 不支援的 Safari 也能跑，因為它走的是 Web Animations API 不是 CSS transition。
+- **Library 不自動處理 prefers-reduced-motion** — 開發者責任。check `window.matchMedia('(prefers-reduced-motion: no-preference)')`，當使用者開了 reduced-motion 把 `duration` 設成 0。
+- Motion 比 GSAP 小很多（KB 等級 vs MB 等級）也比 React Spring 效能好（用 Web Animations API 走 compositor thread）— Comeau 推薦它的兩個理由。
+
+<DemoFrame title="Motion 的 animate(path, { d }) — Safari 也通">
+  <SwoopButton />
+</DemoFrame>
+
+## API: animate(node, target, options)
+
+```js
+import { animate } from 'motion';
+
+animate(
+  pathElement,
+  { d: 'M 20,50 C 80,0 140,100 180,50' },
+  { duration: 0.3 },
+);
+```
+
+三個參數：
+
+1. **DOM 節點** — 直接傳 element。HTML 跟 SVG 都吃。
+2. **target object** — 想動到什麼狀態。多個 property 可以一起傳：`{ d, opacity, transform }`。
+3. **options（optional）** — `duration` (秒)、`ease`、`delay`、`onComplete` 等。
+
+`animate()` 立刻開始播，回傳 `AnimationControls` 可以 `pause()` / `cancel()`。React 裡通常綁在 event handler，每次 hover / click 都重新 trigger。
+
+## 跟 CSS path() 的差別
+
+| | CSS `path()` | Motion `animate()` |
+|---|---|---|
+| Safari 支援 | ❌ | ✅ |
+| 整體支援 | ~79% | ~98%（Web Animations API） |
+| 寫法 | declarative | imperative |
+| Bundle size | 0 KB | ~10 KB |
+| Interruption 處理 | reverse shortening factor | 平滑接續 |
+
+要 cross-browser 一律 Motion；只 target 現代瀏覽器（內網工具、admin dashboard）可以省 bundle 用 CSS path()。
+
+## prefers-reduced-motion 必須手動處理
+
+```js
+function checkPrefersReducedMotion(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !window.matchMedia('(prefers-reduced-motion: no-preference)').matches;
+}
+
+const prefersReducedMotion = checkPrefersReducedMotion();
+animate(
+  path,
+  { d: SWOOP },
+  { duration: prefersReducedMotion ? 0 : 0.3 },
+);
+```
+
+`duration: 0` 等於瞬間切換，不是「不發生」 — path 還是會更新到目標 d，只是沒 tween。對前庭敏感使用者來說「看到結果但不看到過程」是合理 fallback。
+
+匹配 `prefers-reduced-motion: no-preference` 等於使用者**沒**選擇 reduced motion。`!` 翻轉 → 「想要 reduced motion」就回傳 true。
+
+## 兩個 path 必須結構一致（跟 CSS 一樣）
+
+```js
+// ✅ 兩條都是 M + C，可以 tween
+const A = 'M 20,50 C 80,50 140,50 180,50';
+const B = 'M 20,50 C 80,0 140,100 180,50';
+
+// 🛑 一條 M+C 一條 M+L，動畫不可預測
+const A = 'M 20,50 C 80,50 140,50 180,50';
+const B = 'M 20,50 L 180,50';
+```
+
+Motion 內部用 SVG path interpolation 演算法，前提是兩條 path 的 command sequence 對齊。不對齊時 Motion 會盡力 morph 但結果通常難看（折線、跳幀）。
+
+直線想 morph 成曲線 → 把直線寫成 control points 跟兩端共線的 Bezier (`M 0,50 C 60,50 120,50 180,50`)。
+
+## 為什麼不用 GSAP
+
+Comeau 選 Motion 不選 GSAP 的兩個理由（課程裡他特別強調）：
+
+1. **GSAP 巨大**，能做動畫之外的 100 件事，學一輩子也學不完。Motion 小巧專注。
+2. **Motion 用 Web Animations API**，動畫跑在 compositor thread，主執行緒卡住時還是能順。GSAP 跑在主執行緒，busy 時掉幀。
+
+第二點 Comeau 也承認有點爭議 — GSAP 社群會反駁。實際 benchmark 看場景。但對 React app 一般使用 Motion 已經足夠。
+
+## 跟 motion/react 的差別
+
+```js
+import { animate } from 'motion';            // imperative DOM API
+import { motion } from 'motion/react';       // React component API
+```
+
+`motion/react` 提供 `<motion.div>` 跟 `useSpring()` / `useTransform()` 之類 hooks，是 framer-motion 那套 declarative API。
+
+兩個 API 都來自同一個 library，可以混用。本課的 path morph 用 imperative `animate()` 比較直觀（綁在 event handler）；layout animation / shared element 用 declarative motion components（在 motion-and-react/ 那邊有筆記）。
+
+## Gotchas
+
+- **`animate()` 第一個參數要是真的 DOM node**，不是 React ref 物件。`pathRef.current` 才是 node，`pathRef` 本身是 `{ current }` wrapper。
+- **SSR 時 `window` undefined**：`checkPrefersReducedMotion` 要先 check `typeof window`。Tanstack Start 在 hydration 之前 server-render 一次，沒 guard 會炸。
+- **Strict Mode 不影響 Motion**（不像 useEffect 會 double-fire）— `animate()` 本身是 imperative，重複 call 會 cancel 前一個跑新的。
+- **Motion 的 `transform` 是 promoted property**，會走 GPU。其他屬性如 `d`、`stroke-dashoffset` 走 CPU 但因為 Web Animations API 還是不卡主執行緒。
+- **Bundle size**：完整 motion ~30KB gzipped。只用 imperative `animate()` 可以 tree-shake 到 ~10KB。

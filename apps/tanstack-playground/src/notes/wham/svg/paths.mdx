@@ -1,0 +1,106 @@
+---
+title: Paths, one continuous sequence of pen instructions
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/03-paths
+lessonNumber: '02-svg/03-paths'
+order: 3
+summary: '<path d="..."> 是一串繪圖指令，第一個一定是 M（move-to）把筆放下，後面 L / Q / C / A 接著畫。每個指令的起點繼承自前一個指令的終點，跟 <line> 兩端都要寫不一樣，這是 path 能做 Bezier / arc 的根本理由。'
+tags: [svg, path, d-attribute]
+---
+
+import { PathStepThrough } from './paths';
+
+## TL;DR
+
+- `<path d="...">` 的 `d` 是一串指令（move、line、Bezier、arc），瀏覽器照順序執行像在紙上畫。
+- 每個有效 path 必須以 `M`（Move-to）開頭，告訴瀏覽器筆從哪裡開始。中間可以再 `M` 一次「把筆抬起來移到別處」，產生不連續的 sub-path。
+- **指令只接終點**，起點隱式繼承前一個指令的終點。`L 12,4` 意思「從上一個位置畫直線到 (12, 4)」，不像 `<line>` 兩端都要寫。
+- 這個「flowing sequence」設計就是 path 能做 Bezier curve 跟 elliptical arc 的根本理由 — 每個 curve command 從上一個位置接續，可以無縫連到下一條曲線。
+- 逗號跟空白都可以當分隔符；compressed SVG 常寫成 `M8 24L24 8M12 8...` 沒空白，能 work 但難讀。**寫 code 時用空白跟逗號**，gzip 之後 size 差幾乎為 0。
+
+<DemoFrame title="Step through M / L / M / L — slider 控制執行到第幾步">
+  <PathStepThrough />
+</DemoFrame>
+
+## 一個指令一行讀
+
+```svg
+<path d="
+  M 6,4
+  L 12,4
+  L 12,10
+  M 4,12
+  L 12,4
+"/>
+```
+
+逐步執行：
+
+1. `M 6,4` — 把筆放在 (6, 4)，**沒畫任何東西**
+2. `L 12,4` — 從 (6, 4) 畫直線到 (12, 4)，水平往右
+3. `L 12,10` — 從 (12, 4) 接著畫到 (12, 10)，垂直往下 → 形成 L 字
+4. `M 4,12` — 把筆**抬起來**移到 (4, 12)，這之間沒線
+5. `L 12,4` — 從 (4, 12) 畫到 (12, 4)，斜對角線
+
+結果：一個 Г 字 + 一條斜線。Demo 拖 step slider 看每步加上去的視覺效果。
+
+## 跟 `<polyline>` + `<line>` 的差別
+
+同一個圖形也可以這樣寫：
+
+```svg
+<polyline points="6,4 12,4 12,10" />
+<line x1="4" y1="12" x2="12" y2="4" />
+```
+
+可讀性其實更好，但有兩個 path 才能做的事：
+
+- **Bezier curve** (`Q` quadratic、`C` cubic) — `<polyline>` 沒有 curve 概念
+- **Elliptical arc** (`A`) — 跟 `<ellipse>` 不一樣，arc 是 path 內部的曲線指令
+
+寫 icon / 簡單形狀用 `<polyline>` + `<line>` 比較清楚；寫 Figma 匯出的複雜 illustration（包含曲線）只能用 path。
+
+## 「起點繼承」是 path 的核心
+
+`<line>` 兩端都要明寫：
+
+```svg
+<line x1="4" y1="12" x2="12" y2="4" />
+```
+
+`<path>` 的 `L` 只接**終點**：
+
+```svg
+M 4,12 L 12,4
+```
+
+起點 (4, 12) 從上一個指令（`M 4,12`）繼承過來。這個 chaining 設計讓 Bezier 可以無縫接 Bezier：
+
+```svg
+M 0,8
+Q 4,0 8,8
+T 16,8
+```
+
+`T` 是「smooth quadratic」，control point 自動鏡射前一個 `Q` 的 control point — 這只有在 path 裡有用，因為它需要前一個指令的內部狀態。
+
+## 逗號 vs 空白：spec 兩個都認
+
+```svg
+<!-- 都合法 -->
+<path d="M 6,4 L 12,4" />
+<path d="M 6 4 L 12 4" />
+<path d="M6,4L12,4" />
+<path d="M6 4L12 4" />
+```
+
+W3C spec 的考量是 file size — 早期 dial-up 時代每個 byte 都重要。但 gzip 壓縮後差距 < 1%，現代根本不該為這 byte 數犧牲可讀性。
+
+寫 code 時用 `M x,y L x,y` 這種「逗號分 pair、空白分指令」格式最好讀。Figma export 出來的 path 通常 minify 過，要看的話貼進 [SVG path editor](https://yqnn.github.io/svg-path-editor/) 之類工具人工美化。
+
+## Gotchas
+
+- **第一個指令必須是 `M`**。瀏覽器看到 `L` 起手會直接 silently 不畫。
+- **指令大小寫不同**：大寫 = 絕對座標，小寫 = 相對前一個指令的位移。後面 syntactic sugar 那課會講相對指令的用途，初學一律寫大寫即可。
+- **JSX 把 `d` attribute 當字串傳**：`<path d="M 6,4 L 12,4 ..." />` 直接寫即可。多行字串用 template literal `<path d={`M 6,4\n  L 12,4`}` 也合法（換行被當空白）。
+- **fill 預設是黑色** — 即使是「開放路徑」（沒有 Z 收尾），瀏覽器也會把首尾連起來填色。要保持線條空心要 `fill="none"`，跟其他 SVG primitive 一樣。
+- **path 比較貴**：複雜的 path 比同等的 polyline 慢一點點 render（因為要解析指令）。日常 UI 看不出差異，但動畫 100+ paths 同時跑時可能會考慮拆成 polyline + line。

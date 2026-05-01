@@ -1,0 +1,99 @@
+---
+title: Arcs, the elliptical curve with seven parameters
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/03.02-arc
+lessonNumber: '02-svg/03.02-arc'
+order: 3.02
+summary: 'A 指令需要 7 個參數：rx ry rotation large-arc-flag sweep-flag end-x end-y。瀏覽器拿 rx/ry 算出一個虛擬橢圓，連接起點到終點。large-arc-flag 選短路或長路、sweep-flag 選兩個可能橢圓的哪一個。'
+tags: [svg, path, arc, ellipse]
+---
+
+import { ArcExplorer } from './arcs';
+
+## TL;DR
+
+- `A rx,ry rotation large-arc-flag sweep-flag end-x,end-y` — 7 個參數，少一個都不行。起點繼承自前一個指令。
+- 跟 `<ellipse>` 用「中心點 + 半徑」定位完全相反，arc 給「起點 + 終點」，瀏覽器**反推**一個能連接兩點的虛擬橢圓。
+- `rx` / `ry` 是虛擬橢圓的橫向、縱向半徑。半徑越小 → 橢圓越小 → 弧越深；半徑大到弧近乎直線。
+- `large-arc-flag` (0/1) — 任兩點之間有兩條路徑（短路、長路），這個 flag 選哪一條。
+- `sweep-flag` (0/1) — 半徑比兩點距離大時，會有兩個可能的橢圓，這個 flag 選哪一個。0 = counter-clockwise、1 = clockwise（從起點到終點的繪製方向）。
+- `rotation` 旋轉虛擬橢圓本身（不影響圓形 arc，因為圓旋轉沒視覺差別）。實務上幾乎不用。
+
+<DemoFrame title="拖 7 個 knobs 體會 arc 怎麼被定義">
+  <ArcExplorer />
+</DemoFrame>
+
+## 為什麼 arc 不能直接用 ellipse 中心點
+
+`<ellipse cx cy rx ry>` 給中心點，畫整個橢圓。但 path 的設計是「flowing sequence」，每個指令的起點繼承前一個指令的終點 — 你只能告訴 arc「終點在哪」，不能告訴它「中心在哪」（不然中心點會跟前一個指令的位置不連續）。
+
+所以 SVG 的選擇是：給起點 + 終點 + 虛擬橢圓的形狀（rx, ry, rotation），瀏覽器自己算出**符合條件的橢圓位置**，再從中切出連接兩點的那段弧。
+
+代價是兩個 ambiguity：
+
+1. 同一橢圓上連接兩點有兩條路 → `large-arc-flag` 選
+2. 半徑夠大時，能 fit 的橢圓有兩個（鏡像對稱）→ `sweep-flag` 選
+
+## large-arc-flag: 短路 vs 長路
+
+虛擬橢圓上連接 A 跟 B 有兩條弧線：往一邊繞 60° 的短路，往另一邊繞 300° 的長路。
+
+```svg
+<path d="M 5,5 A 5,5 0 0 0 11,11" />  <!-- 短路 -->
+<path d="M 5,5 A 5,5 0 1 0 11,11" />  <!-- 長路 -->
+```
+
+`large-arc-flag` 是 binary：0 短、1 長。Demo 裡 toggle 就會看到弧從淺變深、繞遠路。
+
+兩條路長度剛好一樣（半圓的情況）時這 flag 沒差。
+
+## sweep-flag: 順時鐘 vs 逆時鐘
+
+`rx` / `ry` 比「起點到終點直線距離」大時，能塞進去的橢圓有兩個（左右鏡像）。`sweep-flag` 選哪一個：
+
+- `0` — counter-clockwise（從起點到終點繞「逆時鐘」方向）
+- `1` — clockwise（順時鐘）
+
+Demo 裡半徑開大（rx=10、ry=10）然後 toggle sweep-flag，會看到弧的「凸方向」從一邊翻到另一邊。
+
+## rx, ry 的「半徑越小弧越深」
+
+直覺像把球壓進桌洞裡：
+
+- 高爾夫球（小半徑）→ 球大半浸在洞下 → 弧很深
+- 棒球（中半徑）→ 球一半浸 → 弧中等
+- 保齡球（大半徑）→ 球幾乎不浸 → 弧近乎直線
+
+數學上：`rx`、`ry` 越小，能 fit 的虛擬橢圓越緊靠兩端點，弧曲率越大。
+
+`rx` < 兩點距離的一半 時 spec 規定瀏覽器自動 scale up `rx` 跟 `ry`（保持比例），確保 arc 永遠畫得出來。所以不會因為「半徑太小」報錯，只會被 silently 修正。
+
+## rotation 在圓形 arc 沒效
+
+`rx == ry` 時整個虛擬橢圓是圓，旋轉一個圓在視覺上沒變化 — 所以 rotation 對圓形 arc 是 noop。
+
+只有橢圓 arc（`rx ≠ ry`）才看得出 rotation 效果：原本水平 rx、垂直 ry 的橢圓，旋轉 45° 後 rx 走斜對角、ry 走另一斜對角，弧的形狀也跟著轉。
+
+實務上幾乎不用 — Comeau 自己也說「我從沒用過這個參數」。整個 path 想旋轉的話用 CSS `transform: rotate()` 對整個 SVG 元素旋轉比較直觀。
+
+## 完整參考
+
+```
+M [start-x],[start-y]
+A [rx],[ry] [rotation] [large-arc-flag] [sweep-flag] [end-x],[end-y]
+```
+
+| 參數 | 意義 | 常用值 |
+|---|---|---|
+| `rx`, `ry` | 虛擬橢圓的橫/縱半徑 | 跟兩點距離同尺度 |
+| `rotation` | 旋轉虛擬橢圓（degree） | `0` |
+| `large-arc-flag` | 0=短路、1=長路 | 通常 `0` |
+| `sweep-flag` | 0=逆時鐘、1=順時鐘 | 看設計需求 |
+| `end-x`, `end-y` | 弧的終點 | — |
+
+## Gotchas
+
+- **7 個參數一個都不能少**。`A 5,5 0 0 0 11,11` — 即使不用 rotation 也要寫 `0`。
+- **flag 是 binary 0/1**，不是 true/false。寫成 `A 5,5 0 false 0 11,11` parse 失敗。
+- **參數可以用空白或逗號分隔**，但 flag 跟後面的數字之間最好有空白：`A5,5,0,0,0,11,11` parser 會困惑（無法判斷 `0011` 是兩個 flag 還是一個數字）。
+- **`getTotalLength()` 對 arc 的長度計算是近似值**。需要精確路徑長度（self-drawing trick）時要實測，pathLength attribute 設個 round number 反而比較好控制。
+- **動畫 d attribute 時 arc 的 flag 不能 tween** — 只有數字 (rx, ry, rotation, end-x, end-y) 能 interpolate。改 flag 會直接跳。

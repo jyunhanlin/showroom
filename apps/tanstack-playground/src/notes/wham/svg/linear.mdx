@@ -1,0 +1,104 @@
+---
+title: linear() Function, polyline timing in CSS
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/08.02-linear
+lessonNumber: '02-svg/08.02-linear'
+order: 8.02
+summary: 'linear(0, 0.5, 0.85, 0.97, 1) 接 N 個 0~1 數值（可超過 1 做 overshoot），瀏覽器把它們等距放在 timeline 上用直線連 — polyline timing function。點夠密能模擬任何曲線包含 spring。實務上用 Linear Easing Generator / Easing Wizard 自動生。'
+tags: [svg, easing, linear-function, spring]
+---
+
+import { LinearComparison } from './linear';
+
+## TL;DR
+
+- `linear(0, 0.5, 0.85, 0.97, 1)` — N 個 0 到 1 之間的數字（也允許超過 1 = overshoot）。瀏覽器等距放在 timeline 上用直線連。
+- 看起來是「直線」段，但點夠密就近似任何曲線。Spring physics 算過的 50+ 個離散採樣丟進去就重現 spring 動畫。
+- **Extended syntax**：`linear(0 0%, 0.5 30%, 1 100%)` — 多帶一個百分比指定 X 位置，可以「策略性」放點而不是均分。25 個點塞在彎曲處 vs 50 個均分效果差不多。
+- **不需要手寫**：兩個工具自動把 spring 參數轉成 linear() 字串：[Linear Easing Generator](https://linear-easing-generator.netlify.app/) (Jake Archibald + Adam Argyle)、[Easing Wizard](https://easingwizard.com/)。
+- 跟 `linear`（沒括號）完全不同概念：`linear` = `cubic-bezier(0, 0, 1, 1)` 恆速；`linear()` = polyline timing。命名衝突糟糕但 spec 已定。
+
+<DemoFrame title="cubic ease-out vs linear() crude vs linear() spring">
+  <LinearComparison />
+</DemoFrame>
+
+## 基本 syntax
+
+```css
+.block {
+  transition: transform 500ms linear(0, 0.1, 0.25, 0.5, 0.68, 0.8, 0.88, 0.94, 0.98, 0.995, 1);
+}
+```
+
+11 個數字均分在 500ms 上：0ms→0、50ms→0.1、100ms→0.25、... 500ms→1。瀏覽器在每兩個點之間用直線插值。
+
+直線段越密越像曲線。11 個點還能看到「角」，50+ 個點視覺上完全 smooth。
+
+第 11 個點是 1（終點）。寫 `linear(0, ..., 0.95)` 終點停在 95% 進度，動畫收在那裡（看 `transition` / `animation-fill-mode` 的設定決定後續行為）。
+
+## Overshoot — 超出 0~1 範圍
+
+```css
+linear(0, 1.25, 1, 0.9, 1.04, 0.99, 1.005, 0.996, 1.001, 0.999, 1)
+```
+
+第 2 個點 1.25 = **overshoot 25%**。如果動畫從 `translateX(0)` 跑到 `translateX(40px)`，這個點的實際位置是 50px（超過目標 25%）→ 之後反彈回去。
+
+跟 `cubic-bezier()` 也允許 control point 在 0~1 外的 overshoot 同概念，但 `linear()` 可以做**多次**過衝（spring 那種「來回震盪幾次」），cubic-bezier 只能單次。
+
+## Extended syntax — 策略放點
+
+```css
+linear(
+  0 0%,
+  0.01 0.5%,
+  0.347 3.4%,
+  1 7.3%,
+  1.284 10.6%,
+  ...
+)
+```
+
+每個點帶兩個值：progress（前面看到的 0~1 數字）+ X 位置（0%~100% 在 timeline 上）。可以跳過某些區段不放點（直線那段不需要密採樣），把點集中在曲線變化大的位置。
+
+一個 25 個點的 strategically-placed linear() 跟 50 個點均分的視覺接近，KB 直接砍半。
+
+實務上手寫不太可能算對位置，靠 generator 工具產出。
+
+## 為什麼不直接寫 CSS spring()
+
+WebKit 在 2017 (Safari 10.1) 真的 ship 了 `spring()` timing function — 接受 mass / stiffness / damping / initial-velocity 4 個參數，瀏覽器內建 spring physics。
+
+但 Chrome 跟 Firefox 沒跟進，[CSS spec proposal](https://drafts.csswg.org/css-easing/) 多年沒進展。所以 7 年後仍然只有 Safari 一家獨吃 spring()。
+
+`linear()` 是 cross-browser 的妥協方案：「把 spring 算過的離散點丟給 CSS engine」 — 不是真的 physics，但視覺結果近似，而且 92% 瀏覽器支援。
+
+## 工具產出 vs 手寫
+
+```css
+/* 手寫 11 個點模擬 spring，不太自然 */
+linear(0, 1.25, 1, 0.9, 1.04, 0.99, 1.005, 0.996, 1.001, 0.999, 1);
+
+/* Easing Wizard 產的 50 點 spring，順暢 */
+linear(0, 0.04, 0.16 4%, 0.65, 1.04 17%, 1.16, 1.18, ...);
+```
+
+人腦很擅長辨識「自然 vs 合成」的動畫差異 — 手寫 11 點的 spring 看起來會「機械」，瀏覽器逐段直線跳很明顯。50+ 點才能蓋過這缺陷。
+
+也因此 Comeau 說「linear() 不是給人手寫的」，幾乎都用工具：
+
+- **Linear Easing Generator** — 接受 spring stiffness/damping，吐 linear() 字串。可以 simplify / round 控制點數。
+- **Easing Wizard** — 多個 motion type (Spring / Bounce / Wiggle / Overshoot)，可視化編輯 + 4 種 accuracy preset。
+
+## 為什麼叫 "linear"
+
+不是因為動畫是 linear（恆速），是因為**每段曲線是 linear**（直線）。整體 timing function 是「polyline of linear segments」，spec 命名取了第一個字 = 直線，跟既有的 `linear` keyword 撞名。
+
+> "It's a CSS naming disaster, but it's the spec." — me, paraphrasing Comeau
+
+## Gotchas
+
+- **`linear` 跟 `linear()` 完全不同**。前者是 cubic-bezier(0,0,1,1) 的 alias，後者是 polyline timing。
+- **`linear()` 字串可以很長**：100+ 點是常態。CSS file size 增加但 gzip 後通常 1KB 以下，效能 impact ~0（測試過 framerate 在最簡單 vs 100 點 linear() 沒差別）。
+- **多處用同一個 spring**：用 CSS variable 存 `--spring: linear(0, ..., 1);`，然後 `transition: transform 500ms var(--spring)`，避免複製 50 行字串。
+- **支援 ~92%（2026/04）**。fallback 給 `cubic-bezier(...)` 或 `ease`，不要讓老瀏覽器整個沒動畫。
+- **動畫進入畫面 (entry) 跟離開 (exit) 通常用不同 spring**：entry 通常 stiffness 高（snappy 進場），exit 低（平滑離場）— 不要兩邊用同一個 linear()。

@@ -1,0 +1,116 @@
+---
+title: linear() Limitations, where the polyline trick falls short
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/08.03-linear-limitations
+lessonNumber: '02-svg/08.03-linear-limitations'
+order: 8.03
+summary: 'linear() 不是真 spring，三個 tradeoff：必須有 duration（0-friction 永動 spring 模擬不出）、interrupt 時 reverse shortening factor 把 timing function 壓縮速度感變奇怪、bundle size 沒想像中大但要用 CSS variable 共用。重要動畫該用 Motion 之類 JS library 處理 interrupt。'
+tags: [svg, easing, linear-function, interrupts, performance]
+---
+
+import { InterruptComparison } from './linear-limitations';
+
+## TL;DR
+
+- **Time-based**：CSS transition 必須有 duration，但 spring 物理上 duration 是結果不是輸入。Linear Easing Generator 用「spring 完全 settle 的時間」當 duration 補；Easing Wizard 讓 user 設 duration 並 internally clamp 參數防止失真。**Damping=0 永動 spring 模擬不出**。
+- **Interrupts**：CSS transition 中斷時用 **reverse shortening factor** — 剩 50% 進度被中斷，新動畫 duration 也砍 50%。但 timing function 不變 → 同一個 50 點 spring 用一半 duration 跑 → **震盪頻率變兩倍** → 看起來「假快」很怪。
+- **Performance**：100+ 點 linear() 對 framerate 沒影響（compositor thread）。3 個 max-accuracy spring 的 CSS bundle 增加 ~1.2KB gzipped，可忽略。但要**用 CSS variable 共用**，否則每個動畫複製 50 行字串會膨脹到 30+ KB。
+- **真的重要的動畫用 Motion 或 React Spring**。CSS linear() 適合大部分情境；user 可能反覆 interrupt 的 (toast、modal、hover 多重狀態) 用 JS library 處理 inertia。
+
+<DemoFrame title="連續按看 interrupt 行為差異">
+  <InterruptComparison />
+</DemoFrame>
+
+## 1. Time-based 的鎖
+
+```css
+.elem {
+  transition: transform 1200ms linear(...);
+}
+```
+
+CSS transition 寫死 duration。但 spring 物理：
+
+- 高 stiffness + 低 damping → 震盪很久才停
+- 低 stiffness + 高 damping → 一下就到位
+
+兩種 spring 該有完全不同的動畫長度。固定 1200ms 的 linear() 必然 mismatch 其中一種：
+
+- duration 太短 → spring 還沒 settle 就被截斷
+- duration 太長 → spring 早已 settle，剩餘時間元素卡在終點不動
+
+**Linear Easing Generator** 的解法：根據 spring 參數**動態算出 settle 時間**，讓 duration 自動匹配。但 damping=0（真空）spring 永遠不 settle → 算不出 duration → **沒辦法做永動 spring**。
+
+**Easing Wizard** 的解法：讓 user 自己設 duration，**內部 clamp** spring 參數防止超過合理範圍。代價是某些參數組合行為不直觀（damping 對低 stiffness/mass 沒效）。
+
+## 2. Reverse shortening factor — interrupt 詭異
+
+```js
+// 動畫進行中被打斷的情境
+// 1. 從 0 transition 到 200，預定 1000ms
+// 2. 在 300ms 時打斷（已經跑 30%，到了 60px）
+// 3. 重新 transition 回 0
+```
+
+CSS spec 為了「視覺一致」做了 **reverse shortening factor**：新動畫的 duration 縮短，比例等於「已完成進度」。上例 30% 完成 → 新動畫 duration = 1000 × 0.3 = 300ms。
+
+直覺合理：「都跑了 30% 了，反向不該再花 1000ms」。
+
+**但 timing function 不縮放**。同一個 50 點 spring linear() 在 300ms 內跑完，每個點之間時間更短 → **震盪頻率變高**。原本鬆軟 spring 變成緊繃 spring。視覺上像「動畫加速 fast-forward」，不自然。
+
+**Motion / React Spring 的 spring 沒這問題**：interrupt 時保留當前位置 + 速度（inertia），用同一組 stiffness/damping 重新算 → spring 自然減速反彈，物理一致。
+
+Comeau 建議：對 user 反覆 interact 的元素 (toast 滑入滑出、modal 開關) 用 Motion；單次播放的元素（page transition、loading）用 CSS linear() 即可。
+
+## 3. Performance — 沒想像中糟
+
+Comeau 自己 benchmark 過：
+
+```css
+.elem-1 { transition: transform linear(0, 1) 500ms; }       /* 簡單 */
+.elem-2 { transition: transform linear(0, 0.04, ..., 1) 500ms; }  /* 100+ 點 */
+```
+
+**framerate 完全一樣**。瀏覽器在 compositor thread 處理 timing function，points 多寡不影響每幀計算量（已經是 lookup table）。
+
+Bundle size 測試：3 個 max-accuracy spring (avg 75 點) 加進 CSS：
+
+| | uncompressed | gzipped |
+|---|---|---|
+| Without springs | 63 KB | 10.2 KB |
+| With 3 max-accuracy springs | 67 KB | 11.5 KB |
+
+加了 ~1.2KB gzipped。3G 下載多 5ms，使用者感受不到。
+
+**前提：用 CSS variable 共用**：
+
+```css
+:root {
+  --spring-bouncy: linear(0, 1.25, 0.9, 1.04, 0.99, 1.005, ..., 1);
+}
+
+.toast { transition: transform 500ms var(--spring-bouncy); }
+.modal { transition: transform 500ms var(--spring-bouncy); }
+```
+
+每個動畫複製 50 行字串會把 bundle 撐到 30+ KB（如果有 20 個動畫各複製）。Variable 共用後保持 ~1KB。
+
+## 真的重要的動畫用 JS
+
+```
+| 場景 | 推薦 |
+|---|---|
+| Page transition、loading state、單次 entrance | CSS linear() |
+| Toast 滑入滑出（會 dismiss）、modal 開關（會反覆）、hover 多重狀態 | Motion / React Spring |
+| 高度自訂 spring + JS 邏輯互動 | React Spring |
+| Performance critical (低階 mobile) | CSS linear() (compositor thread) |
+```
+
+CSS linear() 是「90% 場景的 default」，JS spring 是「對 interrupt 真的在意時的 escape hatch」。
+
+## Gotchas
+
+- **永動 spring 真的做不出來**：damping=0 spring 在物理上永遠震盪，CSS linear() 沒辦法表達「無限長度」。
+- **Reverse shortening factor 是 spec 行為**，所有瀏覽器一致 — 不是 bug。要繞開只能換 JS library。
+- **bundle size 估算用 gzipped**：raw CSS 看起來大，gzip 對重複 numeric pattern 壓縮率超高。實際 wire transfer 只是 raw 的 ~17%。
+- **Linear Easing Generator 的 simplify/round 滑桿** 控制 output 點數。從 100 點降到 25 點視覺上差距小但 size 砍半 — 通常 25-50 是甜蜜點。
+- **Safari 對 spring() timing function 有獨家支援**（2017 ship）但其他瀏覽器無 — 不要用，cross-browser 一律 linear()。

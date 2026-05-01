@@ -1,0 +1,99 @@
+---
+title: Path Commands, M / L / Z / Q / C / A — six tools for any shape
+sourceUrl: https://courses.joshwcomeau.com/wham/02-svg/03.01-path-commands
+lessonNumber: '02-svg/03.01-path-commands'
+order: 3.01
+summary: 'M (move) / L (line) / Z (close) 是基礎，Q (quadratic Bezier) 1 個 control point、C (cubic Bezier) 2 個 control points、A (arc) 走橢圓弧。Cubic 比 Quadratic 多一個 control point，能做 S 形跟更精準的單峰曲線。'
+tags: [svg, path, bezier, commands]
+---
+
+import { QuadraticBezier, CubicBezier } from './path-commands';
+
+## TL;DR
+
+- 6 個主要 path 指令：`M` (move-to)、`L` (line-to)、`Z` (close path)、`Q` (quadratic Bezier)、`C` (cubic Bezier)、`A` (arc)。
+- `M` 必出現在每個 path 開頭；中間再出現 = 抬筆移到別處 sub-path。
+- `Z` 把當前 sub-path 從目前位置畫直線回到 sub-path 起點。**跟單純的 `L (起點)` 不同**：Z 把線頭尾連在一起（看 stroke-linejoin），`L 起點` 只是兩條線重疊，stroke 看 stroke-linecap。
+- `Q x1,y1 x,y` — 從前一個位置經過 control point (x1,y1) 拉到 (x, y) 的拋物線。一個 control point 拉一條單峰曲線。
+- `C x1,y1 x2,y2 x,y` — 兩個 control points，可以做 S 形或精準調整單峰形狀。
+- 大寫 = 絕對座標，小寫 = 相對於前一個 endpoint 的位移（syntactic-sugar 那課再講）。
+
+## Quadratic Bezier — 1 個 control point
+
+```svg
+<path d="M 2,14 Q 8,0 14,14" />
+```
+
+從 (2, 14) 出發，control point 在 (8, 0)，終點 (14, 14)。曲線「往 control point 方向被吸引」，但**永遠不會通過 control point**，只會傾向它。
+
+<DemoFrame title="Quadratic Bezier — 拖 cp.x / cp.y 看 control point 怎麼影響曲線">
+  <QuadraticBezier />
+</DemoFrame>
+
+直覺：control point 越遠離直線連接的兩端點，曲線彎越大。control point 跟兩端點共線時，曲線退化成直線。control point 在兩端點外面時，曲線會「往外凸」更誇張。
+
+實用場景：
+
+- 拋物線形狀（單峰）
+- 簡單的 swoop divider
+- icon 裡的單一弧形
+
+侷限：**不能做 S 形**。要 S 形需要 cubic。
+
+## Cubic Bezier — 2 個 control points
+
+```svg
+<path d="M 2,14 C 2,0 14,14 14,0" />
+```
+
+從 (2, 14) 出發，**第一個** control point (2, 0) 控制起點端的「離開方向」，**第二個** control point (14, 14) 控制終點端的「進入方向」，終點 (14, 0)。
+
+<DemoFrame title="Cubic Bezier — 兩個 control points，能做 S 形">
+  <CubicBezier />
+</DemoFrame>
+
+兩個 control points 各自吸引曲線在那一端的形狀。試把 cp1 拉左上、cp2 拉右下，曲線變 S 形。
+
+CSS easing 的 `cubic-bezier(0.42, 0, 0.58, 1)` 也是這個概念 — easing curve 本質就是一條 cubic Bezier，control point 就是兩個 timing 數對。
+
+兩個用 cubic 的場合：
+
+1. **需要 S 形** — Quadratic 做不到
+2. **要更精準控制單峰** — 兩個 control points 在同一邊可以調整曲線兩端的「進入/離開」陡峭度
+
+## Z 不只是 syntactic sugar
+
+```svg
+<path d="M 4,4 L 4,12 L 12,12 Z" />
+```
+
+`Z` 從 (12, 12) 畫直線回 sub-path 起點 (4, 4)，跟 `L 4,4` 看似一樣。差別在 stroke linejoin：
+
+- `Z` — 三角形完整封閉，三個轉角都被 `stroke-linejoin` 處理（miter/round/bevel）
+- `L 4,4` — 終點跟起點重合但「沒連起來」，那個重合點按 `stroke-linecap` 處理（butt/round/square）
+
+用 `stroke-linecap="butt"` 時 Z vs L 4,4 差別最明顯：Z 會收成尖角，L 4,4 會留兩個切口。
+
+實務：要封閉形狀（三角形、多邊形）一律用 Z；要刻意留缺口或視覺上「尾巴沒接到」用 L。
+
+## Fill 不需要 Z
+
+```svg
+<path fill="red" d="M 4,4 L 4,12 L 12,12" />
+```
+
+這個 path 沒收尾（沒 Z），但 `fill` 還是會把它當封閉形狀填色，瀏覽器自動補上「終點到起點」的虛擬線當邊界。
+
+所以 Z 只影響 stroke，不影響 fill。要的話可以同時設 `fill="red"` + 不寫 Z + `stroke="none"` 或留 stroke 看效果。
+
+## Gotchas
+
+- **指令大小寫不同**：`M`、`L`、`Q`、`C` 是絕對座標；`m`、`l`、`q`、`c` 是相對於前一個位置的位移。混用容易出 bug，初學一律全大寫。
+- **Q 跟 C 之間的 control point 不會視覺上出現**，只是數學上影響曲線形狀。Demo 裡的 control point 圓點是我額外畫的視覺輔助。
+- **path 數值可以是負數或超出 viewBox 的值**。control point 在 viewBox 外面只是看不見，不影響數學計算。
+- **連續 Bezier 容易在交界處出 elbow**：`M 0,0 Q 4,10 8,8 Q 14,0 12,12` 兩條 Q 的交界處可能不平滑。後面 syntactic-sugar 那課的 `T` 跟 `S` 就是解這個。
+- **JSX 把 `d` 當字串**：`<path d="M 2,14 Q 8,0 14,14" />` 或用 template literal 動態拼：
+
+  ```tsx
+  <path d={`M ${x},${y} Q 8,0 14,14`} />
+  ```
