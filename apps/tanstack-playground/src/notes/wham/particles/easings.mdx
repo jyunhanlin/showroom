@@ -1,0 +1,58 @@
+---
+title: Timing Functions, easing curves
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/05-easings
+lessonNumber: '01-particles/05-easings'
+order: 8
+summary: '同樣 0 → 100% 的位移、同樣 750ms,中間時間怎麼分配可以做出完全不同的氣質。CSS 內建 5 個關鍵字 (`linear` / `ease-in` / `ease-out` / `ease-in-out` / `ease`),底層都是 `cubic-bezier(p1x, p1y, p2x, p2y)`。'
+tags: [particles, css, easing, animation, cubic-bezier]
+---
+
+import { EasingCompare, EasingCurveGraph } from './easings';
+
+## TL;DR
+
+- 動畫不是只有「從哪到哪、多久」,還有「**進度怎麼分配**」這個維度。
+- 5 個內建關鍵字:
+  - `linear` — 等速,適合連續循環(旋轉、流光)。
+  - `ease-in` — 慢起快結,離場/離開螢幕用得多。
+  - `ease-out` — 快起慢結,進場/出現的標準選擇。
+  - `ease-in-out` — 兩端慢中間快,移動中的物體。
+  - `ease` — CSS 預設值,類似 `ease-in-out` 但更偏前傾。
+- 底層都是 `cubic-bezier(p1x, p1y, p2x, p2y)` — 兩個控制點。
+
+<DemoFrame title="Same distance, same duration, different easing">
+  <EasingCompare />
+</DemoFrame>
+
+切換不同 timing 看看球的速度節奏 — 起點、終點、總時間都沒變,只是「過程的時間怎麼花」。
+
+<DemoFrame title="Easing curves: progress over time">
+  <EasingCurveGraph />
+</DemoFrame>
+
+橫軸時間 t,縱軸 progress;`linear` 是直線,其他是 cubic-bezier 曲線。曲線越陡峭代表那段時間動得越快。
+
+## Why it works
+
+`cubic-bezier(x1, y1, x2, y2)` 是兩個控制點的三次貝茲曲線。曲線從 (0, 0) 到 (1, 1),控制點決定中段怎麼彎。
+
+- `linear` = `cubic-bezier(0, 0, 1, 1)` — 控制點在直線上,曲線就是直線。
+- `ease-out` = `cubic-bezier(0, 0, 0.58, 1)` — 第一個控制點貼底,起步快;第二個拉高接近終點。
+- `ease-in` 鏡像反過來。
+
+## 用法 cheat-sheet
+
+| 場景 | 推薦 |
+|---|---|
+| 物件進場(modal、toast、tooltip) | `ease-out` |
+| 物件離場 | `ease-in` |
+| 一直循環的旋轉/脈動 | `linear` |
+| 物件位移(從 A 到 B 不消失) | `ease-in-out` |
+| 沒想清楚 | `ease`(CSS 預設) |
+
+## Gotchas
+
+- **Hover 進場用 `ease-out` + 退場用 `ease-in`**:`transition` 上同時設不同方向不太優雅,折衷用 `ease-in-out` 或 `ease`。
+- **`ease` ≠ `ease-in-out`**:預設 `ease` 偏前 — 起步比 `ease-in-out` 快。預設值不是中性曲線,要清楚自己用的是什麼。
+- **`linear` 不是「無聊」**:循環動畫(旋轉、scrolling marquee)只能用 linear,不然每圈都會看到加速減速很怪。
+- **超出 [0, 1] 的 cubic-bezier**:`cubic-bezier(0.5, -0.5, 0.5, 1.5)` 之類的「彈跳」效果是合法的 — y 控制點在 0~1 之外進度會「過頭再回來」,做出 spring 預覽。

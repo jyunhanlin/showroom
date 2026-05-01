@@ -1,0 +1,65 @@
+---
+title: Object Pooling, recycling DOM nodes (and why not to)
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/08.01-object-pooling
+lessonNumber: '01-particles/08.01-object-pooling'
+order: 14
+summary: '把用過的 DOM 節點存到 `objectPool` 重用,聽起來省 — 實測在現代瀏覽器幾乎沒差。GC 的工作做得比人腦想像好,object pooling 只是讓程式碼變脆弱。'
+tags: [particles, performance, gc, dom]
+---
+
+import { PoolingComparison } from './object-pooling';
+
+## TL;DR
+
+- 每次粒子 fade 結束就 `.remove()`,DOM 節點被 detach,然後等 GC。
+- 想優化 → 把它們收集到 `objectPool` 陣列,下次要新粒子時先 `pop()` 出一個,沒有才 `createElement`。
+- 在現代 Chrome / Safari / Firefox 上實測:**沒差**。GC 跟動畫是平行運作,根本不影響 frame rate。
+- Pooling 的代價:程式碼變複雜、忘記清屬性會留下殘影、忘記清 pool 會卡住 GC 永久佔記憶體。
+
+<DemoFrame title="plain vs pooled — same animation, different lifecycle">
+  <PoolingComparison />
+</DemoFrame>
+
+兩邊都每 50ms spawn 一顆。左邊每次都 `createElement`,右邊先看 `objectPool` 有沒有。Pooled 那邊的「created」會很快收斂到一個小數字(剛好夠飽和 pipeline),plain 那邊會一直增長(但其實 GC 也在背景默默清)。
+
+## 實作核心
+
+```ts
+const objectPool: HTMLSpanElement[] = [];
+
+function spawn() {
+  const particle = objectPool.length > 0 ? objectPool.pop()! : document.createElement('span');
+  // ...設置 styles / animations
+  host.appendChild(particle);
+
+  setTimeout(() => {
+    particle.remove();
+    objectPool.push(particle);  // 收回 pool
+  }, FADE_DURATION + 200);
+}
+```
+
+`element.remove()` 不會立刻釋放節點 — 只是 detach。如果還有東西(`objectPool` 陣列)持有引用,GC 不會回收。下次 pop 出來重新 mount 就好。
+
+## 為什麼 Comeau 不推薦
+
+1. **效能優勢實測幾乎為零**。Chrome 的 GC 很聰明,DOM node 數穩定在約 300 個就被自動清理,完全跟 pooling 一樣的水準,但不需要你寫一行管理程式碼。
+2. **狀態洩漏 bug 容易寫**。例如忘記清舊的 `--x` / `--y` CSS 變數,粒子會閃現在上次的位置一瞬間。
+3. **block GC**:如果 pool 是個全域陣列,動畫停了之後沒有清掉,所有節點會被永久保留。記憶體用量比沒 pooling 還慘。
+
+「物理上的塑膠垃圾才需要回收。DOM 節點是 intangible 的,只要 user experience 沒差,就不用犧牲程式碼簡潔度去『省』。」
+
+## 什麼時候 pooling 真的有用?
+
+- **每幀產生上千個粒子的 Canvas 場景**:不再是 DOM 節點,而是 JS object。`new` 這種 hot path 上會有 allocation cost。
+- **記憶體吃緊的環境**(舊 mobile、嵌入式 webview):GC 觸發本身會吃 frame。
+- **WebGL / instanced rendering**:每個 vertex buffer slot 重用是基本功。
+
+DOM particle 99% 場景都不在這裡。先測,再決定要不要寫。
+
+## Gotchas
+
+- **state leak**:從 pool 撈出來的節點還帶著上次的 className / inline style / CSS 變數。每次重用都要 fully reset。
+- **arrhythmia**:pool 用 `pop()` 是 LIFO,如果你的設計依賴粒子在 DOM 中的順序(eg. `prepend` 讓新的在最上層),要注意撈出來的節點插入位置。
+- **記得清空**:動畫永久結束時 `objectPool.length = 0`,否則所有節點被永久 hold。
+- **Premature optimization is the root of all evil**:這話 Donald Knuth 說的,套在這裡剛好 — 先用最簡單的解法跑,有量到問題再來優化。

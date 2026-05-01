@@ -1,0 +1,71 @@
+---
+title: Trigonometry 101, why cos/sin = x/y
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/07.01-trigonometry-101
+lessonNumber: '01-particles/07.01-trigonometry-101'
+order: 13
+summary: 'SOH CAH TOA 直觀化 — 把 angle + distance 拆成 x 軸位移(cos × 斜邊)和 y 軸位移(sin × 斜邊)。動拖動 slider 看比例怎麼變。'
+tags: [particles, math, trigonometry]
+---
+
+import { UnitCircleExplorer } from './trigonometry-101';
+
+## TL;DR
+
+要把極座標 `(angle, distance)` 轉成 `(x, y)`,只記得這個就夠:
+
+```
+x = cos(angle) × distance
+y = sin(angle) × distance
+```
+
+不必背公式 — 看圖一次就懂。
+
+<DemoFrame title="unit-circle / right-triangle decomposition">
+  <UnitCircleExplorer />
+</DemoFrame>
+
+紫色斜線 = 長度 distance、跟 x 軸夾 θ 的向量。它在 x 軸的投影(紅)= `cos(θ) × distance`,在 y 軸的投影(綠)= `sin(θ) × distance`。
+
+## SOH CAH TOA
+
+直角三角形三邊比例:
+
+- **S**OH:**S**in(θ) = **O**pposite / **H**ypotenuse(對邊 / 斜邊)
+- **C**AH:**C**os(θ) = **A**djacent / **H**ypotenuse(鄰邊 / 斜邊)
+- **T**OA:**T**an(θ) = **O**pposite / **A**djacent(對邊 / 鄰邊)
+
+用力說一遍:**騷喀偷阿**(SOH-CAH-TOA)。
+
+對 polar → cartesian 的場景,只用前兩條:
+- 斜邊 = distance(從原點到目標的長度)
+- 鄰邊 = x 位移(沿水平線)
+- 對邊 = y 位移(垂直於水平線)
+
+代回去 → `x = cos × distance`、`y = sin × distance`。TAN 在這裡用不到。
+
+## 為什麼 sin 對 y、cos 對 x
+
+慣例。Math 的標準座標系把 0° 定義在「x 軸正方向」、逆時針為正。在這個慣例下:
+
+- 0° → 全部走 x 方向(cos = 1, sin = 0)
+- 90° → 全部走 y 方向(cos = 0, sin = 1)
+- 180° → x 反方向(cos = -1, sin = 0)
+
+所以 `cos` 自然對 x、`sin` 自然對 y。
+
+## CSS 螢幕座標的小陷阱
+
+CSS 的 y 軸方向跟數學課本相反 — **往下是正**。所以 demo 裡 90° 的時候,粒子會往螢幕**下方**(而不是上方)飛。
+
+如果你的設計中希望 0° 是「向上」、90° 是「向右」(像時鐘指針),要做兩件事:
+
+1. 把 angle 往逆時針偏 90°(`angle - 90`)
+2. 或對 y 取負號(`y = -sin(...) * distance`)
+
+CSS 的 `gradient` / `transform: rotate()` 也是 0° = 向上、順時針 — 跟 Math 慣例相反。設計工具用什麼就跟著用什麼,別硬轉。
+
+## Gotchas
+
+- **`Math.cos / sin` 收 radians 不收 degrees**:`Math.cos(45)` 不是 0.707,要先 `45 * Math.PI / 180`。CSS 的 `cos(45deg)` 才會自動處理單位。
+- **`tan(90°)` 是無限大**:鄰邊 = 0 不能除。寫 `Math.tan(Math.PI / 2)` 會吐出 `1.633e16` 之類的數,實務上等於壞掉。
+- **小角度誤差累積**:重複用 cos/sin 算位置的迴圈動畫(像繞圈),浮點誤差會慢慢飄移。需要長期循環時改用「角度累加 + 每幀重算」而不是「上一個 x/y + 微小位移」。

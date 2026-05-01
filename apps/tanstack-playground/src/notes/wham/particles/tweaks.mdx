@@ -1,0 +1,79 @@
+---
+title: Tweaking Dynamics, randomize every property to feel organic
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/12.01-tweaks
+lessonNumber: '01-particles/12.01-tweaks'
+order: 20
+summary: '同步的粒子看起來像「一層在動」,不像「一群在動」。把 fade duration、fade delay、pop duration、size、twinkle 全部各自亂掉,動畫會從機械感變生物感。'
+tags: [particles, animation, polish, randomness, juice]
+---
+
+import { UniformVsVariedTweaks } from './tweaks';
+
+## TL;DR
+
+之前粒子的所有屬性都用同樣的值 — fade 1000ms、disperse 500ms、size 12px。視覺上等於有「一層粒子」一起動,不是「一群粒子」各做各的。
+
+加 5 種隨機:
+
+| 屬性 | 範圍 | 效果 |
+|---|---|---|
+| `--fade-duration` | 500 ~ 1500ms | 有的早消失、有的拖很久 |
+| `--fade-delay` | 0 ~ 300ms | 開始 fade 的時間點錯開 |
+| `--pop-duration` | 300 ~ 700ms | 飛行速度有快有慢 |
+| `--size` | 8 ~ 16px | 粒子大小不一 |
+| twinkle 配 partial keyframe | 兩種隨機 | 每顆閃爍頻率不同 |
+
+<DemoFrame title="uniform vs varied — same dispersion, different feel">
+  <UniformVsVariedTweaks />
+</DemoFrame>
+
+點擊兩邊按鈕反覆對比 — 左邊像「一坨粒子」整體呼吸,右邊像「一群粒子」各自演出。
+
+## Why it works
+
+人腦對「同步」非常敏感 — 一群東西完全同步等於人造感(機器人、鐘表、燈條),一群東西各自微差才像有機物(火、水滴、呼蟲)。
+
+把每個 CSS 變數都吃 `random(min, max)`,每顆粒子在 inline style 上設不同值。Keyframe 讀變數,瀏覽器會在動畫開始的瞬間把 `var(...)` 解析成 computed value — 這代表同一條 keyframe 對 N 顆粒子產生 N 種效果。
+
+```css
+.particle {
+  animation:
+    twinkle var(--twinkle-duration) infinite alternate ease-in-out,
+    fadeToTransparent var(--fade-duration) var(--fade-delay) forwards,
+    disperse var(--pop-duration) forwards var(--particle-curve);
+}
+```
+
+cleanup 那邊要小心:每顆粒子壽命不一樣,要用 `Math.max(fadeDuration + fadeDelay)` 當 setTimeout 的延遲,不然有粒子還沒淡完就被砍。
+
+## Distance ↔ duration 連動
+
+進階:讓**離中心遠的粒子飛越久、淡越慢**,模擬慣性 — 距離越長動能越多。
+
+```ts
+const distance = random(40, 80, true);
+const fadeDuration = normalize(distance, 40, 80, 700, 1300);
+const popDuration = normalize(distance, 40, 80, 350, 600);
+```
+
+得失:
+- 視覺更「物理」,但
+- 每顆粒子的命運被距離綁定,失去一些「混亂之美」。
+
+混合最香:大部分屬性吃距離,fade-delay 跟 twinkle 維持完全隨機。
+
+## 拓展玩法
+
+下面這些都加進來會繼續強化「個體感」:
+
+- `transform: scale(...)` 加進 disperse keyframe,結合自身尺寸的 random。
+- `rotate(180deg) translate(...)` 把直線飛改成螺旋飛(轉軸要在 translate 之前才不會繞中心轉)。
+- 隨機 `cubic-bezier` 的 y 控制點 — 不同粒子曲線略不同。
+- 雙發 spawn:點擊後 100ms 再 spawn 一批,二段爆炸感。
+
+## Gotchas
+
+- **maxLifetime 要包含 fadeDelay**:cleanup setTimeout 用 `max(fadeDuration + fadeDelay) + buffer`,不然延遲較久才開始 fade 的粒子會被提前砍。
+- **`MIN_FADE_DURATION` / `MAX_FADE_DURATION` 是課程命名**:寫死的常數要加範圍上下限,別只 `BASE - RANGE` 沒 clamp,變成負時間 keyframe 不會跑。
+- **iOS Safari < 17**:多條 keyframe stacking 在舊 iOS 上會 fall back 成 sequential(一個跑完換下一個),twinkle 跟 fadeOut 不會合在一起。要嘛接受這個 cosmetic 退化,要嘛用兩層 div 各跑一條 keyframe(但 DOM 數翻倍)。
+- **「亂數加越多越好」是陷阱**:每加一條隨機就 +1 個複雜度。先確認 baseline 的 dispersion + fade 已經對了,才加 polish 層。

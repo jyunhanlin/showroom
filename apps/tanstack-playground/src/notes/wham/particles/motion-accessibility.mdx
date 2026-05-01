@@ -1,0 +1,86 @@
+---
+title: Motion Accessibility, prefers-reduced-motion
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/11-motion-accessibility
+lessonNumber: '01-particles/11-motion-accessibility'
+order: 18
+summary: '`prefers-reduced-motion` 是 OS 層級的偏好,網站要主動尊重。建議用「motion-free by default」寫法 — 預設不動,只在 `no-preference` 時才開動畫,連舊瀏覽器都會默默退化成靜態。'
+tags: [particles, accessibility, prefers-reduced-motion, a11y]
+---
+
+import { ReducedMotionLikeButton, CasinoLightIllusion } from './motion-accessibility';
+
+## TL;DR
+
+- 不少人對動畫敏感:vestibular disorder(前庭系統)、ADHD、自閉、癲癇、TBI 後遺症等。對他們來說過多動畫會引發暈眩、噁心、注意力崩塌。
+- OS 層有「Reduce motion」設定,瀏覽器透過 `prefers-reduced-motion` media query 暴露給網頁。
+- **Motion-free by default** 比「先動再關」更穩 — 舊瀏覽器看不懂 media query 會直接 ignore,使用者得到無動畫版本。
+- 「看起來在動」就要關 — 連 fade 排成的「跑馬燈光」也算。
+
+<DemoFrame title="like button — toggle reduced motion">
+  <ReducedMotionLikeButton />
+</DemoFrame>
+
+勾選 reduced 後,粒子只剩 fade-out,不會再向外飛。互動反饋還在,但沒有可能誘發暈眩的位移。
+
+## Motion-free by default
+
+```css
+/* ❌ 反過來寫 — 預設動,reduced 才靜 */
+.particle {
+  animation: disperse 500ms forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .particle { animation: fadeOut 500ms forwards }
+}
+
+/* ✅ 預設靜,no-preference 才動 */
+.particle {
+  animation: fadeOut 500ms forwards;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .particle {
+    animation: disperse 500ms forwards, fadeOut 500ms forwards;
+  }
+}
+```
+
+第二種寫法的好處:`@media (prefers-reduced-motion: no-preference)` 在不支援這個 query 的舊瀏覽器(IE 之類)會被視為 invalid 整段 ignore,所以動畫就不會跑 — 偏向 a11y 友善的 fallback。
+
+## JS 偵測
+
+```ts
+function isMotionEnabled() {
+  return window.matchMedia('(prefers-reduced-motion: no-preference)').matches;
+}
+```
+
+注意:這只回傳「呼叫當下」的快照。User 改設定後不會自動 update,要監聽 media query 的 change 事件。React 用 hook 包好(Comeau 部落格的 `usePrefersReducedMotion`)。
+
+## 「看起來在動」的陷阱
+
+<DemoFrame title="casino-light — 純 fade 但是大腦讀成移動">
+  <CasinoLightIllusion />
+</DemoFrame>
+
+技術上沒一個 element 在移動 — 八顆球都靜止,只是依序 fade。但對動暈使用者來說,這樣的「視覺光點移動」效果一樣會誘發症狀。**判斷基準是「看起來像不像動」,不是「技術上有沒有 transform/translate」**。
+
+## 該關掉什麼?
+
+- **要關**:位移(translate)、scale、rotate、parallax、視差捲動、scaling carousel、跑馬燈光點。
+- **可以保留**:fade in/out、color transition、box-shadow blur 變化。
+- **不確定就關掉**:Comeau 自己的策略 — 寧可 over-protect,沒人會抱怨「動畫太少」,但會有人因為動畫太多無法用網站。
+
+## Override 機制
+
+`prefers-reduced-motion` 是個全域開關,user 沒辦法針對特定網站例外。對「動畫是體驗核心」的網站(像課程首頁本身),提供一個 in-page toggle 讓使用者**手動開啟完整動畫**比較禮貌:
+
+- 預設尊重 OS 設定。
+- 提供「啟用完整動畫」按鈕(放 footer / 設定頁)。
+- 不要做成第一次進站 popup,那會變成另一種 cookie banner 災難。
+
+## Gotchas
+
+- **不要用 `transition: none !important`**:這樣其他 third-party 想加 transition 也會被砍。讓 cascade 自己解決。
+- **JS 的 matchMedia 要監聽 change**:user 在系統設定改了之後,媒體查詢的 `.matches` 會更新,但你 cached 的值不會。寫 React hook 時記得 `addEventListener('change', ...)` 並在 unmount 清掉。
+- **Chrome devtools 模擬要保持 devtools 開著**:Cmd+Shift+P → "Emulate CSS prefers-reduced-motion: reduce"。一關 devtools 模擬就解除。
+- **Safari 沒辦法在 devtools 模擬** — 要實際去系統設定改。

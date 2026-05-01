@@ -1,0 +1,70 @@
+---
+title: Utility Functions, normalize / clamp / clampedNormalize
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/10.02-lerp-utils
+lessonNumber: '01-particles/10.02-lerp-utils'
+order: 17
+summary: '`normalize` 沒夾住、`clamp` 不轉換尺度。99% 場景需要的是 `clampedNormalize` — 一條合在一起,輸出永遠在 [outMin, outMax] 內。再進階一點:`exponentialNormalize` 可做曲線對映。'
+tags: [particles, utility, lerp, clamp, normalize]
+---
+
+import { NormalizeVariants } from './lerp-utils';
+
+## TL;DR
+
+- `normalize(value, inMin, inMax, outMin, outMax)` 是線性對映 — 但 input 出界時 output 也會出界。
+- `clamp(value, min, max)` 把值夾在區間內,但不做尺度轉換。
+- 兩個常常要一起用 → 包成 `clampedNormalize(value, inMin, inMax, outMin, outMax)`,輸出保證在 `[outMin, outMax]` 內。
+- `exponentialNormalize` 多一個 `exponent` 參數做曲線對映 — input 中段被壓得更平,適合「value 越大反應越誇張」的調光效果。
+
+<DemoFrame title="four normalize variants on the same input">
+  <NormalizeVariants />
+</DemoFrame>
+
+虛線標出輸入區間 `[0, 50]`、輸出區間 `[0.01, 1]`。拖 slider 看四條曲線在輸入超界時的差異。
+
+## Why it works
+
+`canvas.ts` 裡的 `normalize` 寫法:
+
+```ts
+export function normalize(value, inMin, inMax, outMin = 0, outMax = 1) {
+  if (inMax === inMin) return outMin;
+  const t = (value - inMin) / (inMax - inMin);
+  return outMin + (outMax - outMin) * t;
+}
+```
+
+`t` 是「輸入相對位置」 — 輸入剛好在 inMin 時 t = 0、剛好在 inMax 時 t = 1。輸出就用 `outMin + (outMax - outMin) * t` 把 `[0, 1]` 投射到任意區間。
+
+`clampedNormalize` 在最後夾一刀:
+
+```ts
+export function clampedNormalize(value, inMin, inMax, outMin = 0, outMax = 1) {
+  const t = Math.max(0, Math.min(1, normalize(value, inMin, inMax)));
+  return outMin + (outMax - outMin) * t;
+}
+```
+
+注意這個 dispatch:先把 `t` clamp 在 `[0, 1]`,再乘進 `[outMin, outMax]`。等於 outMin/outMax 順序顛倒(outMin > outMax)時也能正確運作 — 對映的方向會反過來,但輸出仍在合法範圍內。
+
+## exponentialNormalize 的用途
+
+```ts
+function exponentialNormalize(value, inMin, inMax, outMin, outMax, exponent = 2) {
+  const t = (value - inMin) / (inMax - inMin);
+  return outMin + (outMax - outMin) * Math.pow(t, exponent);
+}
+```
+
+`exponent = 2` 把線性對映彎成 ease-in 曲線 — input 前半段對 output 變化小、後半段才暴衝。常見場景:
+
+- **音量 / 亮度 slider**:人眼對亮度感受非線性,線性 slider 看起來「拉到一半其實只有 25% 視覺亮度」。改 exponent ≈ 2.2(gamma)後感受更接近 slider 位置。
+- **粒子大小漸進**:離中心越遠的粒子尺寸快速縮小。
+- **Spring overshoot**:把 t < 1 部分擠到後段,做出「快接近終點才衝過來」的感覺。
+
+## Gotchas
+
+- **lodash 的 `clamp` 順序不同**:lodash 是 `clamp(value, lower, upper)`,canvas.ts 的也是這個 order(因為 spec 一致)。但別跟 React Native 那種 `clamp(min, value, max)` 搞混。
+- **inMin === inMax 會除以零**:canvas.ts 加了 guard 回傳 `outMin`。寫自己版本時也記得。
+- **不要在 hot loop 裡每次重算 inverse range**:`(inMax - inMin)` 在大迴圈裡可以提到外面 cache。實務上微秒等級,但 Canvas particle 系統會跑到 60Hz × N particles,值得注意。
+- **Native CSS 也能做這件事**:CSS `clamp(min, val, max)` 跟 `min(max(...))` 在純樣式場景可以替代,但需要 JS 邏輯參與時還是 utility 函數最直接。

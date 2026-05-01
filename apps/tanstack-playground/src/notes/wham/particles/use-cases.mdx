@@ -1,0 +1,70 @@
+---
+title: Specific Use Cases, picking an easing
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/05.01-use-cases
+lessonNumber: '01-particles/05.01-use-cases'
+order: 9
+summary: '每一個 easing keyword 都有它最適合的場景 — `linear` 配無限旋轉,`ease-out` 配進場,`ease-in` 配離場,`ease-in-out` 配 `alternate` 來回擺,`ease` 是萬用 fallback。'
+tags: [particles, css, easing, use-cases]
+---
+
+import { UseCaseSpinner, UseCaseExit, UseCaseEnter, UseCaseOscillate, UseCaseToggle } from './use-cases';
+
+## TL;DR
+
+| Easing | 適用場景 |
+|---|---|
+| `linear` | 無限旋轉(loading spinner)、scrolling marquee |
+| `ease-in` | 物件離場(從畫面飛出去) |
+| `ease-out` | 物件進場(從外面進來) |
+| `ease-in-out` | 來回擺動(`alternate`) |
+| `ease` | 沒想清楚就用這個(CSS 預設) |
+
+## linear · 無限旋轉
+
+<DemoFrame title="loading spinner">
+  <UseCaseSpinner />
+</DemoFrame>
+
+旋轉時不要有加速減速 — 每圈都看到「快慢快慢」會非常詭異。`linear` 是唯一合理選擇。
+
+## ease-in · 離場
+
+<DemoFrame title="run away off-screen">
+  <UseCaseExit />
+</DemoFrame>
+
+物件越走越快、最後消失得乾脆。視覺暗示「這東西會繼續加速,只是被視窗切掉了」。
+
+## ease-out · 進場
+
+<DemoFrame title="enter from off-screen">
+  <UseCaseEnter />
+</DemoFrame>
+
+進場最常用。元素從快到慢,最後優雅停下,像物理上慣性減速。
+
+## ease-in-out · 對稱來回
+
+<DemoFrame title="bounce left ↔ right">
+  <UseCaseOscillate />
+</DemoFrame>
+
+兩端慢中間快、左右對稱 — 配 `alternate infinite` 做出溫和的呼吸感。如果換 `linear` 會像機器人,換 `ease` 就會在某一邊看起來特別 sluggish。
+
+## ease · 萬用 toggle
+
+<DemoFrame title="hover/toggle slider">
+  <UseCaseToggle />
+</DemoFrame>
+
+`ease` 是 CSS 預設值。前段快、後段慢、不對稱。比 `ease-in-out` 有「snappy」感,大部分 hover/toggle 直接用就好。
+
+## 套到粒子效果
+
+理論上粒子是「進場」 → 應該選 `ease-out`。但 CSS 內建的 ease-out 太溫和,粒子飛出去看起來沒力。Comeau 的解法是下一篇:**自訂 cubic-bezier 曲線** — 讓粒子起步衝得更猛、結尾才慢。
+
+## Gotchas
+
+- **`ease` 不是「一般化的 ease-in-out」**:預設 ease = `cubic-bezier(0.25, 0.1, 0.25, 1)`,前傾不對稱。對 `alternate` 動畫不適合,因為來回兩邊節奏不同步。
+- **內建 ease-in / ease-out 太弱**:`ease-out` = `cubic-bezier(0, 0, 0.58, 1)`,差距其實沒很大。要強烈進場/離場感,要走 cubic-bezier 自訂。
+- **`linear` 給 hover/toggle 是地雷**:大部分 UI 動作都需要一點 deceleration 才不像紙片移動。除非是「持續轉動 / 持續位移」,不要無腦用 `linear`。

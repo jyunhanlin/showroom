@@ -1,0 +1,63 @@
+---
+title: Dispersion, particles flying out from center
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/04-dispersion
+lessonNumber: '01-particles/04-dispersion'
+order: 5
+summary: '把粒子做成「從中心爆出去」要解兩件事:每顆要有自己的隨機落點、起點都從中心。用 partial keyframe `from { top: 50%; left: 50% }` 配上 inline style 的隨機 `top/left` 完美組合。'
+tags: [particles, css, keyframes, partial-keyframes, dispersion]
+---
+
+import { LikeButtonWithDispersion } from './dispersion';
+
+## TL;DR
+
+- 想做的:點按鈕 → 5 顆粒子從中心飛到隨機落點 + 同時淡出。
+- 不要用 CSS `transition` + `setTimeout(..., 1)` 來「等下一幀再改 `top/left`」 — 能動但很 hacky;`transition` 是「state 換 state」的工具,粒子的初登場不算 state 變動。
+- 解法:寫一條只有 `from` 的 partial keyframe,把 `to` 留給 inline style 上的隨機 `top/left` 補。每顆粒子用同一條 keyframe 但飛到不同地方。
+
+<DemoFrame title="Like button — center → random dispersion">
+  <LikeButtonWithDispersion />
+</DemoFrame>
+
+## Why it works
+
+兩條 animation 同時跑在同一顆粒子上:
+
+```css
+@keyframes fadeOut    { to { opacity: 0 } }
+@keyframes fromCenter { from { top: 50%; left: 50% } }
+
+.particle {
+  animation:
+    fadeOut    var(--fade-duration)    forwards,
+    fromCenter var(--disperse-duration) forwards;
+}
+```
+
+每顆粒子在 React state 裡有自己的隨機 `top` / `left`,渲染時當 inline style 套上去。`fromCenter` 的 `to` 沒寫,瀏覽器就用 inline style 的值 — partial keyframe 的把戲。
+
+兩條 keyframe **不同 duration**:dispersion 要快(乾脆爆出去),fade 慢一點(殘影感)。所以用兩個 CSS 變數分別控制。
+
+## 為什麼不用 transition
+
+```ts
+// ❌ 原生 transition 寫法
+particle.style.top = '50%';
+particle.style.left = '50%';
+particle.style.transition = 'top 500ms, left 500ms';
+setTimeout(() => {
+  particle.style.top = random(0, 100) + '%';
+  particle.style.left = random(0, 100) + '%';
+}, 1);
+```
+
+兩個問題:
+
+1. `setTimeout(fn, 1)` 是黑魔法 — 在等瀏覽器把第一輪 inline style flush 進渲染管線才能觸發 transition,不保證 1ms 夠。
+2. 這在語意上也不對:粒子一誕生就要往隨機位置飛,不是「state A → state B」的切換,是個 enter animation。Keyframe 才是對的工具。
+
+## Gotchas
+
+- **CSS 變數一定要設**:`--fade-duration` / `--disperse-duration` 沒設,瀏覽器把 `animation: ... var(--fade-duration)` 整條視為 invalid,動畫不會跑。記得在 inline style 上寫 `--fade-duration: 1000ms`。
+- **`@starting-style` 看似能解但別用**:CSS 4 新加的 `@starting-style` 規則理論上能讓 `transition` 同時設定起點與終點,但實作上有個大坑(Comeau 有篇 blog 專門講)。partial keyframe 還是首選。
+- **彼此覆蓋的順序**:partial 那條 (`fromCenter`) 要寫在 `animation` shorthand 的**後面**,不然 `fadeOut` 會把 `top/left` 也吃掉(雖然 `fadeOut` 沒寫這兩個,但 spec 行為就是這樣 — 後寫覆蓋前寫的缺口)。

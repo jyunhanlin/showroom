@@ -1,0 +1,49 @@
+---
+title: Containment Strategies, anchor points & overflow
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/02-containment-strategies
+lessonNumber: '01-particles/02-containment-strategies'
+order: 3
+summary: '只用 `top/left` 會以左上角為基準,粒子在 100% 端會溢出。三種對齊策略:左上、中心 (`translate(-50%,-50%)`)、完美包覆 (`translate(calc(-left), calc(-top))`)。'
+tags: [particles, css, transform, anchor]
+---
+
+import { ContainmentPlayground } from './containment-strategies';
+
+## TL;DR
+
+`top/left: 100%` 是把元素的**左上角**對齊容器右下角,所以元素會溢出半個自己的尺寸。三種解法:
+
+1. **保持原狀**:有時候邊界外露反而自然(像滿天星星的視覺)。
+2. **`transform: translate(-50%, -50%)`**:以中心點當錨,左右上下都對稱,但靠邊時還是會溢出半個元素。
+3. **`translate(calc(var(--left) * -1), calc(var(--top) * -1))`**:依百分比動態抵消,0% 不偏移、100% 完整縮回 — 永遠在容器內。
+
+<DemoFrame title="Three anchoring strategies">
+  <ContainmentPlayground />
+</DemoFrame>
+
+拉 slider 把星星推到 0% / 50% / 100% 比較三格的差別。
+
+## Why it works
+
+關鍵是兩種百分比的基準不同:
+
+- **`top` / `left` 的百分比** → 容器尺寸。`left: 100%` = 「左上角推到容器最右邊」。
+- **`transform: translate()` 的百分比** → 元素自身尺寸。`translateX(-50%)` = 「元素向左移半個自己的寬度」。
+
+所以策略 3 的 `translate(calc(-left), calc(-top))` 是個聰明小把戲 — 用同一份百分比,但兩種基準互相抵消:
+
+- `--left: 0%` → `translate(0%, ...)`,不抵消,星星左上角貼左邊。
+- `--left: 100%` → `translate(-100%, ...)`,星星整個寬度往左拉,右邊貼齊容器右邊。
+- `--left: 50%` → `translate(-50%, ...)`,中心對齊容器中心。
+
+不需要知道元素自身有多寬,就能完美包覆任意尺寸的元素。
+
+## Like 按鈕的選擇
+
+課程在這個情境選 **策略 2**(centre anchor):粒子偶爾溢出邊界看起來更自然,但 `(50%, 50%)` 的粒子真的會落在按鈕正中央,不會偏右下。
+
+## Gotchas
+
+- **transform 已經被別人用了怎辦?** 如果粒子上還有其他 transform(例如 dispersion 章節的 `translate` 位移),這邊的 `-50%, -50%` 要疊在前面 `transform: translate(-50%, -50%) translate(...)`,順序很重要。
+- **策略 3 不適合動畫**:`var(--left)` 是 static 值。如果你打算 animate `left`,瀏覽器不會同步重算 transform 的 `calc()`,會看到反向漂移。動畫位置時改用策略 2。
+- **巢狀 inset 的舊解法**:把粒子放在比容器小一圈的內層 wrapper,優點是好懂,缺點是要知道粒子的固定尺寸 — 動態尺寸或多種大小時就破功。

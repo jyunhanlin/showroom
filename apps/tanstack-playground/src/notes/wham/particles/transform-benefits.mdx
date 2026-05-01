@@ -1,0 +1,53 @@
+---
+title: Transform Benefits, why animate transform over top/left
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/04.02-transform-benefits
+lessonNumber: '01-particles/04.02-transform-benefits'
+order: 7
+summary: 'animation 用 transform 而不是 top/left/width/height,除了 GPU 加速 / 跳過 layout,還能在 Chromium 上做 sub-pixel rendering — 動畫看起來比畫面解析度的物理極限還滑順。'
+tags: [particles, css, transform, performance, sub-pixel]
+---
+
+import { LikeButtonABTest, UnderlineSubpixel } from './transform-benefits';
+
+## TL;DR
+
+- `transform` 是 CSS 中最被優化的屬性。每幀 update 只需 compositor 重組圖層,不必重算 layout / paint。
+- 主流敘事是「fps 比較好」,但 Comeau 在 M4 Max 上實測發現:**到 600+ 粒子才看得出 fps 差異**。低階 Android 才會在 50 粒子左右拉開差距。
+- 真正常常被忽略的優勢是 **sub-pixel rendering**(僅 Chromium):2px 的底線用 `height` 動畫只能 0/1/2 三階,用 `transform: scaleY` 卻能跨越畫素的物理極限做漸層,看起來更滑順。
+
+<DemoFrame title="Like button A/B — transform vs top + left">
+  <LikeButtonABTest />
+</DemoFrame>
+
+把粒子拉到 200+ 顆,在低 DPI 螢幕或舊機器上會比較看得出差異。
+
+## Sub-pixel rendering 視覺對比
+
+兩個 hover 連結,左邊用 `height: 0 → 2px`,右邊用 `transform: scaleY(0) → scaleY(1)`。動畫拉長到 1500ms 觀察。
+
+<DemoFrame title="height vs transform: scaleY underline (Chromium)">
+  <UnderlineSubpixel />
+</DemoFrame>
+
+`height` 那條會看到「0px → 1px → 2px」的階梯感(只有三階)。`scaleY` 那條每行畫素會用 alpha 漸進填滿,**比物理畫素更細的視覺解析度**。
+
+## Why it works
+
+`transform` 不會觸發 layout / paint,只走 compositor。瀏覽器把 element 當一張紋理拉伸/位移,每幀只需要 GPU 重新合成。`top/left/width/height` 都會掉回 layout 階段重算。
+
+Sub-pixel 的部分:Chromium 在 `transform: scale` 時會把元素邊界的 alpha 做漸層 — 等於用透明度模擬「跨畫素」的視覺。其它 CSS 屬性沒這個優化,只能整像素跳。
+
+## Transform 限制
+
+不是所有動畫都能換成 transform。例:展開文字寬度的 sidebar。
+
+- `width` 動畫 → 文字 reflow,排版自然。
+- `transform: scaleX` 動畫 → 文字被擠扁變形,不會 reflow。
+
+對純圖形元素(粒子、圓點、方塊)transform 永遠是首選;對有文字內容或要求佈局重排的場景,還是得用 layout 屬性,並接受可能的 jank。
+
+## Gotchas
+
+- **不要無腦「transforms or bust」**:有些動畫沒有合理的 transform 替代方案,直接拿掉動畫只會降低 UX。先測再優化。
+- **Firefox WebRender 不公平**:Firefox 的 rendering engine 太強,在 Firefox 上幾乎所有動畫都很滑順。要評估真實效能要在 Chrome / Safari + 低階機器上測。
+- **DPR 越高,sub-pixel 優勢越小**:Retina 顯示器上每個 CSS px 已經是 2~3 個物理像素,手動補 alpha 的好處就被吞掉。低 DPR 螢幕(舊筆電、便宜手機)上才看得出明顯差距。

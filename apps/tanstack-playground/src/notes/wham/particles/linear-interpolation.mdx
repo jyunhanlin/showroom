@@ -1,0 +1,70 @@
+---
+title: Linear Interpolation, normalize as a scale-transposer
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/10-linear-interpolation
+lessonNumber: '01-particles/10-linear-interpolation'
+order: 16
+summary: '`(360 / N) * i` 寫得對但讀起來像謎語。改成 `normalize(i, 0, N, 0, 360)` — 「把 i 從 [0, N] 平移到 [0, 360]」 — 一眼看懂。lerp / interpolate / transpose 是同一個概念。'
+tags: [particles, math, lerp, normalize, utility]
+---
+
+import { ScaleTranspose, LikeButtonNormalize } from './linear-interpolation';
+
+## TL;DR
+
+- `normalize(value, inMin, inMax, outMin, outMax)` 是個小到不能再小的工具,但用對地方可以讓 magic number 全部消失。
+- 可讀性一比就知道:
+  ```ts
+  // before
+  const angle = (360 / NUM_OF_PARTICLES) * index;
+
+  // after
+  const angle = normalize(index, 0, NUM_OF_PARTICLES, 0, 360);
+  ```
+- 別名很多 — `lerp` / `interpolate` / `transpose` / `normalize` / `mapRange`,意思一樣。當 black box 用就好。
+
+<DemoFrame title="scale → scale playground">
+  <ScaleTranspose />
+</DemoFrame>
+
+拉 value、in/out range 看上下兩條線怎麼對映。
+
+## 套到粒子
+
+<DemoFrame title="like button — normalize-based angles">
+  <LikeButtonNormalize />
+</DemoFrame>
+
+## Why it works
+
+實作就一條線:
+
+```ts
+function normalize(value, inMin, inMax, outMin = 0, outMax = 1) {
+  const t = (value - inMin) / (inMax - inMin);
+  return outMin + (outMax - outMin) * t;
+}
+```
+
+第一步把 `value` 算成 `[0, 1]` 區間的相對位置 `t`,第二步把 `t` 投射到 `[outMin, outMax]`。要 clamp 就在最後夾一下,變成 `clampedNormalize`。
+
+(這個專案的 `~/utils/canvas.ts` 已經有 `normalize` 跟 `clampedNormalize`,簽名都是 5 個參數 — value、inMin、inMax、outMin、outMax,後兩個有預設 `0` / `1`。)
+
+## 一些其他 use case
+
+- **scrubber** — 滾動進度 `0 ~ scrollHeight` → 進度條寬度 `0 ~ 100%`。
+- **熱度圖** — 數值 `0 ~ max` → 色相 `120deg(綠) ~ 0deg(紅)`。
+- **rAF tween** — `now - startTime` 在 `[0, duration]` → `[startValue, endValue]`,自己手寫補間。
+- **fps 監測** — `frameTime` 在 `[16ms, 50ms]` → bar height `[0, 100px]`。
+
+## off-by-one 小陷阱
+
+5 顆粒子的 index 是 `0, 1, 2, 3, 4`(沒有 5)。寫 `normalize(index, 0, 5, 0, 360)` 時,index = 4 對應 `(4/5) × 360 = 288°`,不是 360°。對「等分」場景剛好 — 因為 0° 跟 360° 是同一個方向,如果第一顆放 0° 第五顆放 360° 就重疊了。
+
+但對其他場景(比如 5 個顏色站在 0%-100% 漸層),你可能想要 `normalize(index, 0, NUM - 1, 0, 360)` — 端點都涵蓋。判斷情境決定 N 還是 N-1。
+
+## Gotchas
+
+- **input min == max** 會除以零。`canvas.ts` 裡的 `normalize` 加了 guard 回傳 `outMin`,但別的工具庫不一定處理。
+- **t 跑出 [0, 1]**:value 在 input 區間外時 result 也會超出 output 區間。要硬鎖在範圍內用 `clampedNormalize`。
+- **不只「線性」**:這函數只做線性對映。要 ease-in / ease-out 那種曲線得另外配 cubic-bezier。
+- **比 `*` 跟 `/` 慢嗎?** 邊際毫秒等級 — heavy loop 才看得出來。可讀性才是優先,profile 之後再說。

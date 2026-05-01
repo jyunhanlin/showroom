@@ -1,0 +1,111 @@
+---
+title: Particles in React, abstracting into a reusable hook
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/13.01-particles-in-react
+lessonNumber: '01-particles/13.01-particles-in-react'
+order: 24
+summary: '課程把 vanilla JS 寫法搬到 React。對我們這個本來就在 React 的專案,重點是把粒子 spawn / cleanup / 計時都包進一支 hook,把樣式 + 行為抽進可重用 component。傳 props 就能改色票/glyph/粒子數。'
+tags: [particles, react, hooks, abstraction]
+---
+
+import { ReactionButtonRow } from './particles-in-react';
+
+## TL;DR
+
+vanilla JS 版本的核心邏輯:
+
+- 粒子陣列當 single source of truth。
+- spawn 後計時清掉,避免 DOM 累積。
+- DOM children 由 `appendChild` 直接管理。
+
+搬到 React,重點是**把這個邏輯藏在 component 介面後面**,讓使用端只需傳 props:
+
+```tsx
+<ReactionButton glyph="❤" paletteHueRange={[340, 30]} />
+<ReactionButton glyph="★" paletteHueRange={[40, 80]} />
+<ReactionButton glyph="✓" paletteHueRange={[100, 160]} />
+```
+
+<DemoFrame title="three reactions, one component">
+  <ReactionButtonRow />
+</DemoFrame>
+
+## Hook 抽象 — 把計時器交給 React 管
+
+把「粒子 state + spawn + cleanup」獨立成 `useParticleSpawner` hook:
+
+```tsx
+function useParticleSpawner({ active, numOfParticles, paletteHueRange }) {
+  const [particles, setParticles] = useState([]);
+  const timeoutsRef = useRef([]);
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(window.clearTimeout);
+    };
+  }, []);
+
+  const spawn = useCallback(() => {
+    /* spawn 一批、setTimeout 清掉、id 紀錄到 ref */
+  }, [active, numOfParticles, paletteHueRange]);
+
+  return { particles, spawn };
+}
+```
+
+兩個關鍵:
+
+1. **timeouts ref**:每次 spawn 排的 cleanup timeout id 都 push 到 ref,unmount 時一起 `clearTimeout`。沒做這件事 component 卸載後 timeout fire 會 setState on unmounted = warning。
+2. **`useCallback` + spread state**:`setParticles((prev) => [...prev, ...batch])` 而不是 `setParticles(batch)` — 連續快點時新粒子才不會把舊粒子吃掉。
+
+## conditional rendering 取代 className 切換
+
+vanilla JS:
+
+```ts
+if (isLiked) btn.classList.add('liked');
+```
+
+React:
+
+```tsx
+<button data-active={active ? 'true' : 'false'} data-phase={phase}>
+```
+
+CSS 用 attribute selector:
+
+```css
+.btn[data-active="true"][data-phase] .glyph {
+  animation: pop 800ms;
+}
+```
+
+`data-phase` 是個遞增 counter — 每次 click +1 會迫使 keyframe 重新觸發(同 selector 但屬性值變了 → re-mount 動畫)。
+
+## 為什麼把 helpers 抽出來
+
+Comeau 在這篇推薦把 `LikeButton.helpers.js` 跟 `LikeButton.tsx` 分檔:
+
+- `.tsx` 裡只有 JSX + state hook + 事件 handler。
+- `.helpers.js` 裡是純 logic — `generateParticles`、`useCleanup`、constants。
+
+好處:之後修改時不會被滿屏的隨機數常數淹沒,可以只看 component shell 就抓到資料流。但小型專案直接合一個檔也沒差,看怎麼好看。
+
+## Gotchas
+
+- **每顆粒子要有穩定 `key`**:用遞增 id (`particleId++`),不是用 array index — 不然 React 會 reuse 上一顆粒子的 DOM,動畫會跑亂。
+- **不要在 `useEffect` deps 放 spawn fn**:`useCallback` 包好 spawn,deps 是它真正讀到的 props。否則每 render 重建 fn,unmount cleanup 抓到的是舊版本。
+- **State updater 要寫 functional**:`setParticles((prev) => ...)` 而不是 `setParticles([...particles, ...batch])` — 後者讀到的是 closure 裡的舊 particles,連續快點會 lose update。
+- **不要 mutate state**:`particles.push(...)` 在 React 裡一定錯。永遠 spread + return 新陣列。
+- **Cleanup 不要用 `setInterval`**:用 setTimeout per batch 比較好控,batch 變數隨 closure 帶進去,id 也好追。
+
+## 跟 vanilla 版的取捨
+
+| | vanilla | React |
+|---|---|---|
+| DOM 操作 | 自己 `appendChild` / `remove()` | render 函數產出,React 同步 |
+| 重複使用 | 多個按鈕要複製整段邏輯 | hook 跟 component prop 切就好 |
+| Bundle 大小 | 0 deps | React + 框架 cost |
+| 心智模型 | 命令式 | 描述式 |
+| 測試 | 模擬 click 看 DOM | RTL 直接 query |
+
+如果在 vanilla 環境(舊網站、靜態頁面),vanilla 版完全可行。在 React 應用裡,把粒子當 component 是更乾淨的作法。

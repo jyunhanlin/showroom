@@ -1,0 +1,56 @@
+---
+title: Particle Distribution, jittered wedges instead of pure random
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/09-particle-distribution
+lessonNumber: '01-particles/09-particle-distribution'
+order: 15
+summary: '純亂數的角度大概有 30% 機率讓 5 顆粒子全擠在同一邊。把 360° 切成 N 個等分,每顆粒子分到自己的楔形區、再加上 ±JITTER 的偏移 — 看起來隨機但永遠不會 clump。'
+tags: [particles, distribution, randomness, polar]
+---
+
+import { ClumpingComparison, LikeButtonJittered } from './particle-distribution';
+
+## TL;DR
+
+- 5 顆粒子各取 `random(0, 360)`,有 ~30% 機率全部落在同一個半圓 — 看起來偏一邊。
+- 把 360° 切成 N 等分,第 i 顆粒子放在第 i 個楔形 → 完美雪花,但太對稱、不像爆炸。
+- 折衷:`angle = (360 / N) * i + random(-JITTER, JITTER)`。每顆粒子有自己的「保底位」,但允許 ±40° 的擾動。
+
+<DemoFrame title="three angle strategies for 5 particles">
+  <ClumpingComparison />
+</DemoFrame>
+
+re-roll 多次:左邊偶爾會擠成一團;中間永遠是規律雪花;右邊永遠分散卻又不規律。
+
+## 套到粒子
+
+<DemoFrame title="like button — jittered wedges (chaos slider)">
+  <LikeButtonJittered />
+</DemoFrame>
+
+`chaos` slider 控 jitter 大小:
+- `0` → 完美雪花。
+- `40` → Comeau 的甜蜜點,Discord 那邊 chaos slider 預設值。
+- `90` → 等於完全 random,clumping bug 復活。
+
+## Why it works
+
+Pure random 的問題是「均值 ≠ 均勻」。`random(0, 360)` 的期望值是 180°,但任何單次抽樣都可能極偏。5 顆獨立樣本要全部落在 180° 範圍內的機率是 `(180/360)^5 ÷ 還有對稱性修正 ≈ 30%`,蠻常發生的。
+
+切楔形 = **stratified sampling**(分層抽樣)。把分布範圍切成 N 等分,每個 stratum 抽一個樣本 — 統計上仍然是隨機的,但保證涵蓋整個範圍。
+
+## 變化版:雪花
+
+```ts
+const isEven = index % 2 === 0;
+const angle = (360 / N) * index;
+const distance = isEven ? 45 : 55;
+```
+
+不加 jitter,但內外圈交替 → 鋸齒雪花。可以做出更裝飾的「魔法陣」感,但沒有「爆炸」的氣質。
+
+## Gotchas
+
+- **`range(N).forEach((index) => ...)`**:lodash 的 `range(5)` 會產生 `[0, 1, 2, 3, 4]`,所以 `index` 直接拿就好,不用另外 counter。
+- **JITTER 太大就退化成 random**:JITTER ≥ 360/N/2 時相鄰楔形會重疊,clumping 又會回來。對 5 顆粒子(72° wedges)JITTER 上限是 36°,但 Comeau 用 40° 一樣 OK — 偶爾相鄰兩顆貼在一起反而更自然。
+- **這招不只用在粒子**:scatter chart 標記、loading dot 的 stagger delay、avatar 排列都能用。「想看起來隨機,但保證不會難看」。
+- **生日問題的親戚**:這跟生日問題類似 — 隨機抽樣會出現預期外的「碰撞」,stratified sampling 是用結構性把碰撞打掉。

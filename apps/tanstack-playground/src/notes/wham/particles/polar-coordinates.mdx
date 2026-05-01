@@ -1,0 +1,78 @@
+---
+title: Polar Coordinates, donut field instead of square
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/07-polar-coordinates
+lessonNumber: '01-particles/07-polar-coordinates'
+order: 12
+summary: '`random(-r, r)` 同時控 x 跟 y → 落點是正方形。改用 `(angle, distance)` 極座標再轉 cartesian → 落點是甜甜圈,粒子飛出去自然圓潤。'
+tags: [particles, math, polar-coordinates, trigonometry]
+---
+
+import { CartesianVsPolarField, LikeButtonPolar } from './polar-coordinates';
+
+## TL;DR
+
+- 用 `random(-r, r)` 同時亂掉 x 跟 y,可能落點是個**正方形**;粒子數一多就明顯。
+- 想要甜甜圈型的落點(離中心至少 32px、最多 64px),Cartesian 解很麻煩。
+- 換極座標:`angle = random(0, 360); distance = random(min, max)`,再用 `cos/sin` 轉 x/y。
+
+<DemoFrame title="200 dots — cartesian vs polar field">
+  <CartesianVsPolarField />
+</DemoFrame>
+
+兩個 field 各 200 顆。左邊 Cartesian 就是個方塊,右邊 Polar 是甜甜圈。
+
+## 套到粒子
+
+<DemoFrame title="like button — polar dispersion">
+  <LikeButtonPolar />
+</DemoFrame>
+
+## Why it works
+
+Polar → Cartesian 的標準轉換:
+
+```ts
+function convertPolarToCartesian(angle: number, distance: number) {
+  const radians = (angle * Math.PI) / 180;
+  return { x: Math.cos(radians) * distance, y: Math.sin(radians) * distance };
+}
+```
+
+(這支已經在 `~/utils/canvas.ts` 裡,簽名回 `{x, y}` 物件 — 跟 course 的 tuple 略有差異,call site 用 destructuring。下一篇 Trigonometry 101 會解釋為什麼 cos/sin 對應 x/y。)
+
+`Math.cos` / `Math.sin` 收的是 radians,所以要先把度數轉弧度。
+
+## CSS 內建版本
+
+CSS 也有 `cos()` / `sin()` 函數,可以把整個轉換塞進 keyframe:
+
+```css
+@keyframes disperse {
+  to {
+    transform: translate(
+      calc(cos(var(--angle)) * var(--distance)),
+      calc(sin(var(--angle)) * var(--distance))
+    );
+  }
+}
+```
+
+inline style 直接傳 `--angle: 110deg; --distance: 60px`,瀏覽器自己算。瀏覽器支援度比 JS 版差一點點,但比較簡潔。
+
+## 想要甜甜圈一樣的密度,還是均勻分布?
+
+這裡有個常見陷阱:`random(min, max)` 對 distance 是**線性**亂數,但 distance 越大、那一圈的周長越長 — 結果是**內圈密、外圈疏**。
+
+要均勻分布要對 distance 做 sqrt:
+
+```ts
+const distance = Math.sqrt(random(min ** 2, max ** 2, true));
+```
+
+對粒子效果一般不需要在意,但下一章「Particle Distribution」會詳細展開。
+
+## Gotchas
+
+- **Degrees vs radians**:`Math.cos / sin` 用 radians,別忘了 `* Math.PI / 180`。CSS 的 `cos(var(--angle))` 在 `--angle` 帶 `deg` 單位時會自動轉,不帶單位就被當 radians。
+- **`convertPolarToCartesian` 在 utils 是物件回傳**:`const { x, y } = convertPolarToCartesian(angle, distance)` — 不是 tuple。
+- **看起來圓的不一定是均勻的**:如果你拉到極大粒子數,可以看到圓周外圈的密度比內圈低 — 這是 distance 線性亂數的副作用。

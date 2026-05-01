@@ -1,0 +1,64 @@
+---
+title: Dynamic Keyframes, CSS variables inside keyframes
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/06-dynamic-keyframes
+lessonNumber: '01-particles/06-dynamic-keyframes'
+order: 11
+summary: 'keyframe 裡可以讀 `var(--x)` — 同一條 keyframe、每個元素用不同變數值就能跑出不同幅度的動畫,不用為每個值複製一份 keyframe。'
+tags: [particles, css, keyframes, css-variables]
+---
+
+import { PendulumOscillation, LikeButtonDynamicVars } from './dynamic-keyframes';
+
+## TL;DR
+
+- Keyframe 不一定要寫死數字。可以寫 `transform: translateX(var(--amount))` — 每個套用這條 keyframe 的元素用自己的 `--amount`,跑出不同幅度。
+- 對粒子動畫,這是上一個版本(partial keyframe)的對稱寫法:
+  - **partial 法**:`from { transform: translate(0,0) }` + inline style 設 `transform`,讓瀏覽器自動補 `to`。
+  - **dynamic var 法**:`to { transform: translate(var(--x), var(--y)) }` + inline style 設 `--x` / `--y`。
+- 兩者效果一樣,Comeau 偏好 dynamic var 法因為跟 `fadeToTransparent` 一致(都寫 `to`)。
+
+## 鐘擺示範
+
+<DemoFrame title="four pendulums, one keyframe">
+  <PendulumOscillation />
+</DemoFrame>
+
+四顆球都套同一條 `wham-dk-oscillate`,但 `--amount` 從 8px 到 64px 各不同。
+
+## 套到粒子
+
+<DemoFrame title="like button — dynamic var disperse">
+  <LikeButtonDynamicVars />
+</DemoFrame>
+
+每顆粒子在 inline style 設 `--x: ${x}px; --y: ${y}px`,keyframe 在 `to` 讀這兩個變數。
+
+## Why it works
+
+CSS keyframes 在套用到元素時才被「解析」 — `var(--x)` 是在元素的 cascade 上下文裡查值,所以同一條 keyframe 對不同元素會產生不同的 computed value。等於把 keyframe 抽象成一個函數,參數透過 CSS 變數帶進來。
+
+```css
+@keyframes oscillate {
+  from { transform: translateX(calc(var(--amount) * -1)) }
+  to   { transform: translateX(var(--amount)) }
+}
+```
+
+`calc(var(--amount) * -1)` 是「正負對稱」的小把戲 — 一個變數同時控制兩端。
+
+## partial vs dynamic var:選哪個?
+
+| | partial keyframe | dynamic var keyframe |
+|---|---|---|
+| 寫法 | `from { transform: translate(0,0) }` | `to { transform: translate(var(--x), var(--y)) }` |
+| inline style | `transform: translate(...)` | `--x: ...; --y: ...` |
+| 跟 `fadeToTransparent` 對稱 | 不對稱(一個 from / 一個 to) | 對稱(都寫 `to`) |
+| 效能 / 瀏覽器支援 | 一樣 | 一樣 |
+
+純粹個人喜好。Comeau 個人偏 dynamic var 法。
+
+## Gotchas
+
+- **`var(--x)` 沒設 → keyframe 整條 invalid**:粒子不會動。要嘛在 inline style 設,要嘛在 keyframe 裡寫 fallback `var(--x, 0px)`。
+- **同一個變數別人改了會影響動畫**:CSS 變數有繼承。如果父層也設了 `--x`,記得粒子上要覆蓋。
+- **動畫進行中改變數值**:Chrome / Safari 行為不一致 — 多數情況不會即時反映,要到下一輪 keyframe iteration 才生效。把它當作「動畫開始時取一次的快照」更穩。

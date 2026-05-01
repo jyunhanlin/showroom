@@ -1,0 +1,35 @@
+---
+title: Particle Generation, baseline like-button particles
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/01-initial-structure
+lessonNumber: '01-particles/01-initial-structure'
+order: 1
+summary: 'Like 按鈕點下去噴出 N 顆隨機位置的粒子,先做最簡版:DOM `<span>` + CSS keyframe 淡出。'
+tags: [particles, dom, keyframes, lodash]
+---
+
+import { LikeButton } from './initial-structure';
+
+## TL;DR
+
+- 第一版只做最樸素的目標 — **點按鈕 → 在按鈕內亂灑 N 顆粒子 → 淡出**。
+- 先不考慮「向外爆炸」、不考慮 velocity,連動畫位移都沒有。
+- 粒子是 `<span class="particle">`,`position: absolute` + 隨機 `top/left` 百分比;CSS keyframe `fadeOut` 配 `animation-fill-mode: forwards` 收尾。
+
+<DemoFrame title="Like button — DOM particles, fade only">
+  <LikeButton />
+</DemoFrame>
+
+## Why it works
+
+四個小決策疊起來:
+
+1. **點擊產生 5 顆粒子**:`range(5).map(() => createParticle())`,粒子推進 `particles` state 而不是手動 `appendChild`(課程是 vanilla JS,我們在 React playground 改用 state)。
+2. **位置用 `random(0, 100)` 算 % **:課程說這是「快又夠用」的解法,後面章節會講為什麼會稍微跑出按鈕邊界。
+3. **`position: absolute`**:不然每顆粒子會佔流式版面把按鈕撐成俄羅斯方塊。
+4. **`forwards` fill-mode**:淡出動畫結束後保持 `opacity: 0`,不然粒子會在動畫結束的瞬間「閃回」全不透明。
+
+## Gotchas
+
+- **不寫 `forwards` 的後果**:keyframe `to { opacity: 0 }` 只在動畫**進行中**生效。動畫一結束就回到元素本身的 `opacity`(預設 1)。表現是粒子淡出後突然又亮回來。
+- **替代解法**:不寫 `forwards`,改在 `.particle` 上把 `opacity` 預設為 0。但這樣等於把終點狀態抄兩次,寧願 `forwards`。
+- **`from`/`to` vs `0%`/`100%`**:兩者完全等價,只在需要中間關鍵點時才必須用百分比。

@@ -1,0 +1,57 @@
+---
+title: Custom Curves, designing your own cubic-bezier
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/05.02-custom-curves
+lessonNumber: '01-particles/05.02-custom-curves'
+order: 10
+summary: '5 個內建 keyword 都對應一條 `cubic-bezier(p1x, p1y, p2x, p2y)`。可以自己拉控制點 — 兩個技巧:挑對形狀後**誇張化**、誇張過頭就用**更長的 duration** 補。'
+tags: [particles, css, easing, cubic-bezier, animation-design]
+---
+
+import { BezierEditor } from './custom-curves';
+
+## TL;DR
+
+- 內建 5 個 timing keyword 全部都是 `cubic-bezier(...)` 的 alias。例:`ease = cubic-bezier(0.25, 0.1, 0.25, 1)`。
+- 想設計自己的 easing,兩條心法:
+  1. **先挑形狀,再誇張化**:確定要 ease-in / ease-out / ease-in-out 哪一類,再把控制點往該方向拉到極致 — 比內建版本更有戲。
+  2. **動畫太誇張就拉長 duration**:90% 的位移在前 200ms 結束、後 1300ms 慢慢停 → 感覺很快但又很滑順。看起來矛盾,但「**perceived speed**」才是用戶感受到的 — 不是時鐘上的時間。
+- Bezier 拉不出 spring / bounce,要做彈跳要用 `linear()` 或 spring physics(下一章)。
+
+<DemoFrame title="cubic-bezier playground">
+  <BezierEditor />
+</DemoFrame>
+
+拖兩個控制點看曲線怎麼變,套 preset 看內建關鍵字長什麼樣。
+
+## Why it works
+
+`cubic-bezier(x1, y1, x2, y2)` 是條從 (0,0) 到 (1,1) 的三次貝茲曲線。兩個控制點決定中段的彎度。
+
+- `y` 是 progress(動畫的完成度)。
+- `x` 是 time。
+- 曲線斜率 = 速度。斜率陡 → 那段時間動得快;斜率平 → 那段時間幾乎不動。
+
+`ease-in` 第一個控制點 y 值低、被「壓在底部」 → 起步段斜率小 → 起步慢。
+
+## 兩條心法 demo
+
+**心法 1:誇張化**
+
+內建 `ease-in` 是 `cubic-bezier(0.42, 0, 1, 1)` — 前段被壓的程度其實沒很多。改成 `cubic-bezier(0.7, 0, 1, 1)`:壓得更深,起步慢得更明顯,加速感更強。
+
+**心法 2:過頭了就加長**
+
+`ease-out` 想做「重煞車」感:第一個控制點 y 拉到 1,第二個 x 拉到接近 1 → 90% 動畫一瞬間結束、剩下 10% 在那邊滑著停。如果只給 500ms,中間會有段時間球都不動,看起來像卡住。改成 1500ms,球瞬間衝到末端、然後慢慢挪到位 — 感覺「明明動得很快但又很滑」。
+
+## 設計系統怎麼用
+
+不是每個動畫都要自訂曲線。常見做法:
+
+- **80% 場景** — 設計系統定 3~5 條全域 easing token(`--easing-bounce`, `--easing-snappy`, `--easing-smooth` 之類),小動畫直接撈。
+- **20% 場景** — 大型 splashy animation 才一次性自訂。
+
+## Gotchas
+
+- **超出 [0, 1] 的 y 值**:`cubic-bezier(0.5, -0.5, 0.5, 1.5)` 是合法的,做出「倒退一點再衝過頭」的彈跳效果。但 spring 物理感還是要用 `linear()` keyword(內含多控制點)或 spring 函式庫,Bezier 模擬有極限。
+- **fade 動畫 easing 影響不大**:`opacity` 0 → 1 是個感官特別不敏感的變化,挑哪條曲線都看不太出來。把心力花在會「**移動**」的屬性上。
+- **`ease ≠ ease-in-out`**:預設 ease 是不對稱的(前傾)。對來回擺動的 `alternate` 動畫不適合,因為兩個方向節奏會不同。

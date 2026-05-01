@@ -1,0 +1,72 @@
+---
+title: Our Final Effect, every layer combined
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/13-final
+lessonNumber: '01-particles/13-final'
+order: 23
+summary: '把整個 module 的招式全堆到一個 like 按鈕上 — pop-circle 三段 keyframe、heart spring (linear)、jittered polar 粒子、hue-rotate、twinkle、不同的隨機 duration、a11y 包外層。各層單獨看都不顯眼,堆起來才顯出 juice。'
+tags: [particles, animation, juice, recap]
+---
+
+import { FinalLikeButton } from './final';
+
+## TL;DR
+
+最終版 = 前面每一篇的招式疊起來:
+
+| 層 | 來源 |
+|---|---|
+| pop-circle 三段 keyframe | [accessories](./12.02-accessories) |
+| heart `linear()` spring | [accessories](./12.02-accessories) |
+| Jittered polar dispersion | [particle-distribution](./09-particle-distribution) |
+| Linear interpolation 算 angle | [linear-interpolation](./10-linear-interpolation) |
+| 隨機 size / fade-duration / pop-duration / fade-delay | [tweaks](./12.01-tweaks) |
+| Twinkle keyframe stack | [partial-keyframes](./03-partial-keyframes) |
+| `hue-rotate(720deg)` 走色相環 | [colors](./12.03-colors) |
+| `prefers-reduced-motion: no-preference` 包外層 | [motion-accessibility](./11-motion-accessibility) |
+| 粒子延遲 ~150ms 才 spawn | [accessories](./12.02-accessories) |
+
+<DemoFrame title="final like button — every layer combined">
+  <FinalLikeButton />
+</DemoFrame>
+
+## 為什麼這樣堆能看?
+
+每個 incremental 改動單看都很微妙 —「fade duration 變 random」、「色彩用 hue-rotate」、「粒子飛之前等個 150ms」。但是疊起來感受是 cumulative。
+
+最寶貴的 takeaway 不是這顆按鈕本身,而是「**多個微小細節 > 一個大效果**」這個直覺。
+
+## 整理出來的 architecture
+
+到這一篇為止,我們學到:
+
+```
+┌─────────────────────────────────────────────────┐
+│  CSS 層                                          │
+│  • Keyframes 用 CSS variables 抽 dynamic values │
+│  • Partial keyframes 配合 inline style          │
+│  • Stacked keyframes(twinkle × fadeOut)        │
+│  • CSS filters(hue-rotate)當光學濾鏡           │
+│  • linear() 模擬 spring                         │
+│  • prefers-reduced-motion 包 a11y wrapper       │
+├─────────────────────────────────────────────────┤
+│  JS 層                                           │
+│  • 粒子 state 在 React 裡管理                    │
+│  • lodash range / random / sample               │
+│  • polar coords + convertPolarToCartesian       │
+│  • normalize 做 scale 對映                       │
+│  • setTimeout 延遲 + 批次 cleanup                │
+│  • CSS variables 當資料流                        │
+└─────────────────────────────────────────────────┘
+```
+
+每一塊都不複雜。但組合起來,就成了 commercial-grade 的 micro-interaction。
+
+## License 提醒
+
+Comeau 自己在這篇明確說 — 課程裡這個 like-button 效果可以**自由用在自己的專案**(包括商業),不需要 attribution。
+
+但他也提醒:**真正讓人記得的效果一定是改編過的**。直接拷貝就跟前面講過的「generic confetti」一樣 — 看過就忘了。把這套 architecture 拿去做你產品的特色按鈕。
+
+## 接下來
+
+下一篇 `13.01-particles-in-react` 是課程的 vanilla JS 寫法搬到 React 的 refactor — 但我們本來就在 React,所以那篇對我們是「整理 hook 與 state model」而不是「換實作」。

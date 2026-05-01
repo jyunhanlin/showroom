@@ -1,0 +1,77 @@
+---
+title: Color Shifting, hue-rotate beats animating background
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/12.03-colors
+lessonNumber: '01-particles/12.03-colors'
+order: 22
+summary: '`rgb()` 亂數太混亂,`hsl(_, 100%, 80%)` 鎖飽和度跟亮度才會 cohesive。動畫 background-color 在中段會變灰(瀏覽器在 RGB 空間插值);用 `filter: hue-rotate(...)` 走色相環,還省 paint。'
+tags: [particles, color, hsl, hue-rotate, css-filter]
+---
+
+import { RgbVsHslPalette, DeadZoneDemo, HueRotateLikeButton } from './colors';
+
+## TL;DR
+
+- `rgb(random, random, random)` 出來的色板太分散 — 同時有暗有亮有飽和有粉,沒一致性。
+- `hsl(random, 100%, 80%)` 只亂掉 hue、固定飽和度與亮度 → 統一氣質的 pastel。
+- 想做色彩漸變,**不要動 `background-color`** — 瀏覽器永遠在 RGB 空間插值,中間會經過灰色「死區」。
+- 用 `filter: hue-rotate()` 走色相環,沒有死區;順便比 background-color 省 paint。
+
+<DemoFrame title="rgb chaos vs hsl pastel">
+  <RgbVsHslPalette />
+</DemoFrame>
+
+<DemoFrame title="dead zone — RGB 插值經過灰色">
+  <DeadZoneDemo />
+</DemoFrame>
+
+<DemoFrame title="like button — hue-rotate 720° 走色相環">
+  <HueRotateLikeButton />
+</DemoFrame>
+
+## Why hue-rotate works
+
+CSS 的 `filter: hue-rotate(Xdeg)` 對該元素整張 raster 做色相旋轉。從紅 → 黃 → 綠 → 青 → 藍 → 紫 → 紅,**不經過灰色**,因為它是繞色相環,不是在 R/G/B 三個 channel 上線性插值。
+
+```css
+@keyframes hueRotate {
+  to { filter: hue-rotate(var(--hue-rotation)) }
+}
+.particle {
+  background: hsl(var(--start-hue) 90% 75%);
+  animation: hueRotate 1000ms linear forwards;
+}
+```
+
+每顆粒子用 inline style 設不同起始 hue,但 `--hue-rotation` 統一(例如 720°)。所有粒子同步轉動色相環兩圈,但起點不同。
+
+## Performance bonus
+
+`filter: hue-rotate` 是 GPU compositor-friendly — 動畫期間瀏覽器只重新合成 raster 的色相,不需要 repaint 每顆粒子。`background-color` 則每幀都要 paint。
+
+對 50+ 顆粒子的效果差異實際可量。對 10 顆以下的差異微秒級看不出。但 hue-rotate 給未來放大粒子數的 headroom。
+
+## Dead zone 細節
+
+```css
+button {
+  background: hsl(0deg 100% 65%);
+  transition: background 1500ms;
+}
+button:hover {
+  background: hsl(180deg 100% 65%);
+}
+```
+
+兩個顏色都很飽和(red 跟 teal),但中段的色:
+- HSL 認知:應該維持 100% saturation、 65% lightness,只是 hue 從 0° 滑到 180° → 中點是 90°(黃綠色)。
+- 實際:瀏覽器把 `hsl(0 100% 65%)` 解析成 `rgb(255, 77, 77)`、`hsl(180 100% 65%)` 解析成 `rgb(77, 255, 255)`,然後**逐 channel** 線性插值。中點 `rgb(166, 166, 166)` — 灰色。
+
+第二個雷:`hsl(0deg)` 跟 `hsl(360deg)` 在 RGB 空間是同一個值。寫 `transition: 0deg → 360deg` 會發現完全沒動 — 因為起點終點在 RGB 是同一個。
+
+## Gotchas
+
+- **`hue-rotate` 不是 hsl hue 的同義詞**:它是個 raster filter,演算法不同。對白色或灰色完全沒影響(沒色相可轉),對純飽和色才有預期效果。如果起始色就偏暗,旋轉後會繼續偏暗。
+- **要混 `filter: blur` 之類的**:多個 filter 寫在同一個 `filter` declaration 裡用空格分隔:`filter: blur(2px) hue-rotate(180deg)`。次序會影響結果。
+- **CSS 層級**:filter 套在 element 上會建立 stacking context — 會影響 z-index 行為。粒子如果原本要疊在按鈕上面,加 filter 後可能要重新檢查層次。
+- **跨色相空間動畫**:CSS `color-mix()` 配 `oklch` interpolation hint 是更現代的解法 — `color-mix(in oklch, red, teal)` 中段不會掉灰。但目前還沒辦法直接用在 keyframe / transition 上,只能算靜態色。
+- **使用色彩主題化粒子**:不要用 `random(0, 359)`,改成 `sample(THEME_HUES)` — 例如情人節 `[0, 340, 350]`、萬聖節 `[20, 40, 280]` — 把驚喜跟產品調性綁起來。

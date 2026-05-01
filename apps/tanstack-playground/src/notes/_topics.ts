@@ -17,6 +17,10 @@ export const topics: Record<string, TopicMeta> = {
     name: 'SVG',
     description: 'primitives, paths, animation, springs & easings',
   },
+  particles: {
+    name: 'Particles',
+    description: 'DOM particle systems, easings, polar coords, lerp',
+  },
 };
 
 export function topicName(id: string): string {

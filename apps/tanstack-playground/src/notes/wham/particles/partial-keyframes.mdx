@@ -1,0 +1,46 @@
+---
+title: Partial Keyframes, omitting from/to to inherit
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/03-partial-keyframes
+lessonNumber: '01-particles/03-partial-keyframes'
+order: 4
+summary: 'keyframe 只寫 `to {…}` 或只寫 `from {…}`,缺的那邊會用元素**當下的值**填補。能寫出對任意起始 opacity 都優雅的 fadeOut。'
+tags: [particles, css, keyframes, animation]
+---
+
+import { PartialVsFullKeyframe, StackedKeyframes } from './partial-keyframes';
+
+## TL;DR
+
+- `@keyframes fadeOut { from { opacity: 1 } to { opacity: 0 } }` 對 `opacity: 0.6` 的元素會先**閃回 1** 再淡出 — 視覺斷層。
+- 改寫成 `@keyframes fadeToTransparent { to { opacity: 0 } }`,沒寫的 `from` 會自動用「元素當下的 opacity」填補,從 0.6 一路順順淡到 0。
+- 同樣的把戲 `from` 也適用:`@keyframes fadeFromTransparent { from { opacity: 0 } }` 表示「淡入到元素自己設定的 opacity」,不論那是 1 還是 0.7。
+
+<DemoFrame title="Partial vs full keyframe — three resting opacities">
+  <PartialVsFullKeyframe />
+</DemoFrame>
+
+## 兩條 keyframe 疊加 = 相乘
+
+更瘋狂的:partial keyframe 可以**疊**在另一條完整 keyframe 上,兩條同時動同一個屬性,值會相乘。
+
+<DemoFrame title="twinkle (0.25↔0.75) × fadeFromTransparent">
+  <StackedKeyframes />
+</DemoFrame>
+
+`twinkle` 在 0.25 ~ 0.75 之間振盪,`fadeFromTransparent` 從 0 進場。兩者同時跑時,fade-in 期間每一幀的 opacity 是 `twinkle_value × fade_progress`,結果是「閃爍從無到有漸強進場」。
+
+## Why it works
+
+關鍵字一個句子:**partial keyframe 沒寫的那邊,瀏覽器會用該屬性「當下計算出來的值」當缺口**。
+
+這裡的「當下」是動畫開始時的計算值,可以來自:
+- inline style
+- CSS class
+- 另一條同時跑的 keyframe(就是上面 stacked 的把戲)
+
+## Gotchas
+
+- **順序很重要**:疊兩條 keyframe 時,partial 的那條一定要寫在 `animation:` 裡的**後面**。順序顛倒,partial 那條對其它 keyframe 寫定的值沒有「插嘴」的權限,效果會被覆蓋掉。
+- **舊版 mobile Safari (< iOS 17)**:不會合併兩條 keyframe,會變成「先跑完一條再跑下一條」。如果一定要支援老設備,把兩條 keyframe 拆到父子兩個 div 上跑。
+- **不是相乘是「插值」**:partial keyframe 只負責補缺口的那個值,但兩條 keyframe 同時動同一屬性時,瀏覽器是把 partial 當作「在現值與目標值之間做線性插值」的工具,結果看起來像相乘是因為 fade 那條從 0 補到「當下值」剛好等於乘法。
+- **Utility 集合**:Comeau 的全域 CSS 裡有 `fadeFromOpaque` / `fadeToOpaque` / `fadeFromTransparent` / `fadeToTransparent` 四個小工具,大部分淡入淡出場景直接拿來用就好。

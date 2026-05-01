@@ -1,0 +1,49 @@
+---
+title: Juice, custom whimsy beats off-the-shelf confetti
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/12-juice
+lessonNumber: '01-particles/12-juice'
+order: 19
+summary: '"Juice" 是 gamedev 術語 — 觸覺/視覺反饋的層層堆疊,讓基本互動變得讓人想再點一次。但 `npm install canvas-confetti` 不算 juice;真正有效的 juice 必須是為產品量身打造的,不然只是另一個被看膩的彩屑。'
+tags: [particles, design, juice, animation-philosophy]
+---
+
+import { PlainVsJuicedButton } from './juice';
+
+## TL;DR
+
+- **Juice**:gamedev 術語,描述「讓互動變得有觸覺感」的小細節 — 按下去的 squash、彈出的粒子、聲音、震動。出處是 Martin Jonasson & Petri Purho 在 GDC 2012 的 talk **"Juice it or lose it"**(15 分鐘,值得看)。
+- 同一份遊戲邏輯,堆完所有 juice 之後感覺完全不同。Web 也一樣 — 動畫、easing、粒子等等都是 juice 的零件。
+- **但 juice 必須是 bespoke**。`npm install canvas-confetti` 三百萬人用過,你的網站再用一次,使用者只覺得「又一個」。同樣的彩屑爆炸看了 50 次後就失去驚喜的能力。
+- 真正打動人的 juice 必須跟產品的個性連動 — 主題色、品牌調性、互動的語意。
+
+<DemoFrame title="MVP vs juiced — 同一個 Add to cart">
+  <PlainVsJuicedButton />
+</DemoFrame>
+
+左邊:純功能,點下去計數+1,沒了。右邊:多了 button squash、放射粒子、計數彈跳。多花 30 行,感受差兩個量級。
+
+## 為什麼通用元件失靈
+
+`canvas-confetti` 是個**寫得很好的**套件 — 不是它做錯什麼。問題是「飽和」:
+
+- 你看過 50 次同樣的彩屑爆炸,大腦自動分類成「噢 又是這個」。
+- 註冊完成 → 彩屑;升級成功 → 彩屑;結帳完成 → 彩屑。彩屑變成「事情完成」的視覺替代字。
+- 它本來該觸發的「驚喜」已經磨掉了。
+
+跟設計系統的 design tokens 不同 — token 是內部一致性,彩屑是外部 lookalike。一致性是優點,跟別人撞臉是缺點。
+
+## 怎麼設計 bespoke juice
+
+幾個練習方向:
+
+1. **跟產品內容連動**:加入購物車的粒子可以是品牌色的小 logo,不是泛泛彩屑。
+2. **配合互動的語意**:「點讚」是溫暖的(粉紅、上飄),「刪除」是抗拒的(灰、向下散),「成功」是擴張的(亮、外擴)。
+3. **層數疊起來**:button squash + 顏色變化 + 粒子 + 計數彈跳,單獨看每個都很小,疊起來就明顯。
+4. **節制**:juice 不是越多越好。一個流程裡只挑 1~2 個焦點 moment,其它保持安靜 — 不然到處都在動,反而沒有焦點。
+
+## Gotchas
+
+- **「我就快速做一下用 confetti 套件」**:這個快不會省太多時間,但會永久剝奪這個介面的驚喜權。如果不是 PoC,自己 spawn 粒子是值得投入的小成本。
+- **A/B 測得出來嗎?**:Juice 的價值常常測不出 conversion 改變。但 retention、滿意度、口碑這些長期指標會反映。
+- **Performance 第一**:juice 卡頓 > juice 不存在。每加一層動畫都要 profile,別讓 60fps 掉到 24fps。
+- **Accessibility 不是事後**:reduced-motion 路徑要跟 full-juice 路徑一起設計。「動畫關掉就什麼回饋都沒了」是 a11y 失敗。

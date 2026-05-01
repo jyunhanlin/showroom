@@ -1,0 +1,47 @@
+---
+title: Particle Cleanup, removing zombies after fade-out
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/01.01-cleanup
+lessonNumber: '01-particles/01.01-cleanup'
+order: 2
+summary: '粒子淡出後 DOM 還在 → 點久了會塞爆。配一個 `FADE_DURATION` 當 single source of truth,setTimeout 一次刪整批,還要 `pointer-events: none` 擋住 hover 鬼影。'
+tags: [particles, dom, cleanup, setTimeout, pointer-events]
+---
+
+import { LikeButtonWithCleanup } from './cleanup';
+
+## TL;DR
+
+- 上一篇的粒子淡出後 **opacity 是 0,但 DOM 節點還在**;狂點按鈕會堆成一堆隱形 `<span>`。
+- 修法兩件事:
+  1. **`pointer-events: none`** — 不然透明粒子會擋住按鈕,觸發奇怪的 hover/cursor 行為。
+  2. **延遲刪除** — 一次點擊 push 一批粒子到陣列,排一個 `setTimeout(FADE_DURATION + 200)` 把整批一次撈出 state 刪掉。
+- `FADE_DURATION` 當常數,CSS 動畫長度和 setTimeout 都讀它,避免兩邊各自漂移。
+
+<DemoFrame title="Like button with batched cleanup">
+  <LikeButtonWithCleanup />
+</DemoFrame>
+
+可以一直點,粒子數會回到 0 — DOM 不會無限增長。
+
+## Why it works
+
+每次點擊一批 5 顆粒子。把這批的 id 收起來,排一個 timeout:
+
+```ts
+const newIds = newParticles.map((p) => p.id);
+setParticles((prev) => [...prev, ...newParticles]);
+window.setTimeout(() => {
+  setParticles((prev) => prev.filter((p) => !newIds.includes(p.id)));
+}, FADE_DURATION + 200);
+```
+
+關鍵是「一次 timeout 刪一整批」,而不是「每顆粒子各排一個 timeout」。100 顆並行 timeout 在低階機器上會出現可量到的 jank。
+
+`+ 200ms` 的 buffer 是 paranoia — 動畫真的結束再刪,確保不會出現「淡出進行到一半粒子被砍掉」的視覺斷層。
+
+## Gotchas
+
+- **`pointer-events: none` 不只是潔癖**:粒子可能跑到按鈕邊界外,佔到 hover 區域。沒擋住會出現「指標看起來在按鈕上,但其實是在粒子上」的怪行為。
+- **React 卸載時的孤兒 timeout**:每個 timeout 要追蹤起來,在 component unmount 的時候 `clearTimeout`,不然會觸發 unmounted setState warning。Demo 裡用 ref 收集 id 在 cleanup 一起清。
+- **`animationend` 替代方案**:可以用 `animationend` 事件代替 timeout,但有兩個雷:多重 keyframe 動畫無法區分是哪個結束;舊瀏覽器有過漏觸發的歷史。Comeau 偏好 timeout。
+- **不要把 `FADE_DURATION` 拆開放兩處**:CSS 寫 1000ms、JS 寫 1500ms,過幾個月誰也不會記得改哪個會壞 — 一個常數兩邊讀。

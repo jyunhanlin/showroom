@@ -1,0 +1,87 @@
+---
+title: Accessories, popping circle and swelling heart
+sourceUrl: https://courses.joshwcomeau.com/wham/01-particles/12.02-accessories
+lessonNumber: '01-particles/12.02-accessories'
+order: 21
+summary: '只有粒子還是不夠 — Twitter 那顆 Like 按鈕還有「彩色圓圈炸開」與「愛心彈跳放大」兩層配件。三條 partial keyframe 各管一個屬性、用 `linear()` 模擬 spring 是兩個關鍵技巧。'
+tags: [particles, animation, juice, linear-easing, spring]
+---
+
+import { FullJuicedLikeButton } from './accessories';
+
+## TL;DR
+
+Twitter 經典 Like 按鈕的細節不只粒子。多兩層:
+
+1. **Popping circle** — 紅色圓圈快速放大、變淺紫、淡出。三段都不同 timing,用三條 partial keyframe 各自疊。
+2. **Swelling heart** — 愛心從 0 彈跳放大。用 CSS `linear()` 做 spring,Bezier 表達不出。
+
+加上既有粒子 → spawn 要延遲 ~150ms,等圈圈先佔位。
+
+<DemoFrame title="like button — pop-circle + spring heart + particles">
+  <FullJuicedLikeButton />
+</DemoFrame>
+
+## Popping circle 三條 keyframe
+
+最直觀的寫法是 `from { scale: 0; bg: red; opacity: 1 }` — 但所有屬性綁在同一條 timeline,慢的拉慢、快的拉快。實際看起來很死。
+
+拆成三條 partial keyframe,各自有自己的 duration 和 delay:
+
+```css
+@keyframes fromShrunken      { from { transform: scale(0) } }
+@keyframes circleColorShift  { from { background: hsl(350 100% 60%) } }
+@keyframes fadeFromOpaque    { from { opacity: 1 } }
+
+.popCircle.liked {
+  animation:
+    fromShrunken     150ms,
+    circleColorShift 150ms,
+    fadeFromOpaque   300ms 150ms backwards;
+}
+```
+
+- 大小變化 + 顏色變化 — 同步發生 150ms 內。
+- 淡出在 150ms **之後**才開始,跑 300ms。
+- `backwards` fill mode 確保 fade 還沒開始前 opacity 維持 1。
+
+Partial keyframe 的好處再次體現:`fadeFromOpaque` 沒寫終點 → 結束後回到 element 預設的 `opacity: 0`。
+
+## Heart spring 用 linear()
+
+Bezier 沒辦法表達「過頭再回來再過頭」的彈簧。CSS 4 的 `linear()` 函式可以用一連串點來描述任意曲線:
+
+```css
+animation: fromShrunken 1500ms 150ms backwards
+  linear(0, 0.05 2%, 0.4 6%, 1 10%, 1.18 13%, 1.21 15%, 1.18 17%, 1.0 22%, 0.94 25%, 0.97 30%, 1.02 38%, 1.0 50%, 1);
+```
+
+- 數字是 `(progress, time%)` 對 — 在某個 time 達到某個 progress。
+- 看到那些 1.21、1.18、0.94 — 過頭(`>1`)然後回彈(`<1`),那就是彈簧的本質。
+- 直接手寫太累,用 [Easing Wizard](https://easingwizard.com) 拉滑桿吐 string。
+
+下一章 (`08.01-intro-to-spring-physics`) 會用真正的 spring 物理 + JS 取代 `linear()`,但靜態 spring 很多場景 `linear()` 已經夠用。
+
+## 粒子延遲 spawn
+
+粒子應該等圓圈彈出後再出來。最簡單:
+
+```ts
+window.setTimeout(() => {
+  spawnParticles();
+}, PARTICLE_DELAY);
+```
+
+替代方案是聽 `animationend` 事件,但 Comeau 不愛 — 因為:
+- 多條 keyframe 同時跑,event 觸發兩次。
+- 偶爾不觸發。
+- 「想要稍微快一點 / 慢一點」沒辦法調。
+
+`setTimeout` 反而讓不同步是 feature,不是 bug。
+
+## Gotchas
+
+- **`backwards` fill-mode 是關鍵**:沒寫的話,delay 期間元素會用「最終」狀態(`scale: 1`)而不是「初始」狀態(`scale: 0`),你會看到愛心瞬間跳出再縮回 0 再彈回 1。
+- **`linear()` 瀏覽器支援** (Chrome 113+ / Safari 17.4+):約 90% 用戶能跑;舊瀏覽器掉回到瀏覽器預設 timing function(等同沒 spring)。
+- **疊到爆**:popping circle 三條 + heart 一條 + 粒子兩條(fade + disperse) + twinkle = 一個按鈕 7 條 keyframe。Comeau 自己也說「things are getting gnarly」 — 把 keyframe 集中放一處、用 CSS 變數抽 duration 是最低限度的整理。
+- **跟 React state 一起用**:每次點擊要強制重啟 keyframe — 用 `key` prop 或 `data-phase` 之類的 counter,讓 element re-mount / re-trigger。
