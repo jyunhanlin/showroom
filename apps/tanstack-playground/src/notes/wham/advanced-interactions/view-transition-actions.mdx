@@ -2,7 +2,7 @@
 title: View Transitions in Practice (Toast Stack & Action-Driven Dialog)
 sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/07.03-vt-exercises
 lessonNumber: '03-advanced-interactions/07.03-vt-exercises'
-order: 12
+order: 22
 summary: '兩個 real UI 用 View Transitions：toast dismiss 讓兄弟自動 slide-down、action-driven dialog 用「unmount 前改 view-transition-name」切換不同退場動畫。Critical 坑：exit animation target `::view-transition-old(name)`，不是 `::view-transition-group(name)`（後者管位置 → 會「飛到頂」）。z-index 反向才能讓 dismissed toast 從**後面**淡出。'
 tags: [view-transitions, react, flushSync, exit-animation, toast, dialog]
 ---

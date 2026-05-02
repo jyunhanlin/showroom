@@ -2,7 +2,7 @@
 title: Cursor Tracking Perf, throttle the expensive part
 sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/01.02-perf-optimizations
 lessonNumber: '03-advanced-interactions/01.02-perf-optimizations'
-order: 80
+order: 4
 summary: '`getBoundingClientRect()` 對 DOM 是個小但實在的支出(~1–3ms)。每幀打 60 次會吃掉預算。最佳解不是 cache 一次(scroll 就破),也不是 listen scroll/resize(觸發頻率一樣高),而是 `throttle` 那一行 — 滑鼠仍每幀更新位置,bounding box 用 stale 值。'
 tags: [advanced-interactions, performance, throttle, getBoundingClientRect, cursor]
 ---

@@ -2,7 +2,7 @@
 title: Mapping Cursor to SVG (`viewBox` ↔ pixel-space)
 sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/03-mapping-cursor-to-svg
 lessonNumber: '03-advanced-interactions/03-mapping-cursor-to-svg'
-order: 5
+order: 10
 summary: 'SVG 有自己的座標系（`viewBox`），跟 `event.clientX/Y` 拿到的 pixel 不同。直接把 pixel 塞給 `cx`/`cy` 會在 viewBox 跟容器尺寸不同時整個錯位。兩個解法：(1) `normalize(relativeX, 0, bb.width, 0, VIEWBOX)` — 直觀好記；(2) `svg.createSVGPoint() → matrixTransform(svg.getScreenCTM().inverse())` — 優雅但 DOM API 偏門。多數人選 normalize。'
 tags: [svg, cursor, normalize, viewBox, getBoundingClientRect, coordinate-system]
 ---

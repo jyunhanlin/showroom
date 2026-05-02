@@ -2,7 +2,7 @@
 title: 'Parallax Scrolling (`animation-timeline: scroll()` + per-layer `--from`)'
 sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/05.05-parallax
 lessonNumber: '03-advanced-interactions/05.05-parallax'
-order: 9
+order: 16
 summary: '6 層 SVG 風景，每層綁同一個 `@keyframes parallax { from { translateY(var(--from)) } }`，但 inline style 給不同的 `--from` 值（天空 0、雲 10/16、遠山 50、中山 70、前景 130）。`animation-timeline: scroll()` 把每層的 0%→100% 進度綁到 scroll container 的捲動進度，scroll 到底所有層歸位 `translateY(0)`。Pre-animation-timeline 時代要 JS 算 scroll position + transform 每層 → jank-prone；現在 CSS-only、smooth。**這個 effect 是 vestibular sensitivity 的頭號兇手，務必 wrap 在 `prefers-reduced-motion: no-preference` 後面**。'
 tags: [parallax, animation-timeline, scroll-driven-animation, css-custom-properties, prefers-reduced-motion]
 ---

@@ -2,7 +2,7 @@
 title: 'Wipe Effects (`clip-path: polygon()` transitions)'
 sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/04-wipe-effects
 lessonNumber: '03-advanced-interactions/04-wipe-effects'
-order: 6
+order: 11
 summary: '`clip-path: polygon()` 點對點 interpolate = 雨刷式 wipe reveal。三個踩雷：(1) intangible pixels — 被裁掉的區域不接 pointer events，`:hover` 一定要拉到 parent `<button>` 否則永遠觸發不到；(2) doom flicker — visible-by-default + hover-hides 變 cursor → 縮 → 沒 hover → 長 → cursor 又上 → loop，跟 cursor-distance「不要量會動的東西」同根；(3) drop-shadow paint order — filter 在 clip-path 之前算，shadow 也被切，把 filter 拉到 parent wrapper。'
 tags: [clip-path, polygon, wipe-effects, intangible-pixels, drop-shadow, prefers-reduced-motion]
 ---

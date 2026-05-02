@@ -2,7 +2,7 @@
 title: View Transition Interrupts, hit-testing during transitions
 sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/07.05-vt-interrupts
 lessonNumber: '03-advanced-interactions/07.05-vt-interrupts'
-order: 91
+order: 24
 summary: 'VT 進行中 button 點不到 — 真實 DOM 元素被「移到」pseudo-element 渲染,連 hit-test 都跳過。`pointer-events: none` on `::view-transition` 不夠。實務 workaround:把 trigger 元素挪出 VT 範圍 / 兩個元素分工(視覺 vs 行為)/ 用前段衝刺的 easing 讓 interrupt 不那麼突兀。'
 tags: [advanced-interactions, view-transitions, hit-testing, accessibility]
 ---

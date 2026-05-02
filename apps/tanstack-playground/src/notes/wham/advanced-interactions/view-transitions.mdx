@@ -2,7 +2,7 @@
 title: View Transitions API (`document.startViewTransition`)
 sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/07-view-transitions
 lessonNumber: '03-advanced-interactions/07-view-transitions'
-order: 11
+order: 19
 summary: '`document.startViewTransition(cb)` 把「DOM 結構改變」這種 CSS transition 抓不到的場景變成可動畫：snapshot 舊狀態 → 跑 cb → snapshot 新狀態 → 在最上層 cross-fade / 自動算 `transform: matrix()` keyframes 在兩個 snapshot 之間 tween。React 端最大坑是 state 是 async — 必須在 cb 裡 `flushSync(setX)` 否則 browser snapshot 到還沒 commit 的 UI = no-op。'
 tags: [view-transitions, startViewTransition, flushSync, css, animation]
 ---
