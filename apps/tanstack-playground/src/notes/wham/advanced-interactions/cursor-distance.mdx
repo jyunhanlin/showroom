@@ -3,7 +3,7 @@ title: Cursor Distance (`getBoundingClientRect` + Pythagorean)
 sourceUrl: https://courses.joshwcomeau.com/wham/03-advanced-interactions/01-cursor-interactions
 lessonNumber: '03-advanced-interactions/01-cursor-interactions'
 order: 1
-summary: '量 cursor 跟某個 DOM node 的距離 → 套 `clampedNormalize` 算 scale。三個小坑：(1) 別量會被自己影響的 elem，量 stable parent 否則踩 30Hz 自我震盪 + 光敏癲癇 threshold；(2) `getBoundingClientRect()` 不便宜，要 `throttle` 它；(3) hook 內部 throttled function 必須 `useMemo`，否則每 render 重置內部 timer = 等於沒 throttle。'
+summary: '量 cursor 跟某個 DOM node 的距離 → 套 `clampedNormalize` 算 scale。三個小坑：(1) 測量對象永遠選 stable parent，不要選會被自己 scale 影響的元素 — 否則 bbox ↔ scale 互推成 feedback loop、震盪達 30Hz，踩穿 WCAG 光敏癲癇 3Hz threshold；(2) `getBoundingClientRect()` 不便宜，要 `throttle` 它；(3) hook 內部 throttled function 必須 `useMemo`，否則每 render 重置內部 timer = 等於沒 throttle。'
 tags: [cursor, getBoundingClientRect, throttle, useRelativeMousePosition, normalize]
 ---
 
@@ -11,9 +11,9 @@ import { CursorDistanceBallSocket } from './cursor-distance';
 
 ## TL;DR
 
-- Cursor 跟元素中心的距離 = 兩個 X/Y 座標套畢氏定理。`getBoundingClientRect()` 拿 elem 的 viewport 位置、`event.clientX/Y` 拿 cursor 位置，相減後 `Math.sqrt(dx² + dy²)`。
+- Cursor 跟元素中心的距離 = 兩個 X/Y 座標套畢氏定理。`getBoundingClientRect()` 拿元素的 viewport 位置、`event.clientX/Y` 拿 cursor 位置，相減後 `Math.sqrt(dx² + dy²)`。
 - 用 `clampedNormalize(distance, minDist, maxDist, maxOutput, minOutput)` 把距離映射到 visual property（scale、blur、translate）。clamped 版避免 cursor 距離超出 maxDist 時 output 跑成負數產生鏡像放大。
-- **量穩定的 parent，不要量會被動的 child**。child 自己被 cursor 影響時 bounding box 跟著動 → 距離計算變不穩 → 形成 30Hz 自我震盪 → 直接踩 WCAG 「3 Hz 以上 flicker」的光敏癲癇 threshold，不是抽象 a11y 警告。
+- **測量對象選穩定的 parent，不要選會被自己影響的 child**。child 自己被 cursor 影響時 bounding box 跟著動 → 距離計算變不穩 → 形成 30Hz 自我震盪 → 直接踩 WCAG 「3 Hz 以上 flicker」的光敏癲癇 threshold，不是抽象 a11y 警告。
 - `getBoundingClientRect()` 在低階機 ~3ms/call。pointermove 一秒幾十次 = 一個 60Hz frame budget 的 1/5 純拿來算 bb。`throttle(() => bb, 500)` 把它 cache 500ms — 一秒最多兩次而非幾十次。
 - React 抽成 `useRelativeMousePosition(ref)` hook：把 throttled bb + pointermove + setState 包一包。Hook 內部的 throttled function **一定要 `useMemo`**，否則每次 render 產生新 instance、internal timer state 重置 → 等於沒 throttle。
 
@@ -44,9 +44,9 @@ ball.style.scale = clampedNormalize(distance, 10, 100, 1, 0);
 
 ## Don't change what you measure
 
-直覺上 hover 反應 = 量被影響的元素本身。但這個 demo 永遠量灰色 socket，**不要量會變的黃色 ball**。
+直覺上 hover 反應 = 拿被影響的元素本身當測量對象。但這個 demo 永遠以灰色 socket 為對象，**不要選會變的黃色 ball**。
 
-如果改成量 ball 自己：cursor 接近 → ball 變大 → ball center 因放大可能位移（如果 transform-origin 不在 center）→ 距離變短 → ball 變更大 → loop。即便 transform-origin 在 center 沒位移，ball 縮小到極小時 bounding box 中心點仍會被 transform 影響細微浮動。
+如果改成以 ball 自己為測量對象：cursor 接近 → ball 變大 → ball center 因放大可能位移（如果 transform-origin 不在 center）→ 距離變短 → ball 變更大 → loop。即便 transform-origin 在 center 沒位移，ball 縮小到極小時 bounding box 中心點仍會被 transform 影響細微浮動。
 
 實測這個 feedback loop 在某些參數下可達 30Hz flicker — 直接踩 WCAG 「Three Flashes or Below」threshold（最高 3Hz），對 photosensitive epilepsy 是真實風險，不是抽象 a11y 警告。
 
@@ -71,7 +71,7 @@ const bb = socket.getBoundingClientRect();  // 只算一次
 window.addEventListener('pointermove', () => { /* 用上面那個 bb */ });
 ```
 
-scroll 一發生 elem 在 viewport 跑掉、舊 bb 失效、cursor 跟「上次測量位置」算出的距離整個錯位。resize 也一樣。content 改動（accordion 展開）也一樣。
+scroll 一發生元素在 viewport 跑掉、舊 bb 失效、cursor 跟「上次測量位置」算出的距離整個錯位。resize 也一樣。content 改動（accordion 展開）也一樣。
 
 ### 為什麼不只在 scroll/resize 時 recompute
 
@@ -127,7 +127,7 @@ function useRelativeMousePosition(ref, throttleDuration = 500) {
 兩個 React-specific 的點：
 
 1. **`useMemo` 包 throttled function**。如果直接 `const fn = throttle(...)` 寫在 component body，每次 render 產生新 throttled instance，throttle 的 internal timer state 也跟著重置 — 等於沒 throttle。`useMemo([ref, throttleDuration])` 確保 deps 沒變就同一個 instance。
-2. **回傳已減去 center 的座標**。cursor 在 elem 正中央時 `{x: 0, y: 0}`。consumer 算距離直接 `Math.sqrt(x² + y²)` 不用再減 center。
+2. **回傳已減去 center 的座標**。cursor 在元素正中央時 `{x: 0, y: 0}`。consumer 算距離直接 `Math.sqrt(x² + y²)` 不用再減 center。
 
 回傳第二個值 `boundingBox` 給 consumer 自己用 — 例如想以 top-right corner 為 anchor 而不是 center 時：
 
@@ -141,10 +141,10 @@ const adjusted = {
 
 ## Gotchas
 
-- **Don't change what you measure**。量會被自己影響的 elem → feedback loop → 30Hz 震盪 → 光敏癲癇真實風險。永遠量 stable parent，hover state 的 `:hover` selector 也是同樣道理拉到 parent。
+- **Don't change what you measure**。把會被自己影響的元素當測量對象 → feedback loop → 30Hz 震盪 → 光敏癲癇真實風險。測量對象永遠選 stable parent，hover state 的 `:hover` selector 也是同樣道理拉到 parent。
 - **`getBoundingClientRect()` 一定要 throttle**。沒 throttle 在低階機可吃掉 frame budget 的 1/5。500ms 是 sane default。stale 一個 frame user 察覺不到。
 - **`useMemo` 包 throttled function**。component body 直接 `throttle(...)` 每 render 重置 internal timer = 等於沒 throttle。同樣陷阱也適用 `debounce`、`memoize` 等任何帶 internal state 的 helper。
 - **`clampedNormalize` 而不是 `normalize`**。沒 clamped 版的話 cursor 走超過 maxDist 時 scale 跑成負數 → 元素鏡像放大。clamped 版自動把 output 卡在 [minOutput, maxOutput]。
 - **dead zone 設 minDist > 0**。minDist = 0 的話 user 必須對準正中心一個 pixel 才能拿 max output。10–20px 給 tolerance、體感從「對不準」變「靠近就生效」。
-- **`pointermove` listener 掛在 `window` 不是 elem**。掛在 elem 上只有 cursor 在 elem 內才觸發；掛在 window 上 cursor 走出 elem 也會繼續 update — 才能讓 distance > maxDist 時把 ball 縮回 0。
+- **`pointermove` listener 掛在 `window` 不是元素**。掛在元素上只有 cursor 在元素內才觸發；掛在 window 上 cursor 走出元素也會繼續 update — 才能讓 distance > maxDist 時把 ball 縮回 0。
 - **`prefers-reduced-motion` 在 production 要加**。這個 demo 為示範方便沒加；上線時 wrap 一個 `if (prefersReducedMotion) return;` 在 handler 開頭，cursor 移動時直接保持靜態 scale。
