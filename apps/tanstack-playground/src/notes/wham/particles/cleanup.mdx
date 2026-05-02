@@ -43,5 +43,5 @@ window.setTimeout(() => {
 
 - **`pointer-events: none` 不只是潔癖**:粒子可能跑到按鈕邊界外,佔到 hover 區域。沒擋住會出現「指標看起來在按鈕上,但其實是在粒子上」的怪行為。
 - **React 卸載時的孤兒 timeout**:每個 timeout 要追蹤起來,在 component unmount 的時候 `clearTimeout`,不然會觸發 unmounted setState warning。Demo 裡用 ref 收集 id 在 cleanup 一起清。
-- **`animationend` 替代方案**:可以用 `animationend` 事件代替 timeout,但有兩個雷:多重 keyframe 動畫無法區分是哪個結束;舊瀏覽器有過漏觸發的歷史。Comeau 偏好 timeout。
+- **`animationend` 替代方案**:可以用 `animationend` 事件代替 timeout,但有兩個雷:多重 keyframe 動畫無法區分是哪個結束;舊瀏覽器有過漏觸發的歷史。Josh 偏好 timeout。
 - **不要把 `FADE_DURATION` 拆開放兩處**:CSS 寫 1000ms、JS 寫 1500ms,過幾個月誰也不會記得改哪個會壞 — 一個常數兩邊讀。

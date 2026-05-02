@@ -41,7 +41,7 @@ function spawn() {
 
 `element.remove()` 不會立刻釋放節點 — 只是 detach。如果還有東西(`objectPool` 陣列)持有引用,GC 不會回收。下次 pop 出來重新 mount 就好。
 
-## 為什麼 Comeau 不推薦
+## 為什麼 Josh 不推薦
 
 1. **效能優勢實測幾乎為零**。Chrome 的 GC 很聰明,DOM node 數穩定在約 300 個就被自動清理,完全跟 pooling 一樣的水準,但不需要你寫一行管理程式碼。
 2. **狀態洩漏 bug 容易寫**。例如忘記清舊的 `--x` / `--y` CSS 變數,粒子會閃現在上次的位置一瞬間。

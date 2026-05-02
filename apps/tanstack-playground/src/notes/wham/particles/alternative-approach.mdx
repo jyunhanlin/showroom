@@ -42,5 +42,5 @@ particle.style.transform = `translate(${x}px, ${y}px)`;
 ## Gotchas
 
 - **`transform` 一條被佔走**:partial keyframe 跟 inline style 兩邊都在用 `transform`。如果你還想加 `transform: scale(...)` 之類的,會跟 `translate` 互相覆蓋。要嘛用 CSS 變數(`translate(var(--x), var(--y)) scale(1.2)`),要嘛切到 `translate` 屬性(獨立於 `transform`,新瀏覽器才支援)。
-- **CSS Grid 是替代解**:`display: grid; place-items: center` 也能置中,但會把按鈕內所有元素都疊在 `grid-area: 1 / 1`,連 `<svg>` heart 也被當成 grid item — 對既有 children 太強勢,Comeau 偏好 auto-margins。
+- **CSS Grid 是替代解**:`display: grid; place-items: center` 也能置中,但會把按鈕內所有元素都疊在 `grid-area: 1 / 1`,連 `<svg>` heart 也被當成 grid item — 對既有 children 太強勢,Josh 偏好 auto-margins。
 - **重點不是省哪幾行 code**:這個重構的核心是「**心智模型從相對轉絕對**」 — 之後做粒子 effect 時,腦子裡會想「想飛 60px 半徑」而不是「想飛 90% 容器寬」。

@@ -29,7 +29,7 @@ re-roll 多次:左邊偶爾會擠成一團;中間永遠是規律雪花;右邊永
 
 `chaos` slider 控 jitter 大小:
 - `0` → 完美雪花。
-- `40` → Comeau 的甜蜜點,Discord 那邊 chaos slider 預設值。
+- `40` → Josh 的甜蜜點,Discord 那邊 chaos slider 預設值。
 - `90` → 等於完全 random,clumping bug 復活。
 
 ## Why it works
@@ -51,6 +51,6 @@ const distance = isEven ? 45 : 55;
 ## Gotchas
 
 - **`range(N).forEach((index) => ...)`**:lodash 的 `range(5)` 會產生 `[0, 1, 2, 3, 4]`,所以 `index` 直接拿就好,不用另外 counter。
-- **JITTER 太大就退化成 random**:JITTER ≥ 360/N/2 時相鄰楔形會重疊,clumping 又會回來。對 5 顆粒子(72° wedges)JITTER 上限是 36°,但 Comeau 用 40° 一樣 OK — 偶爾相鄰兩顆貼在一起反而更自然。
+- **JITTER 太大就退化成 random**:JITTER ≥ 360/N/2 時相鄰楔形會重疊,clumping 又會回來。對 5 顆粒子(72° wedges)JITTER 上限是 36°,但 Josh 用 40° 一樣 OK — 偶爾相鄰兩顆貼在一起反而更自然。
 - **這招不只用在粒子**:scatter chart 標記、loading dot 的 stagger delay、avatar 排列都能用。「想看起來隨機,但保證不會難看」。
 - **生日問題的親戚**:這跟生日問題類似 — 隨機抽樣會出現預期外的「碰撞」,stratified sampling 是用結構性把碰撞打掉。

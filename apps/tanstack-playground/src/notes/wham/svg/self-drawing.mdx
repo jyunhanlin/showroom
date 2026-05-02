@@ -18,7 +18,7 @@ import { SelfDrawingScribble } from './self-drawing';
 - `pathLength="100"` 設一個虛擬長度，CSS 端 dasharray / dashoffset 的數值都對 100 來算。免去 `getTotalLength()` JS 算路徑真實長度。
 - 自我繪製是 module 7 自身完整的 demo trick，但跟 SVG path / stroke / dash 那一連串 building block 全部串起來的 capstone。
 
-<DemoFrame title="hover — Comeau 的 W scribble 用 dashoffset trick">
+<DemoFrame title="hover — Josh 的 W scribble 用 dashoffset trick">
   <SelfDrawingScribble />
 </DemoFrame>
 
@@ -110,11 +110,11 @@ elem.style.strokeDashoffset = `${pathLength}px`;
 
 但 `stroke-dashoffset` 在 Firefox 的 CSS context 必須有 `px` suffix，沒寫的話 Firefox silently ignore。
 
-**安全策略：CSS 裡所有 SVG 數值都加 `px`**。Comeau 自己也說他常忘記，但記得加比較不會踩到。
+**安全策略：CSS 裡所有 SVG 數值都加 `px`**。Josh 自己也說他常忘記，但記得加比較不會踩到。
 
 ## Gotchas
 
-- **動畫結束「圓點消失」現象**：方法 B 倒回（hover-out）時整段 dash 滑出 path → 最後變成 0 寬度的 dash → round cap 撐成圓點 → 視覺上「啪」消失。要解可以用 mask 或繼續滑超出畫面。Comeau 後面 mask 那課會講。
-- **效能差距 ~17%（從 Comeau 自己的 benchmark）**：方法 A 寬度持續變的 dash 比方法 B 滑動的 dash 多 ~20% paint cost。但兩者在 16.6ms budget 內都遠遠夠用，2.2% vs 1.8%，肉眼看不出。
+- **動畫結束「圓點消失」現象**：方法 B 倒回（hover-out）時整段 dash 滑出 path → 最後變成 0 寬度的 dash → round cap 撐成圓點 → 視覺上「啪」消失。要解可以用 mask 或繼續滑超出畫面。Josh 後面 mask 那課會講。
+- **效能差距 ~17%（從 Josh 自己的 benchmark）**：方法 A 寬度持續變的 dash 比方法 B 滑動的 dash 多 ~20% paint cost。但兩者在 16.6ms budget 內都遠遠夠用，2.2% vs 1.8%，肉眼看不出。
 - **JSX 寫法**：`pathLength` 是 SVG attribute 直接寫 `<path pathLength="100" />`。Tailwind v4 的 `[stroke-dashoffset:0px]` arbitrary class 可以套 group-hover 觸發。
 - **不要用 stroke-dashoffset 做大量 path 同時動**。本身一張單路徑很便宜，但 100+ 條 path 同時跑 dashoffset 動畫會在低階機器掉幀。考慮拆成 IntersectionObserver 觸發或限制動畫條數。

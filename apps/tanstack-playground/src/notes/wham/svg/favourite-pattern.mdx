@@ -11,7 +11,7 @@ import { SpringTokenPlayground } from './favourite-pattern';
 
 ## TL;DR
 
-逐個動畫都自己生 `linear()` 是大坑 — bundle 變大、視覺不一致。Comeau 的最佳實踐:
+逐個動畫都自己生 `linear()` 是大坑 — bundle 變大、視覺不一致。Josh 的最佳實踐:
 
 1. **Spring as token**:`html` 上掛 3~4 條 `--spring-smooth` / `--spring-bounce` / `--spring-snappy`,80% 場景共用,20% 才寫 one-off。
 2. **Duration 跟 spring 綁在一起**:`--spring-bounce-time: 1200ms`。每條 spring 都是設計給特定 duration 的,別獨立調。

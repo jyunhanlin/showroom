@@ -66,7 +66,7 @@ function App() {
 
 注意:**不需要 `document.startViewTransition`** — `startTransition` 觸發後,`<ViewTransition>` 內部自動配合。
 
-但 interrupt 行為比較死:動畫進行中再點,React 會 queue 並等動畫結束後才開新一輪。Comeau 認為這對 user 不友善(快點時 user 期待立即反應)。
+但 interrupt 行為比較死:動畫進行中再點,React 會 queue 並等動畫結束後才開新一輪。Josh 認為這對 user 不友善(快點時 user 期待立即反應)。
 
 ## 一個 ViewTransition 包多個 children = 雷
 

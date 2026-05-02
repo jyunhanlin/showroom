@@ -99,7 +99,7 @@ Scroll 到底時所有層都到 `translateY(0)`（也就是 keyframes 的 `to` /
 - 遠的東西在現實中視差小（看遠方雲，車跑了 10 公尺位置幾乎沒變）→ `--from` 小
 - 近的東西視差大（看路邊樹，車跑了 10 公尺整個刷過去）→ `--from` 大
 
-我這個 demo 用 `0 / 10 / 16 / 50 / 70 / 130`，從天空到前景樹差近 130 倍。實際數字是 vibes-based — 拉到不舒服就改小、看不出視差就改大。Comeau 課程也是直接給數字，沒有公式。
+我這個 demo 用 `0 / 10 / 16 / 50 / 70 / 130`，從天空到前景樹差近 130 倍。實際數字是 vibes-based — 拉到不舒服就改小、看不出視差就改大。Josh 課程也是直接給數字，沒有公式。
 
 ## sticky 容器讓圖層留在畫面上
 
@@ -130,7 +130,7 @@ Scroll 到底時所有層都到 `translateY(0)`（也就是 keyframes 的 `to` /
 
 ## prefers-reduced-motion 是不能省的
 
-Comeau 在課裡明說這不是 grey area：parallax 是 **vestibular motion sickness 的頭號觸發**，比一般 transition 嚴重很多。前庭敏感的人遇到 parallax 不是「覺得有點晃」，是會立刻頭暈反胃。一定要 wrap：
+Josh 在課裡明說這不是 grey area：parallax 是 **vestibular motion sickness 的頭號觸發**，比一般 transition 嚴重很多。前庭敏感的人遇到 parallax 不是「覺得有點晃」，是會立刻頭暈反胃。一定要 wrap：
 
 ```css
 @media (prefers-reduced-motion: no-preference) {

@@ -15,7 +15,7 @@ import { SwoopButton } from './motion-library';
 - `animate(domNode, { d: 'M ...' }, { duration: 0.3 })` — 三個參數：DOM 節點、目標屬性、options。
 - Motion 在 JS 裡逐 frame 算 interpolated 值，更新 attribute。CSS `path()` 不支援的 Safari 也能跑，因為它走的是 Web Animations API 不是 CSS transition。
 - **Library 不自動處理 prefers-reduced-motion** — 開發者責任。check `window.matchMedia('(prefers-reduced-motion: no-preference)')`，當使用者開了 reduced-motion 把 `duration` 設成 0。
-- Motion 比 GSAP 小很多（KB 等級 vs MB 等級）也比 React Spring 效能好（用 Web Animations API 走 compositor thread）— Comeau 推薦它的兩個理由。
+- Motion 比 GSAP 小很多（KB 等級 vs MB 等級）也比 React Spring 效能好（用 Web Animations API 走 compositor thread）— Josh 推薦它的兩個理由。
 
 <DemoFrame title="Motion 的 animate(path, { d }) — Safari 也通">
   <SwoopButton />
@@ -91,12 +91,12 @@ Motion 內部用 SVG path interpolation 演算法，前提是兩條 path 的 com
 
 ## 為什麼不用 GSAP
 
-Comeau 選 Motion 不選 GSAP 的兩個理由（課程裡他特別強調）：
+Josh 選 Motion 不選 GSAP 的兩個理由（課程裡他特別強調）：
 
 1. **GSAP 巨大**，能做動畫之外的 100 件事，學一輩子也學不完。Motion 小巧專注。
 2. **Motion 用 Web Animations API**，動畫跑在 compositor thread，主執行緒卡住時還是能順。GSAP 跑在主執行緒，busy 時掉幀。
 
-第二點 Comeau 也承認有點爭議 — GSAP 社群會反駁。實際 benchmark 看場景。但對 React app 一般使用 Motion 已經足夠。
+第二點 Josh 也承認有點爭議 — GSAP 社群會反駁。實際 benchmark 看場景。但對 React app 一般使用 Motion 已經足夠。
 
 ## 跟 motion/react 的差別
 

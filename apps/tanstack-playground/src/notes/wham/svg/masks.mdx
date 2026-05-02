@@ -90,6 +90,6 @@ hover 時 cutout 從白(完整月)→ 黑(月牙)+ 位置漂移 → 看起來像
 ## Gotchas
 
 - **mask 預設不畫**:如果 `<mask>` 內什麼都沒有,套用後**目標 shape 會整個消失**(等同全黑遮罩)。要記得先放白色 rect 蓋全範圍。
-- **userSpaceOnUse vs objectBoundingBox**:預設 `<mask>` 是 `objectBoundingBox` — 內部座標是 0-1 normalized。一般直覺是 `<mask maskUnits="userSpaceOnUse">` 讓 px 跟 viewBox 一致。Comeau 例子全部用 user space,我們也跟。
+- **userSpaceOnUse vs objectBoundingBox**:預設 `<mask>` 是 `objectBoundingBox` — 內部座標是 0-1 normalized。一般直覺是 `<mask maskUnits="userSpaceOnUse">` 讓 px 跟 viewBox 一致。Josh 例子全部用 user space,我們也跟。
 - **mask 內的 stroke 厚度被 mask 自己 viewBox 影響**:如果 `<mask>` 大小跟 SVG 不一致,stroke 寬會跑掉。
 - **chrome/safari 對 mask 的 GPU 加速**:複雜 mask + transform animation 在某些 GPU 上會掉 fps。複雜 mask 動畫測過再上 production。

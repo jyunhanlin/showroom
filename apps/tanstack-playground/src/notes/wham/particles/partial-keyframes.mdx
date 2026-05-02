@@ -43,4 +43,4 @@ import { PartialVsFullKeyframe, StackedKeyframes } from './partial-keyframes';
 - **順序很重要**:疊兩條 keyframe 時,partial 的那條一定要寫在 `animation:` 裡的**後面**。順序顛倒,partial 那條對其它 keyframe 寫定的值沒有「插嘴」的權限,效果會被覆蓋掉。
 - **舊版 mobile Safari (< iOS 17)**:不會合併兩條 keyframe,會變成「先跑完一條再跑下一條」。如果一定要支援老設備,把兩條 keyframe 拆到父子兩個 div 上跑。
 - **不是相乘是「插值」**:partial keyframe 只負責補缺口的那個值,但兩條 keyframe 同時動同一屬性時,瀏覽器是把 partial 當作「在現值與目標值之間做線性插值」的工具,結果看起來像相乘是因為 fade 那條從 0 補到「當下值」剛好等於乘法。
-- **Utility 集合**:Comeau 的全域 CSS 裡有 `fadeFromOpaque` / `fadeToOpaque` / `fadeFromTransparent` / `fadeToTransparent` 四個小工具,大部分淡入淡出場景直接拿來用就好。
+- **Utility 集合**:Josh 的全域 CSS 裡有 `fadeFromOpaque` / `fadeToOpaque` / `fadeFromTransparent` / `fadeToTransparent` 四個小工具,大部分淡入淡出場景直接拿來用就好。

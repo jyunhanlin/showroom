@@ -82,4 +82,4 @@ Hamburger icon 在 32×32 渲染時，`stroke-width="2"` 在 viewBox 內部 = 24
 - **JSX 是 camelCase: `vectorEffect="non-scaling-stroke"`**。value 必須是 `"non-scaling-stroke"`、`"none"`、`"non-scaling-size"` 等其中一個字串。
 - **可以放 inline `style` 或 attr 或 CSS class** — 三種都認。慣用 CSS class 套 `svg * { vector-effect: non-scaling-stroke }` 比較好維護。
 - **dash pattern 不受影響** — `stroke-dasharray` 的數值在 non-scaling-stroke 下還是 viewBox 單位。dash 跟 gap 在 stretched SVG 還是會被 squash 視覺長度，這 vector-effect 解不了。
-- **這招在 Comeau 課裡標榜「絕招」**，他從 Rich Harris (Svelte 作者) 學到的，1995 spec 就有但極少人知道。`overflow: visible` 跟它合稱 SVG 兩大隱形 quality-of-life CSS。
+- **這招在 Josh 課裡標榜「絕招」**，他從 Rich Harris (Svelte 作者) 學到的，1995 spec 就有但極少人知道。`overflow: visible` 跟它合稱 SVG 兩大隱形 quality-of-life CSS。

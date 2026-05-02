@@ -71,7 +71,7 @@ viewBox 是 3:2，元素被設成 3:1（600×200）。SVG 怎麼處理？
 </style>
 ```
 
-平緩的 swoop 在 1920px 寬看起來好看，但 viewport 縮到 320px 寬被同等比例壓扁，整條曲線變得很陡。Comeau 形容像「toboggan ride 變成 black diamond ski cliff」。
+平緩的 swoop 在 1920px 寬看起來好看，但 viewport 縮到 320px 寬被同等比例壓扁，整條曲線變得很陡。Josh 形容像「toboggan ride 變成 black diamond ski cliff」。
 
 解法是 fixed `min-width` + parent `overflow: hidden`：
 

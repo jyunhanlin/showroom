@@ -13,7 +13,7 @@ import { SpringPlayground } from './intro-to-spring-physics';
 
 - **Stiffness** (= tension)：彈簧多緊。**高 stiffness → 震盪頻率快 + 過衝大**；低 stiffness → 平滑 glide 沒震盪。
 - **Damping** (= friction)：環境多黏。**Damping=0 → 真空 → 永遠震盪**；高 damping → 糖漿，幾乎沒過衝直接到位。
-- **Mass**：物體質量。Comeau 說「我從不調這個」 — 1 永遠 ok，調 stiffness/damping 比較直觀。
+- **Mass**：物體質量。Josh 說「我從不調這個」 — 1 永遠 ok，調 stiffness/damping 比較直觀。
 - **沒有 duration**：spring 動畫多長是物理結果，spring settle 下來才結束。Time-based timing function (CSS transition `1000ms`) 跟 spring 概念衝突，linear() 那節再講怎麼兜。
 - **Tweak 流程**：先把 damping 設 20（中性）→ 調 stiffness 對「速度感」→ 再調 damping 對「震盪 vibe」。
 
@@ -54,7 +54,7 @@ animate(elem, { x: 240 }, { type: 'spring', stiffness: 200, damping: 0 });
 
 Mass 影響「同 stiffness 下物體加速多快」 — 但這跟 stiffness 變化等價，調 stiffness 涵蓋同樣 design space。
 
-Comeau 提到 mass 純粹是 completeness（library 都有這 param）。**保持 mass=1 一輩子都不會踩到坑**。
+Josh 提到 mass 純粹是 completeness（library 都有這 param）。**保持 mass=1 一輩子都不會踩到坑**。
 
 ## 沒有 duration 的反直覺
 

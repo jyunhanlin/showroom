@@ -12,7 +12,7 @@ import { LikeButtonABTest, UnderlineSubpixel } from './transform-benefits';
 ## TL;DR
 
 - `transform` 是 CSS 中最被優化的屬性。每幀 update 只需 compositor 重組圖層,不必重算 layout / paint。
-- 主流敘事是「fps 比較好」,但 Comeau 在 M4 Max 上實測發現:**到 600+ 粒子才看得出 fps 差異**。低階 Android 才會在 50 粒子左右拉開差距。
+- 主流敘事是「fps 比較好」,但 Josh 在 M4 Max 上實測發現:**到 600+ 粒子才看得出 fps 差異**。低階 Android 才會在 50 粒子左右拉開差距。
 - 真正常常被忽略的優勢是 **sub-pixel rendering**(僅 Chromium):2px 的底線用 `height` 動畫只能 0/1/2 三階,用 `transform: scaleY` 卻能跨越畫素的物理極限做漸層,看起來更滑順。
 
 <DemoFrame title="Like button A/B — transform vs top + left">

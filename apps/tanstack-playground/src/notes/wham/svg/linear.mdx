@@ -84,7 +84,7 @@ linear(0, 0.04, 0.16 4%, 0.65, 1.04 17%, 1.16, 1.18, ...);
 
 人腦很擅長辨識「自然 vs 合成」的動畫差異 — 手寫 11 點的 spring 看起來會「機械」，瀏覽器逐段直線跳很明顯。50+ 點才能蓋過這缺陷。
 
-也因此 Comeau 說「linear() 不是給人手寫的」，幾乎都用工具：
+也因此 Josh 說「linear() 不是給人手寫的」，幾乎都用工具：
 
 - **Linear Easing Generator** — 接受 spring stiffness/damping，吐 linear() 字串。可以 simplify / round 控制點數。
 - **Easing Wizard** — 多個 motion type (Spring / Bounce / Wiggle / Overshoot)，可視化編輯 + 4 種 accuracy preset。
@@ -93,7 +93,7 @@ linear(0, 0.04, 0.16 4%, 0.65, 1.04 17%, 1.16, 1.18, ...);
 
 不是因為動畫是 linear（恆速），是因為**每段曲線是 linear**（直線）。整體 timing function 是「polyline of linear segments」，spec 命名取了第一個字 = 直線，跟既有的 `linear` keyword 撞名。
 
-> "It's a CSS naming disaster, but it's the spec." — me, paraphrasing Comeau
+> "It's a CSS naming disaster, but it's the spec." — me, paraphrasing Josh
 
 ## Gotchas
 

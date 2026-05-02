@@ -81,7 +81,7 @@ TanStack Start SPA mode 沒做 cross-document navigation — route 切換是 cli
 
 ## Edge cases & 雷
 
-- **AdBlock 等 extension 注入會中斷 VT**:Comeau 實測 AdBlock 把 `@view-transition` 寫在外部 stylesheet 時 VT 30–40% 機率不 fire,寫在 inline `<style>` 才穩。
+- **AdBlock 等 extension 注入會中斷 VT**:Josh 實測 AdBlock 把 `@view-transition` 寫在外部 stylesheet 時 VT 30–40% 機率不 fire,寫在 inline `<style>` 才穩。
 - **404 / error 頁面要不要也加?** 如果加,navigate 到 broken page 仍會 trigger VT 但找不到對應 element → 部分 morph、部分 fade。看你想不想做。
 - **`prefers-reduced-motion`** 在 cross-doc VT 也適用 — 跟 same-doc 一樣,瀏覽器不會 fire VT 或會用簡化版。
 - **Render-blocking meta tag**:如果 detail page 的 hero 要等 fetch 才出現,可以用 `<link rel="expect">` 或 render-blocking 機制讓瀏覽器等到關鍵 element 進 DOM 才開始 VT。實驗中。

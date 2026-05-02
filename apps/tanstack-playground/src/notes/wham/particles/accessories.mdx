@@ -72,7 +72,7 @@ window.setTimeout(() => {
 }, PARTICLE_DELAY);
 ```
 
-替代方案是聽 `animationend` 事件,但 Comeau 不愛 — 因為:
+替代方案是聽 `animationend` 事件,但 Josh 不愛 — 因為:
 - 多條 keyframe 同時跑,event 觸發兩次。
 - 偶爾不觸發。
 - 「想要稍微快一點 / 慢一點」沒辦法調。
@@ -83,5 +83,5 @@ window.setTimeout(() => {
 
 - **`backwards` fill-mode 是關鍵**:沒寫的話,delay 期間元素會用「最終」狀態(`scale: 1`)而不是「初始」狀態(`scale: 0`),你會看到愛心瞬間跳出再縮回 0 再彈回 1。
 - **`linear()` 瀏覽器支援** (Chrome 113+ / Safari 17.4+):約 90% 用戶能跑;舊瀏覽器掉回到瀏覽器預設 timing function(等同沒 spring)。
-- **疊到爆**:popping circle 三條 + heart 一條 + 粒子兩條(fade + disperse) + twinkle = 一個按鈕 7 條 keyframe。Comeau 自己也說「things are getting gnarly」 — 把 keyframe 集中放一處、用 CSS 變數抽 duration 是最低限度的整理。
+- **疊到爆**:popping circle 三條 + heart 一條 + 粒子兩條(fade + disperse) + twinkle = 一個按鈕 7 條 keyframe。Josh 自己也說「things are getting gnarly」 — 把 keyframe 集中放一處、用 CSS 變數抽 duration 是最低限度的整理。
 - **跟 React state 一起用**:每次點擊要強制重啟 keyframe — 用 `key` prop 或 `data-phase` 之類的 counter,讓 element re-mount / re-trigger。

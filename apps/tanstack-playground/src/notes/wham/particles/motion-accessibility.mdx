@@ -54,7 +54,7 @@ function isMotionEnabled() {
 }
 ```
 
-注意:這只回傳「呼叫當下」的快照。User 改設定後不會自動 update,要監聽 media query 的 change 事件。React 用 hook 包好(Comeau 部落格的 `usePrefersReducedMotion`)。
+注意:這只回傳「呼叫當下」的快照。User 改設定後不會自動 update,要監聽 media query 的 change 事件。React 用 hook 包好(Josh 部落格的 `usePrefersReducedMotion`)。
 
 ## 「看起來在動」的陷阱
 
@@ -68,7 +68,7 @@ function isMotionEnabled() {
 
 - **要關**:位移(translate)、scale、rotate、parallax、視差捲動、scaling carousel、跑馬燈光點。
 - **可以保留**:fade in/out、color transition、box-shadow blur 變化。
-- **不確定就關掉**:Comeau 自己的策略 — 寧可 over-protect,沒人會抱怨「動畫太少」,但會有人因為動畫太多無法用網站。
+- **不確定就關掉**:Josh 自己的策略 — 寧可 over-protect,沒人會抱怨「動畫太少」,但會有人因為動畫太多無法用網站。
 
 ## Override 機制
 
