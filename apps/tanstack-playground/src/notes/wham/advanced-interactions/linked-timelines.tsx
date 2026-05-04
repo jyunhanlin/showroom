@@ -26,7 +26,7 @@ export function LinkedTimelinesDemo() {
             style={{ backgroundColor: SQUARE_FILL, borderRadius: radius, rotate, scale }}
           />
         </div>
-        <div ref={scrollerRef} className="h-72 overflow-y-auto rounded-md bg-slate-100 p-4 text-sm">
+        <div ref={scrollerRef} className="relative h-72 overflow-y-auto rounded-md bg-slate-100 p-4 text-sm">
           <p className="mb-4 text-gray-500">捲動我 ↓</p>
           <p className="mb-32 text-gray-500">…</p>
           <div ref={targetRef} className="rounded border border-dashed border-slate-400 p-3 text-slate-700">
