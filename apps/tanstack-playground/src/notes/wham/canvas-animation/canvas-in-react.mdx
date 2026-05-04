@@ -1,0 +1,167 @@
+---
+title: Canvas in React
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/10-canvas-in-react
+lessonNumber: '04-canvas/10-canvas-in-react'
+order: 10
+summary: React 是 declarative，canvas 是 imperative — 兩個世界觀靠 useRef + useEffect 接起來。Strict Mode 會 double-invoke effect，cleanup 一定要把 rAF / interval / listener 全部砍掉。State 進 canvas 用 ref-bridge，不要 re-init。
+tags: [canvas, react, useRef, useEffect, strict-mode, cleanup]
+---
+
+import CanvasInReact from './canvas-in-react';
+
+## TL;DR
+
+- 通道兩件事:`useRef<HTMLCanvasElement>(null)` 拿到 element，`useEffect(() => {...}, [])` 做 setup + cleanup。
+- **Cleanup 是必修**。`cancelAnimationFrame` + `removeEventListener` + `clearInterval`。Strict Mode dev 時會 mount → unmount → mount，沒清乾淨直接兩個 rAF loop 在跑。
+- **State 進 canvas 用 ref-bridge**:把 state 寫到 `useRef` 上，rAF 迴圈讀 ref 而不是讀 closure。不然 state 一變 effect 重跑，canvas 從頭 reset。
+- 結構性 prop (canvas 尺寸、初始參數) 才把它放進 effect deps；視覺參數 (顏色、速度、count) 都走 ref-bridge。
+
+<DemoFrame title="Canvas + React state — slider 改 dot 數，canvas 不 re-init">
+  <CanvasInReact />
+</DemoFrame>
+
+## Two worlds
+
+React 的世界觀是「給我一個 component tree，我幫你 reconcile DOM」。Canvas 的世界觀是「你拿 ctx，自己每幀畫 pixel」。React 不會 reconcile canvas 內容 — bitmap 對 React 是黑盒。
+
+接點是 `<canvas>` 這個 DOM element 本身。React 渲染 `<canvas ref={ref} />`，把 element 給你；接下來你在 effect 裡用 `ref.current.getContext('2d')` 拿到 imperative API。
+
+## The minimal pattern
+
+```tsx
+function MyCanvas() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d')!;
+    let rafId = 0;
+
+    function draw() {
+      // ...每幀畫東西...
+      rafId = requestAnimationFrame(draw);
+    }
+    rafId = requestAnimationFrame(draw);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} />;
+}
+```
+
+三個重點:
+
+1. **`if (!canvas) return`**:`canvasRef.current` 在第一次 effect 跑時保證有值 (effect 在 commit 之後)，但 TS narrow 還是要寫。
+2. **`[]` deps**:effect 只跑一次，rAF 迴圈持續跑。如果 deps 變化會 cleanup → re-init，canvas 從頭重畫。
+3. **return cleanup**:`cancelAnimationFrame` 把迴圈停掉。沒這行，unmount 後 rAF 還在跑、ctx ref 已死、`getBoundingClientRect` 等噴錯。
+
+## Strict Mode 是壓力測試
+
+React 18+ dev 模式下，effect 會跑兩次:`setup → cleanup → setup`。這是故意的 — 沒寫好 cleanup 的 effect 會在這裡爆。常見症狀:
+
+- 兩個 rAF 迴圈同時跑，畫面動兩倍快或閃。
+- `setInterval` 沒 clear，spawn rate 變兩倍，粒子越來越多。
+- `addEventListener` 沒 remove，scroll handler 跑兩次。
+
+修法是 cleanup function 把 setup 階段做的所有「外部副作用」都復原:
+
+```ts
+useEffect(() => {
+  const id = setInterval(spawn, 200);
+  window.addEventListener('resize', onResize);
+  let rafId = requestAnimationFrame(draw);
+  // ...
+
+  return () => {
+    cancelAnimationFrame(rafId);
+    clearInterval(id);
+    window.removeEventListener('resize', onResize);
+  };
+}, []);
+```
+
+`setupCanvas` 自己的 resize listener 也要清 — 它回傳 `disposeResize` 函式給你呼叫。
+
+## Threading state into canvas: ref-bridge
+
+最容易踩坑的場景:state 變化要影響 canvas，但 canvas 不該 re-init。
+
+```tsx
+// ❌ 把 count 放進 deps，每次拉 slider 整個 canvas 重來
+useEffect(() => {
+  // setup + rAF loop reading count via closure
+}, [count]);
+```
+
+正確寫法是把 state 同步到 ref，rAF 迴圈讀 ref:
+
+```tsx
+const [count, setCount] = useState(8);
+const countRef = useRef(count);
+
+useEffect(() => { countRef.current = count; }, [count]);
+
+useEffect(() => {
+  // ... setup ...
+  function draw() {
+    const n = countRef.current;  // 每幀讀最新值
+    // ...
+  }
+  // ...
+}, []);  // <- 這個 effect 永遠 [] deps
+```
+
+Pattern 名字叫 **ref-bridge**:state 是 React 認的「rerender 觸發器」，ref 是 React 不認的「mutable cell」。把當前值放在 ref 上，rAF 迴圈每幀讀，state 改變的 propagation 不需要 re-init。
+
+## When deps actually do change setup
+
+不是所有 state 都該 ref-bridge。**結構性的東西**該重 init:
+
+| Prop | Ref-bridge | Effect deps |
+|---|---|---|
+| 顏色、速度、粒子數量 | ✅ | ❌ |
+| Canvas 尺寸、座標系 | ❌ | ✅ |
+| 初始化參數 (seed、init particle list) | ❌ | ✅ |
+| 是否啟用某 feature 的 boolean | 看狀況 | 看狀況 |
+
+判斷原則:**改這個值需要重來「畫面狀態」嗎？** 改顏色不需要 (下幀套上去)；改 canvas 尺寸需要 (重新 setup ctx + scale)。
+
+## Interactive canvas: mouse + state
+
+點 canvas 觸發 React state 變化，最自然的寫法是綁在 `<canvas onClick={...}>`:
+
+```tsx
+function onClick(e: React.MouseEvent<HTMLCanvasElement>) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  setHits(prev => [...prev, { x, y }]);
+}
+
+// 在 rAF loop 裡讀 hitsRef.current 畫
+```
+
+Mouse 座標要從 `getBoundingClientRect` 算，不能直接用 `clientX/Y`。那是 viewport 座標、不是 canvas 內部座標。
+
+## When to use a library
+
+對於 2D canvas + 簡單動畫，原生 `useEffect` + ref 完全夠用，整個 pattern 一個 file 可以講清楚。但兩個情境用 library 更省:
+
+- **3D / WebGL**:`@react-three/fiber` 把 three.js 的場景圖換成 React component tree。Component 描述 mesh / light / camera，react reconcile 整個 scene。
+- **複雜 2D scene graph (互動式編輯器、遊戲)**:`react-konva` / `pixi-react` 給你 Stage / Layer / Sprite 等 component，每個是 canvas 上的 logical entity，可以加 onClick / onDrag。對於有 hundreds of interactive entity 比手刻 hit-test 省力。
+
+如果只是 particle system / generative art / 自己控制每幀 ([rocketship](/wham/canvas-animation/rocketship)、[fireworks](/wham/canvas-animation/fireworks)、[trails](/wham/canvas-animation/trails) 都是這類)，don't bring a library。imperative loop 就是最自然的 fit。
+
+## Gotchas
+
+- **`canvasRef.current` 在 render 中讀是 null**。Render 階段 ref 還沒指派；要在 effect / event handler 裡讀。
+- **Effect 順序**:子元件的 effect 先跑、parent 後跑。如果 parent effect 用到子元件的 canvas，要靠 callback ref 或 lift state。
+- **`useLayoutEffect` vs `useEffect`**:對於 canvas setup 沒差 (canvas paint 不依賴 layout 完成的時機)。但 measure DOM 後再設 canvas size 要用 `useLayoutEffect` 避開 flash。
+- **Resize observer + ResizeObserver 派發 `window.resize`**:`responsive-canvas` 那篇用這個 trick，讓 setupCanvas 的 resize listener 在 wrapper 尺寸變化時也跑。原生 window resize 不會在「父 element 改大小但 viewport 沒變」時 fire。
+- **State 改太頻繁 (mouse move per frame)**:每次 setState 觸發一次 React rerender，60fps × setState = 60 次 rerender/sec。如果只是要把座標餵 canvas，直接寫進 ref，不要進 state。
+- **Don't `useEffect(() => { ... }, [count])` for animation**:除非 count 真的需要重 init。否則用 ref-bridge。

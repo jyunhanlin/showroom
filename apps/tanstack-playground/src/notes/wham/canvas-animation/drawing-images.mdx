@@ -1,0 +1,106 @@
+---
+title: Drawing Images
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/01.04-loading-images
+lessonNumber: '04-canvas/01.04-loading-images'
+order: 1.4
+summary: drawImage 三種 arity (3 / 5 / 9 個參數)。9-arg 形式做 sprite slicing — 從 source rect 取一塊，畫到 dest rect，順便縮放。Source 可以是 img / video / canvas。
+tags: [canvas, drawImage, sprite, image-loading, smoothing]
+---
+
+import DrawingImages from './drawing-images';
+
+## TL;DR
+
+- `drawImage(source, dx, dy)` — 在 (dx, dy) 落原尺寸。
+- `drawImage(source, dx, dy, dw, dh)` — 縮放到 (dw, dh)。
+- `drawImage(source, sx, sy, sw, sh, dx, dy, dw, dh)` — 9-arg：從 source 的 (sx, sy, sw, sh) 取一塊，畫到 (dx, dy, dw, dh)。**sprite sheet 切圖就是用這個**。
+- Source 可以是 `<img>`、`<canvas>`、`<video>`、`ImageBitmap`、`OffscreenCanvas`。任何瀏覽器能解碼成 raster 的東西都行。
+- 載入 `<img>` 要等 `decode()` 或 `onload`，不然 `drawImage` 會畫空白 (但不噴錯)。
+
+<DemoFrame title="9-arg drawImage:從 sprite sheet 切出每個 cell，畫到不同尺寸">
+  <DrawingImages />
+</DemoFrame>
+
+## Three arities
+
+```ts
+ctx.drawImage(img, 100, 50);                    // 原尺寸
+ctx.drawImage(img, 100, 50, 200, 200);          // 縮放成 200×200
+ctx.drawImage(img, 0, 0, 64, 64, 100, 50, 200, 200);
+//             |   |--source rect--|  |--dest rect---|
+//             |   從 source bitmap (0,0)-(64,64) 切一塊
+//             |                       畫到目標 (100,50)-(300,250)
+```
+
+9-arg 是最常用的 — sprite sheet 就靠它把單一張大圖切成多個小圖在不同位置畫。
+
+## Source coords are bitmap coords
+
+第二、三、四個參數 (sx, sy, sw, sh) 是 source 的 **bitmap pixel** 座標，**不是 CSS pixel**。這個區別在三種情況會踩坑:
+
+- **`<img>` 檔案**:source bitmap = 圖檔解碼後的真實尺寸 (`img.naturalWidth` × `img.naturalHeight`)。如果 `<img>` CSS size 是 100×100 但檔案是 400×400，sprite slicing 要用 400×400 座標。
+- **Retina canvas as source**:如果 source 是另一個 canvas 而那個 canvas 是 DPR-aware 的 (bitmap = CSS × dpr)，source 座標是 dpr 後的數字。`sx = 64` 在 DPR=2 上只切到原 cell 的一半。
+- **`<video>`**:source 是 `videoWidth` × `videoHeight`，未必跟 element 顯示尺寸相同。
+
+## Loading images safely
+
+`<img>` 的 raster data 是非同步載入。剛 `new Image()` + `src = ...`，`drawImage` 馬上呼叫會畫空白 (沒噴錯，更難 debug):
+
+```ts
+const img = new Image();
+img.src = '/sprite.png';
+
+// ❌ 競態 — 還沒載完就畫
+ctx.drawImage(img, 0, 0);
+```
+
+兩種等法:
+
+```ts
+// 1. onload callback
+img.onload = () => ctx.drawImage(img, 0, 0);
+
+// 2. await img.decode() (推薦) — 不只 loaded 還包含 decode 完成
+const img = new Image();
+img.src = '/sprite.png';
+await img.decode();
+ctx.drawImage(img, 0, 0);
+```
+
+`decode()` 比 `onload` 嚴格 — `onload` 只保證 bytes 下載完，`decode()` 保證已經解碼成 bitmap 可立即用。`drawImage` 在已 loaded 但未 decode 的 image 上會 lazy-decode (block main thread 一下)。
+
+## Source 可以是 canvas
+
+這篇 demo 沒載任何 image 檔 — source 是另一個 canvas (`document.createElement('canvas')`、絕不 mount 進 DOM)。canvas 直接當 drawImage source，可以省掉外部資源管理。
+
+```ts
+const sheet = document.createElement('canvas');
+sheet.width = 128;
+sheet.height = 128;
+const sheetCtx = sheet.getContext('2d')!;
+// ...在 sheetCtx 上畫好你要的 sprite sheet...
+
+// 主畫面 ctx 上 slice 用
+ctx.drawImage(sheet, 0, 0, 64, 64, 100, 50, 200, 200);
+```
+
+這個 pattern 也叫 **offscreen rendering**。重的 batch rendering 可以丟進 Worker 用 `OffscreenCanvas`，主 thread 只 drawImage 結果。詳見 [Offscreen Canvas](/wham/canvas-animation/offscreen-canvas)。
+
+## Smoothing
+
+縮放 image 預設會 bilinear / trilinear。Pixel art 場景不要 — 設 `ctx.imageSmoothingEnabled = false` 切回 nearest-neighbor:
+
+```ts
+ctx.imageSmoothingEnabled = false;
+ctx.drawImage(pixelArt, 0, 0, 16, 16, 0, 0, 256, 256);  // 16×放大，銳利方塊
+```
+
+`imageSmoothingQuality` ('low' / 'medium' / 'high') 讓 enabled 模式下選質量。Default 'low'，畫面多 image 時調 'medium' 效果可見。
+
+## Gotchas
+
+- **Cross-origin canvas tainting**:從別的 origin load `<img>` 然後 `drawImage` 進 canvas，那個 canvas 變 "tainted" — 後續 `getImageData()` / `toDataURL()` 會丟 `SecurityError`。修法:`<img crossorigin="anonymous">` + 對方 server 回 `Access-Control-Allow-Origin`。
+- **`drawImage` 在沒 load 的 img 上**:不噴 error，靜悄悄畫空白。看到「圖沒出現」第一個檢查 `img.complete && img.naturalWidth > 0`。
+- **0 寬高 sprite slice**:`sw = 0` 或 `sh = 0` 會丟 `IndexSizeError`。動態算 source rect 時 clamp 一下。
+- **GIF 只畫第一幀**。canvas 不會自動播 GIF 動畫。要動畫得每幀換 source。
+- **SVG image 縮放是向量**。`<img src="x.svg">` 進 canvas 後，`drawImage` 縮放會 raster 化 — 縮太大會糊。需要銳利 SVG 就改用 `Path2D` 直接畫。

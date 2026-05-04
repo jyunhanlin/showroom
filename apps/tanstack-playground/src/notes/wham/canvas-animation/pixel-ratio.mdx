@@ -1,0 +1,78 @@
+---
+title: Pixel Ratio
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/01.02-pixel-ratio
+lessonNumber: '04-canvas/01.02-pixel-ratio'
+order: 1.2
+summary: Retina 螢幕 1 CSS px 對應 2-3 個 device px。canvas bitmap 沒乘 DPR 會被瀏覽器 bilinear 拉糊。bitmap = CSS × DPR + ctx.scale(dpr,dpr) 才有像素級銳利度。
+tags: [canvas, dpr, retina, hidpi, setupCanvas]
+---
+
+import PixelRatio from './pixel-ratio';
+
+## TL;DR
+
+- CSS pixel ≠ device pixel。Retina 上 `window.devicePixelRatio = 2` 或 `3`，每個 CSS px 對應 4-9 個實體 pixel。
+- Canvas bitmap 預設用 CSS 尺寸，瀏覽器再 bilinear 拉成實體尺寸 — 結果就是糊。
+- 修法兩步:`canvas.width/height = cssSize × dpr`，再 `ctx.scale(dpr, dpr)` 讓 drawing API 還是收 CSS 座標。
+- 我們的 `setupCanvas` helper 已經把這套包好，所有 demo 都靠它。
+
+<DemoFrame title="Naive vs DPR-aware — Retina 螢幕上才看得到差異">
+  <PixelRatio />
+</DemoFrame>
+
+## Two sizes, not one
+
+Canvas 同時有兩個尺寸:
+
+- **CSS size** — `<canvas>` 元素佔據的 layout 空間，由 CSS 決定 (`width: 200px`、Tailwind `w-full`)。
+- **Bitmap size** — 內部 pixel buffer 的尺寸，由 `canvas.width` / `canvas.height` 屬性決定 (預設 300×150)。
+
+兩個尺寸沒有自動連動。把 CSS size 設成 200×100、bitmap 留在預設 300×150，瀏覽器會把 300×150 的 bitmap squash 進 200×100 的盒子裡 — 變形糊掉。`<img>` 不會這樣是因為 raster image source 通常解析度比顯示尺寸高，瀏覽器是 downsample 不是 upsample。canvas 的 source = bitmap = 你給的那個尺寸，沒得 downsample。
+
+## Why naive canvas is blurry
+
+把 bitmap 設成 CSS 尺寸 (200×100) 看起來理所當然。但在 DPR=2 的螢幕上，這個 200×100 的盒子實際佔 400×200 個 device pixel。瀏覽器要把 200×100 的 bitmap 撐到 400×200 — bilinear 內插，就糊了。
+
+最戲劇化的是 1px line:原本應該是「一條 device pixel 寬的銳利線」，被拉成「兩排 device pixel 各 50% 不透明的線」。
+
+## The fix
+
+```ts
+const dpr = window.devicePixelRatio || 1;
+const rect = canvas.getBoundingClientRect();
+canvas.width = Math.round(rect.width * dpr);
+canvas.height = Math.round(rect.height * dpr);
+ctx.scale(dpr, dpr);
+```
+
+兩件事:
+
+1. **Bitmap 放大 DPR 倍**。bitmap 變成 400×200，跟 device pixel 1:1，沒有插值。
+2. **`ctx.scale(dpr, dpr)`**。drawing API 還是收 CSS 座標 — `fillRect(0, 0, 200, 100)` 自動內部乘上 dpr 寫到 400×200 的 bitmap。
+
+如果省掉 step 2，整個 codebase 每個 draw call 都要自己乘 dpr，一處沒乘就斷一塊。`ctx.scale` 把這件事一次處理掉。
+
+## Re-running on resize
+
+DPR 不是常數:把視窗從 retina 拖到外接 1080p screen，`window.devicePixelRatio` 會變。CSS 尺寸也可能變 (responsive layout)。所以這套 setup 要綁在 resize listener 上重跑:
+
+```ts
+function update() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
+  ctx.scale(dpr, dpr);
+}
+window.addEventListener('resize', update);
+update();
+```
+
+`setupCanvas` 已經這樣做。注意 `canvas.width` 一被指定就清空整個 bitmap (含 transform stack) — 所以每次 resize 都要重新跑 `ctx.scale`，並且重畫所有內容。動畫 demo 因為下一幀 rAF 會重畫，所以 resize 自動恢復；靜態 demo (像這篇) 就要手動 listener 重畫。
+
+## Gotchas
+
+- **`Math.round` 一定要加**。`rect.width * dpr` 可能是 399.6，不同瀏覽器對 fractional `canvas.width` 處理不一 (floor / ceil / round)，留個 1px 邊界誤差。
+- **Sub-pixel coordinates 還是會糊**。即使 bitmap 對齊了，`ctx.lineWidth = 1` 在整數座標上 stroke 會跨兩個 pixel — canvas API stroke 預設位置在 path 中心。要銳利 1px line 就 `moveTo(10.5, ...)`，或用 `fillRect(10, 0, 1, h)`。
+- **`ctx.scale` 是累積的**。Transform stack 沒 reset 連續呼叫兩次 setup，scale 變 dpr²。`canvas.width = ...` 會清掉 transform 所以 setupCanvas 的 update 隱含重置；但如果手寫，要記得 `ctx.setTransform(1, 0, 0, 1, 0, 0)` 後再 scale。
+- **本機看不出差別 = DPR=1**。`console.log(window.devicePixelRatio)` 是 debug 第一步。非 retina 外接螢幕、或瀏覽器 zoom 不是 100% 時 DPR 都可能變化，naive vs sharp 兩邊就一樣。

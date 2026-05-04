@@ -1,0 +1,72 @@
+---
+title: Canvas vs. SVG
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/03-canvas-vs-svg
+lessonNumber: '04-canvas/03-canvas-vs-svg'
+order: 3
+summary: Raster vs vector 是兩條完全不同的 rendering 路線。SVG = 向量 DOM，每個形狀是一個 element，瀏覽器可以無限放大、a11y 友善、hit-test 免費；Canvas = imperative pixel buffer，畫完就只剩像素，量大 (>10k particles) 才跑得動。
+tags: [canvas, svg, raster, vector, decision, a11y]
+---
+
+## TL;DR
+
+- **SVG** = vector DOM。每個形狀是 `<circle>` / `<path>` element，瀏覽器自動處理放大不糊、a11y、hit-test、CSS 動畫。代價:DOM element 多 (>幾千) 開始卡。
+- **Canvas** = raster pixel buffer。畫完就只剩 RGBA 像素，沒 DOM、沒 hit-test、沒 a11y。代價低、能跑數萬 particle。
+- 決策原則:**有限數量 + 需要互動 / 要 a11y / 要 print → SVG**；**動畫密集 / 元素超多 / 像素級效果 (blur / shader / pixel manipulation) → Canvas**。
+
+## Raster vs vector，30 秒
+
+| | Raster | Vector |
+|---|---|---|
+| 儲存單位 | pixel grid | 數學描述 (path / shape) |
+| 放大 | 糊 (內插) | 銳利 (重新 rasterize) |
+| 檔案大小 | ∝ pixel 數 | ∝ shape 複雜度 |
+| 例 | PNG / JPEG / Canvas | SVG / Font / PDF |
+
+向量在輸出時還是要 rasterize 成 pixel — 但因為描述是數學的，每次能用當前的 device DPR 重新 raster 出最銳利的版本。canvas 的 bitmap 一旦寫成 pixel 就固定了，放大只能 bilinear (見 [Pixel Ratio](/wham/canvas-animation/pixel-ratio))。
+
+## Decision matrix
+
+| 維度 | SVG | Canvas |
+|---|---|---|
+| **元素數量** | < 幾千 | 幾萬都 OK |
+| **解析度獨立** | ✅ 自動跟著 DPR / zoom | ⚠️ 要自己 setupCanvas |
+| **A11y / SEO** | ✅ DOM 可讀，可加 `role` / `aria-label` | ❌ 對 screen reader 是黑盒，要 fallback `<canvas>` 子元素 |
+| **Hit-testing (click / hover)** | ✅ 免費 (DOM event) | ❌ 自己算 (point-in-rect / point-in-circle) |
+| **CSS 動畫 / hover** | ✅ 直接套 `:hover { fill: red }` | ❌ 要重畫 frame |
+| **Pixel-level 效果** | ⚠️ filter / mask 可以但慢 | ✅ blur / blend / shader / `getImageData` |
+| **匯出 PDF / 印刷** | ✅ 向量 | ❌ Raster |
+| **Server-side render** | ✅ HTML 一部分 | ❌ 需要 headless browser |
+| **Bundle / DOM cost** | DOM tree 增大 | 一個 `<canvas>` element |
+
+## When SVG wins
+
+- **互動式圖表** (D3 體系):每個 bar / dot 是 element，可以 hover / click / a11y 標籤 / CSS transition。
+- **icon / illustration**:無限縮放，跟系統字級放在一起不會糊。
+- **動態 UI badges / loading spinner**:< 幾十個 element，CSS 動畫直接搞定。
+- **要列印或匯出 PDF 的東西**:報表、設計工具輸出。
+- **需要無障礙的東西**:政府 / 金融 / 教育類 web app，screen reader 要能讀懂圖。
+
+## When Canvas wins
+
+- **粒子系統** ([rocketship](/wham/canvas-animation/rocketship)、[fireworks](/wham/canvas-animation/fireworks)、[trails](/wham/canvas-animation/trails)):同時跑幾百到幾萬 particle，SVG DOM 直接卡。
+- **Pixel manipulation**:image filter、generative art、shader 風格 (canvas 2D + `getImageData` 或 WebGL)。
+- **連續 raster 效果**:[trails](/wham/canvas-animation/trails) 半透明覆蓋疊出尾跡，SVG 沒對應 idiom。
+- **遊戲 / 高密度 animation loop**:每幀重畫整個畫面比改 DOM 屬性快很多。
+- **數據視覺化大量點**:scatter plot 幾萬點，canvas 流暢；SVG 死當。
+
+## Mixed approach 也常見
+
+實務上不一定二選一:
+
+- **SVG 包 canvas**:整個 layout 用 SVG (軸、標籤、互動標記)，密集資料層用 `<foreignObject>` 包一個 `<canvas>` 畫粒子。
+- **Canvas + DOM overlay**:canvas 畫主視覺，hover label / tooltip 用一般 DOM 絕對定位疊上去 — 拿到 a11y、保留 canvas 性能。
+- **Canvas raster export from SVG**:設計用 SVG 編輯，輸出時 `drawImage(svgImage, ...)` rasterize 成 PNG。
+
+## Heuristic
+
+決定不下來就問:「這個畫面元素的『身份』需要被 DOM 認得嗎？」
+
+- 需要 (hover / click / 讀出來 / CSS 動 / a11y) → **SVG**
+- 不需要 (純視覺、動就好) → **Canvas**
+
+「有限數量、有意義」靠 SVG；「大量、純視覺」靠 Canvas。Whimsical animation 偏 Canvas 是因為動畫密度高、互動需求低、視覺密度才是重點。

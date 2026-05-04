@@ -1,0 +1,138 @@
+---
+title: Transforms
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/05-transforms
+lessonNumber: '04-canvas/05-transforms'
+order: 5
+summary: translate / rotate / scale 三件事改寫 ctx 的 coordinate system。順序很重要 — translate→rotate ≠ rotate→translate。save/restore 是 transform stack，是 nested transform 的唯一活路。
+tags: [canvas, transforms, translate, rotate, scale, save-restore, pivot]
+---
+
+import Transforms from './transforms';
+
+## TL;DR
+
+- `ctx.translate(x, y)` 把原點搬到 (x, y)。`ctx.rotate(rad)` 繞當前原點旋轉。`ctx.scale(sx, sy)` 縮放。
+- **順序很重要**:`translate(100, 0).rotate(0.5)` 跟 `rotate(0.5).translate(100, 0)` 結果不同。把每個 transform 想成「對下一個 draw call 生效的座標變換」。
+- **save/restore 是堆疊**。`save()` 把當前 transform + style 推到 stack，`restore()` pop 出來。Nested transform 沒這對就洩漏。
+- Pivot pattern:**`translate(pivot)` → `rotate(angle)` → 用 `(-w/2, -h/2)` 為 origin 畫**。讓物件繞自己中心轉。
+
+<DemoFrame title="Transform stack:中心方塊轉 + 衛星跟著轉 + 衛星自轉">
+  <Transforms />
+</DemoFrame>
+
+## Three transforms
+
+```ts
+ctx.translate(x, y);        // 原點搬到 (x, y)
+ctx.rotate(radians);        // 繞當前原點旋轉
+ctx.scale(sx, sy);          // 縮放 (1 = 不變、-1 = 鏡射)
+```
+
+每個 transform call 都是 **mutate ctx 的 transform matrix**，下一個 draw call 自動套用這個 matrix:
+
+```ts
+ctx.translate(100, 50);
+ctx.fillRect(0, 0, 30, 30);   // 實際畫在 (100, 50)
+ctx.fillRect(50, 0, 30, 30);  // 實際畫在 (150, 50)
+```
+
+「我要畫的圖像在 (100, 50)」 vs 「我把畫板搬到 (100, 50) 然後在原點畫」 — canvas 是後者的世界觀。
+
+## Order matters
+
+```ts
+// A:先平移再旋轉 — 物件在 (100, 0) 繞原點 (100, 0) 自轉
+ctx.translate(100, 0);
+ctx.rotate(angle);
+ctx.fillRect(-15, -15, 30, 30);
+
+// B:先旋轉再平移 — 整個座標系先轉了，平移方向跟著轉
+ctx.rotate(angle);
+ctx.translate(100, 0);
+ctx.fillRect(-15, -15, 30, 30);
+```
+
+A 是「物件在 (100, 0) 自轉」。B 是「物件繞原點繞圈，半徑 100」 — 這就是 orbit pattern。
+
+兩個操作不交換的根因:matrix 乘法不交換 (`T·R ≠ R·T`)。實作上 canvas 是把每個 transform 從右乘到當前 matrix:`matrix = matrix · newOp`，所以 A 等於 `I · T · R`，B 等於 `I · R · T`。
+
+## The pivot pattern
+
+要讓一個方塊繞自己中心轉，不能直接 `rotate` — 那會繞 canvas 原點 (左上角):
+
+```ts
+// ❌ 錯：繞 (0, 0) 轉
+ctx.rotate(angle);
+ctx.fillRect(100, 100, 50, 50);
+
+// ✅ 對：搬原點 → 轉 → 以 (-w/2, -h/2) 為左上角畫
+ctx.translate(125, 125);            // pivot 點
+ctx.rotate(angle);
+ctx.fillRect(-25, -25, 50, 50);     // 中心對齊原點
+```
+
+三步驟:**translate 到 pivot → rotate → 用負一半為 offset 畫**。所有「繞自己中心轉」的東西都這樣寫。
+
+## save/restore stack
+
+Transform 是 sticky 的 — 設了不會自動還原。Animation loop 每幀都 `translate(cx, cy).rotate(angle)`，第 60 幀已經跑到 cx*60、轉了 60 倍。
+
+```ts
+ctx.save();                  // push 當前 transform + style
+ctx.translate(cx, cy);
+ctx.rotate(angle);
+ctx.fillRect(-25, -25, 50, 50);
+ctx.restore();               // pop 回 push 之前
+```
+
+`save` 也保 `fillStyle` / `strokeStyle` / `lineWidth` / `font` / `globalAlpha` 等等所有 state。Nested 場景 (parent transform 套 child transform) 用 stack 才不會手動算 inverse:
+
+```ts
+ctx.save();
+ctx.translate(cx, cy);
+ctx.rotate(parentAngle);                 // parent system
+ctx.fillRect(-25, -25, 50, 50);          // 中心方塊
+
+for (let i = 0; i < 4; i++) {
+  ctx.save();
+  ctx.rotate(i * Math.PI / 2);           // 0°, 90°, 180°, 270°
+  ctx.translate(70, 0);                  // 跑到衛星位置
+  ctx.rotate(satelliteAngle);            // 衛星自轉
+  ctx.fillRect(-8, -8, 16, 16);
+  ctx.restore();                         // 回到 parent system
+}
+ctx.restore();                           // 回到 canvas 原始 system
+```
+
+每個衛星的 transform stack 是 `[parent translate→rotate] + [orbit rotate→translate→self rotate]`。`restore` 內側那個讓下一個衛星從同一個 parent system 起算 — 不然第二個衛星的 `rotate(90°)` 會疊在前一個的 `rotate(0°+self)` 上。
+
+## setTransform — full reset
+
+要把整個 transform 砍掉重設，用 `setTransform(a, b, c, d, e, f)`:
+
+```ts
+ctx.setTransform(1, 0, 0, 1, 0, 0);   // identity (重置)
+```
+
+這個技巧在 `clearRect` 整個 canvas 時很有用 — 如果 transform 還沒 reset，`clearRect(0, 0, w, h)` 只清「目前 coordinate system 的左上 0,0 到 w,h」，不一定是整個畫面。所以 animation loop 第一行可以是:
+
+```ts
+ctx.setTransform(1, 0, 0, 1, 0, 0);
+ctx.clearRect(0, 0, dimensions.width, dimensions.height);
+```
+
+但**注意**:`setTransform` 會把 setupCanvas 的 `ctx.scale(dpr, dpr)` 也清掉。如果 setup 時有 DPR 處理，reset 後要重新 scale，或乾脆不用 setTransform — 而是靠 save/restore 一直配對。我自己偏好 save/restore，邏輯比較不容易出錯。
+
+## Scale gotchas
+
+- **`scale(-1, 1)` = 水平鏡射**。但鏡射後 text 也是反的。要鏡射 sprite + 正常 text 就得分開 save/restore。
+- **`scale(2, 2)` 後 lineWidth 也變 2**。Stroke width 是套 transform 之後的值。要保持 1px stroke 就在 scale 之外設 lineWidth，或用 `1 / currentScale`。
+- **負 scale 翻轉填色順序**。`fillRect` 不影響但複雜 path 可能在 `even-odd` fill rule 下行為不同。
+
+## Gotchas
+
+- **`save` / `restore` 不配對**。漏 `restore` = transform stack 越疊越深；多 `restore` = pop 出 underflow，後面 transform 全錯位。Animation loop 內 `save`/`restore` 永遠寫成對。
+- **以為 `ctx.rotate` 是度數**。是 radians。用 `convertDegreesToRadians(deg)` 包一層 (這個 codebase 已經有 helper)。
+- **`rotate` 方向**。順時針正向 (跟數學慣例反)，因為 canvas y 軸向下。
+- **DPR scale 是隱含的**。`setupCanvas` 已經呼叫 `ctx.scale(dpr, dpr)` 在 transform stack 底層 — 你的 `translate / rotate / scale` 都疊在它之上。`setTransform(1,0,0,1,0,0)` 會清掉，所以動 transform 用 save/restore 而不是 setTransform。
+- **transform 不影響 clearRect 的覆蓋範圍**。`clearRect(0, 0, w, h)` 是相對當前座標系；transform 沒重置時可能漏清。要清整個 canvas 就 reset transform 後再 clearRect，或用 `ctx.canvas.width = ctx.canvas.width` (粗暴但有效，會清 transform 跟 bitmap)。

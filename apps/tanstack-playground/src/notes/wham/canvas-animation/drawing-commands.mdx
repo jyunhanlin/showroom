@@ -1,0 +1,120 @@
+---
+title: Drawing Commands
+sourceUrl: https://courses.joshwcomeau.com/wham/04-canvas/01.03-drawing-commands
+lessonNumber: '04-canvas/01.03-drawing-commands'
+order: 1.3
+summary: Canvas 2D 兩種畫圖風格 — immediate (fillRect / strokeRect) 跟 path-based (beginPath → moveTo/arc/lineTo → fill/stroke)。state (fillStyle / lineWidth / font) 是 sticky 的，靠 save/restore 隔離。
+tags: [canvas, drawing, path, fillRect, arc, bezier, fillText, save-restore]
+---
+
+import DrawingCommands from './drawing-commands';
+
+## TL;DR
+
+- 兩條畫圖路線:**immediate** (`fillRect` / `strokeRect` / `clearRect`) 直接落筆；**path-based** (`beginPath` → `moveTo` → `lineTo` / `arc` / `bezierCurveTo` → `fill()` / `stroke()`) 先描述形狀再渲染。
+- Path 一定要 `beginPath()` 開頭。忘了 = 上一個 path 還在 buffer 裡，這次 `fill()` 會把上次的也重畫一次，不一致 bug。
+- State (`fillStyle` / `strokeStyle` / `lineWidth` / `font` / `textBaseline` / transform) 是 sticky 的 — 設了就一直留著，直到下次再設或 `restore`。
+
+<DemoFrame title="六種最常用的 drawing primitive">
+  <DrawingCommands />
+</DemoFrame>
+
+## Immediate vs path-based
+
+Canvas 2D 給你兩條路線，做的是同一件事:
+
+```ts
+// Immediate — 一行就畫好
+ctx.fillRect(10, 10, 40, 40);
+
+// Path-based — 描述形狀再渲染
+ctx.beginPath();
+ctx.rect(10, 10, 40, 40);
+ctx.fill();
+```
+
+兩種輸出視覺上一樣。但 path-based 給你彈性:
+
+- 同一個 path 可以同時 `fill()` + `stroke()`，得到「實心 + 邊框」的圖形。
+- 形狀可以是任意組合 (`moveTo` + `lineTo` + `arc` + `bezierCurveTo` 串起來)，不只 rect / circle。
+- Path 可以 `closePath()` 接回起點，stroke 出來才會閉合。
+
+`fillRect` / `strokeRect` / `clearRect` 是 path-based 的便捷糖。其他形狀都得走 path-based。
+
+## Path commands cheatsheet
+
+| 指令 | 做什麼 |
+|---|---|
+| `beginPath()` | **開新 path**。沒呼叫 = 上一個 path 還在 buffer 裡 |
+| `moveTo(x, y)` | 抬筆移動到 (x, y)，不畫線 |
+| `lineTo(x, y)` | 從現在位置畫直線到 (x, y) |
+| `arc(cx, cy, r, start, end, ccw?)` | 弧。`start` / `end` 是 radians，0 在 3 點鐘方向 |
+| `arcTo(x1, y1, x2, y2, r)` | 圓角:從現在位置往 (x1,y1) 走，遇到 (x2,y2) 之間用半徑 r 圓弧 |
+| `bezierCurveTo(c1x, c1y, c2x, c2y, x, y)` | 三次貝茲，兩個控制點 |
+| `quadraticCurveTo(cx, cy, x, y)` | 二次貝茲，一個控制點 |
+| `rect(x, y, w, h)` | 矩形加進當前 path (跟 `fillRect` 不同 — 不立刻畫) |
+| `closePath()` | 從現在位置畫直線回 path 起點 |
+| `fill()` / `stroke()` | 把當前 path 上色 / 描邊 |
+
+## State is sticky
+
+所有畫面屬性 (`fillStyle` / `strokeStyle` / `lineWidth` / `lineCap` / `lineJoin` / `font` / `textBaseline` / `textAlign` / transform stack) 都是 context 上的 mutable state:
+
+```ts
+ctx.fillStyle = 'red';
+ctx.fillRect(0, 0, 10, 10);   // red
+ctx.fillRect(20, 0, 10, 10);  // 還是 red，沒重設
+```
+
+兩個常見 bug:
+
+- **顏色洩漏**:某個 helper 設了 `ctx.fillStyle = 'red'` 沒復原，下個 helper 跟著紅。
+- **transform 累積**:`ctx.translate(10, 0)` 每次 rAF 跑一次，第 60 幀就跑到 600。
+
+修法是 `save()` / `restore()` 包起來:
+
+```ts
+ctx.save();
+ctx.fillStyle = 'red';
+ctx.translate(10, 20);
+ctx.fillRect(0, 0, 30, 30);
+ctx.restore();   // fillStyle 跟 transform 都還原
+```
+
+State stack 細節在 [Transforms](/wham/canvas-animation/transforms) 那篇講透。
+
+## Arc angles
+
+`ctx.arc(cx, cy, r, start, end, ccw?)` 的角度單位是 radians，且 0 在 3 點鐘方向、順時針增加 (跟數學慣例 y 軸方向相反，因為 canvas y 軸是向下的):
+
+```ts
+// 整個圓
+ctx.arc(50, 50, 20, 0, Math.PI * 2);
+
+// 上半圓 (從 9 點到 3 點走下半 — 沒錯，因為 y 軸向下)
+ctx.arc(50, 50, 20, Math.PI, 0, true);  // ccw=true 反向
+```
+
+Pie slice 要從圓心開始畫:
+
+```ts
+ctx.beginPath();
+ctx.moveTo(cx, cy);                       // 抬筆到圓心
+ctx.arc(cx, cy, r, 0, Math.PI * 0.5);     // 弧
+ctx.closePath();                          // 從弧終點接回圓心
+ctx.stroke();
+```
+
+## Text
+
+`fillText(str, x, y)` / `strokeText(str, x, y)` 在 (x, y) 落字。x/y 的意義由 `textAlign` ('left' / 'center' / 'right' / 'start' / 'end') 跟 `textBaseline` ('top' / 'middle' / 'alphabetic' / 'bottom') 決定。
+
+`font` 是 CSS font shorthand:`'bold 16px sans-serif'`。沒設預設是 `'10px sans-serif'`，看起來小的可憐 — debug 第一個檢查項。
+
+## Gotchas
+
+- **`beginPath` 漏寫**。連續 `arc` + `fill` 兩次會把第一個圓再 fill 一次 (path 還在 buffer)。靜態畫面看不出，動畫畫面會發現顏色越來越深。
+- **`fillRect` 不需要 `beginPath`**。它是 immediate 指令，不走 path buffer。但 `rect()` 會。
+- **`stroke()` 的 1px 在整數座標上會糊**。Stroke 預設位置是 path 中心，1px 邊在整數 x 上會跨到兩邊各 0.5。要銳利就 `moveTo(10.5, 0.5)`。
+- **`fillText` 沒 set `font` 預設超小**。先設 `ctx.font` 再 `fillText`。
+- **`closePath` ≠ `fill()`**。`closePath` 只是把 path 接回起點 (描邊閉合用)，沒落色。要落色還是要 `fill()` 或 `stroke()`。
