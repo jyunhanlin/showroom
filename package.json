@@ -37,5 +37,10 @@
     "*.{json,md,css,html,yaml,yml}": [
       "oxfmt"
     ]
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp"
+    ]
   }
 }
