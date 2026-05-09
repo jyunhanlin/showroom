@@ -69,6 +69,21 @@ const Index = () => (
               Standing Desk
             </Link>
           </li>
+          <li>
+            <Link className={linkCls} href="/wavy-carousel">
+              Wavy Carousel
+            </Link>{' '}
+            (
+            <a
+              className={linkCls}
+              href="https://tympanus.net/codrops/2025/11/26/creating-wavy-infinite-carousels-in-react-three-fiber-with-glsl-shaders/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              copy from here
+            </a>
+            )
+          </li>
         </ul>
       </div>
       <div className="h-auto w-full overflow-auto sm:h-full sm:w-1/2">
