@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - apps/nextjs-playground/**
+      - .github/workflows/nextjs-playground.yaml
+  workflow_dispatch:
 
 jobs:
   deployment:

@@ -7,6 +7,7 @@ on:
     paths:
       - apps/astro-playground/**
       - .github/workflows/astro-playground.yaml
+  workflow_dispatch:
 
 jobs:
   deployment:
