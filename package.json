@@ -19,7 +19,6 @@
     "lint": "oxlint .",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "preinstall": "npx -y only-allow pnpm",
     "prepare": "husky"
   },
   "devDependencies": {
