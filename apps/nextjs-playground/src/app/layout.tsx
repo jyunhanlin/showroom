@@ -1,6 +1,8 @@
 import { Metadata } from 'next';
 import { Fira_Mono } from 'next/font/google';
 
+import { Providers } from './providers';
+
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -30,7 +32,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
