@@ -134,7 +134,7 @@ function Carousel({
 
   useFrame((_, dt) => {
     const targetVelocity = velocityRef.current * scrollSign;
-    damped.current = THREE.MathUtils.damp(damped.current, targetVelocity, 5, dt);
+    damped.current = THREE.MathUtils.damp(damped.current, targetVelocity, 12, dt);
     scrollOffset.current += damped.current * dt;
 
     const group = groupRef.current;
@@ -226,7 +226,7 @@ export function WavyCarousel() {
     let rafId = 0;
     const raf = (time: number) => {
       lenis.raf(time);
-      velocityRef.current = lenis.velocity * 0.015;
+      velocityRef.current = lenis.velocity * 0.08;
       rafId = requestAnimationFrame(raf);
     };
     rafId = requestAnimationFrame(raf);
