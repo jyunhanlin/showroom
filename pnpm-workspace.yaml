@@ -3,5 +3,5 @@ packages:
   - packages/*
   - '!**/test/**'
 
-ignoredBuiltDependencies:
-  - sharp
+allowBuilds:
+  sharp: true
