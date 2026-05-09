@@ -223,13 +223,10 @@ export function WavyCarousel() {
       lerp: 0.1,
     });
 
-    lenis.on('scroll', ({ velocity }: { velocity: number }) => {
-      velocityRef.current = velocity * 0.015;
-    });
-
     let rafId = 0;
     const raf = (time: number) => {
       lenis.raf(time);
+      velocityRef.current = lenis.velocity * 0.015;
       rafId = requestAnimationFrame(raf);
     };
     rafId = requestAnimationFrame(raf);
@@ -242,17 +239,17 @@ export function WavyCarousel() {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">
+      <div className="absolute inset-0">
+        <Canvas dpr={[1, 1.5]} camera={{ position: [0, 0, 8], fov: 45 }}>
+          <Scene variant={variant} velocityRef={velocityRef} />
+        </Canvas>
+      </div>
+
       <div
         ref={wrapperRef}
         className="absolute inset-0 overflow-y-scroll [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <div ref={contentRef} style={{ height: '500vh' }} />
-      </div>
-
-      <div className="pointer-events-none absolute inset-0">
-        <Canvas dpr={[1, 1.5]} camera={{ position: [0, 0, 8], fov: 45 }}>
-          <Scene variant={variant} velocityRef={velocityRef} />
-        </Canvas>
       </div>
 
       <div className="absolute top-4 right-4 z-10 flex gap-2 rounded-md bg-black/40 p-1 text-xs text-white backdrop-blur">
