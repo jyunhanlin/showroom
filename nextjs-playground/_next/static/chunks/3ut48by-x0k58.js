@@ -1,4 +1,4 @@
-(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,9251,e=>{"use strict";var u=e.i(36734);e.s(["useLoader",()=>u.G])},77164,e=>{"use strict";e.s(["assetPath",0,"/showroom/nextjs-playground"])},70574,e=>{"use strict";var u=e.i(44501),t=e.i(55029),r=e.i(9251),l=e.i(1859),i=e.i(1685),a=e.i(21348),o=e.i(77164);let n=`
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,51263,e=>{"use strict";var u=e.i(50198);e.s(["useLoader",()=>u.G])},77164,e=>{"use strict";e.s(["assetPath",0,"/showroom/nextjs-playground"])},70574,e=>{"use strict";var u=e.i(73401),t=e.i(41073),r=e.i(51263),l=e.i(23638),i=e.i(8996),a=e.i(21348),o=e.i(77164);let n=`
 varying vec2 vUv;
 void main() {
   vUv = uv;
