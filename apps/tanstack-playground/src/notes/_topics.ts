@@ -23,7 +23,7 @@ export const topics: Record<string, TopicMeta> = {
   },
   fundamentals: {
     name: 'Fundamentals',
-    description: 'NodeMaterial, TSL nodes, uniforms & attributes, textures, node functions',
+    description: 'NodeMaterial, TSL nodes, uniforms & attributes, math, textures, node functions',
   },
 };
 
