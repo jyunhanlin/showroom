@@ -4,6 +4,11 @@ export const courses = {
     author: 'Josh W Comeau',
     baseUrl: 'https://courses.joshwcomeau.com/wham',
   },
+  'webgpu-tsl': {
+    name: 'WebGPU & TSL',
+    author: 'Bruno Simon',
+    baseUrl: 'https://threejs-journey.com/lessons/webgpu-tsl',
+  },
 } as const;
 
 export type CourseId = keyof typeof courses;

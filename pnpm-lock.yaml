@@ -135,6 +135,9 @@ importers:
       '@mdx-js/rollup':
         specifier: ^3.1.1
         version: 3.1.1(rollup@4.62.2)
+      '@react-three/fiber':
+        specifier: ^9.7.0
+        version: 9.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.185.1)
       '@tanstack/react-router':
         specifier: ^1.168.23
         version: 1.170.19(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -168,6 +171,9 @@ importers:
       simplex-noise:
         specifier: ^4.0.3
         version: 4.0.3
+      three:
+        specifier: ^0.185.1
+        version: 0.185.1
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -193,6 +199,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.5(@types/react@19.2.18)
+      '@types/three':
+        specifier: ^0.185.4
+        version: 0.185.4
       '@vitejs/plugin-react':
         specifier: ^6.0.1
         version: 6.1.1(vite@8.2.2(@types/node@26.4.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0))

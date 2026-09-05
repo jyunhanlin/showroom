@@ -21,6 +21,10 @@ export const topics: Record<string, TopicMeta> = {
     name: 'Motion + React',
     description: 'motion/react library, layout & exit animations',
   },
+  fundamentals: {
+    name: 'Fundamentals',
+    description: 'NodeMaterial, TSL nodes, uniforms & attributes, textures, node functions',
+  },
 };
 
 export function topicName(id: string): string {

@@ -1,0 +1,242 @@
+---
+title: Node Materials
+sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/node-materials
+lessonNumber: 'node-materials'
+order: 2
+summary: 'WebGPURenderer 下每個 material 都是 node 組出來的，但只有 *NodeMaterial 把插槽露出來。把 TSL node 掛到 colorNode / roughnessNode / positionNode / opacityNode / outputNode 上，就等於改 shader，不用碰 GLSL、不用 replace chunk。'
+tags: [webgpu, tsl, node-material, colorNode, positionNode, vertexStage]
+---
+
+import { NodeMaterialDemo } from './node-materials';
+
+## TL;DR
+
+- `MeshStandardMaterial` → `MeshStandardNodeMaterial`，名字加 `Node` 就好。所有原本的屬性（`color`、`metalness`、`roughness`）照舊，多出一排 `*Node` 插槽。
+- 插槽收的是 **node**，不是 JS number。`roughnessNode = 0` 被當 falsy 直接忽略；`float(0)` 才會生效。
+- `colorNode`、`roughnessNode`、`opacityNode` 跑在 fragment stage；`positionNode` 跑在 vertex stage；`outputNode` 在 lighting 之後，蓋掉前面所有結果。
+- `positionNode` 要從 `positionLocal` 出發再 `.add()` 位移。直接塞 `vec3(2, 0, 0)` 會讓所有頂點縮成一點。
+- node 可以鏈：`uv().add(time.mul(0.02)).mul(vec2(40, 5))`。存進變數就能同時餵給多個插槽。
+- 貴的計算包 `vertexStage()` 或 `.toVertexStage()`，搬到 vertex 算一次、靠 varying 內插到 fragment。
+
+## 一張圖
+
+<svg viewBox="0 0 760 330" className="mx-auto block w-full max-w-3xl" role="img" aria-label="NodeMaterial 資料流：attribute 進 vertex stage，經 positionNode；內插後進 fragment stage，經 colorNode、roughnessNode、lighting、outputNode，最後成為像素">
+  <defs>
+    <marker id="nm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    </marker>
+    <pattern id="nm-checker" width="16" height="16" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#dc2626" />
+      <rect x="8" y="8" width="8" height="8" fill="#dc2626" />
+      <rect x="8" width="8" height="8" fill="#1e293b" />
+      <rect y="8" width="8" height="8" fill="#1e293b" />
+    </pattern>
+  </defs>
+
+  {/* Column 1: inputs */}
+  <rect x="16" y="40" width="128" height="230" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="80" y="62" textAnchor="middle" fontSize="12" fontWeight="600" fill="#334155">進 GPU 的東西</text>
+  <rect x="28" y="80" width="104" height="30" rx="4" fill="#fff" stroke="#94a3b8" />
+  <text x="80" y="99" textAnchor="middle" fontSize="11" fontFamily="ui-monospace, monospace" fill="#0f172a">position</text>
+  <rect x="28" y="120" width="104" height="30" rx="4" fill="#fff" stroke="#94a3b8" />
+  <text x="80" y="139" textAnchor="middle" fontSize="11" fontFamily="ui-monospace, monospace" fill="#0f172a">uv</text>
+  <text x="80" y="176" textAnchor="middle" fontSize="10" fill="#64748b">attribute（每個頂點一份）</text>
+  <rect x="28" y="196" width="104" height="30" rx="4" fill="#fff" stroke="#94a3b8" />
+  <text x="80" y="215" textAnchor="middle" fontSize="11" fontFamily="ui-monospace, monospace" fill="#0f172a">time</text>
+  <text x="80" y="250" textAnchor="middle" fontSize="10" fill="#64748b">內建 uniform（每幀一份）</text>
+
+  {/* Column 2: vertex stage */}
+  <rect x="184" y="40" width="228" height="120" rx="8" fill="#eff6ff" stroke="#93c5fd" />
+  <text x="298" y="62" textAnchor="middle" fontSize="12" fontWeight="600" fill="#1e3a8a">Vertex stage（每個頂點跑一次）</text>
+  <rect x="196" y="76" width="204" height="70" rx="4" fill="#fff" stroke="#60a5fa" />
+  <text x="206" y="94" fontSize="11" fontWeight="600" fontFamily="ui-monospace, monospace" fill="#1d4ed8">positionNode =</text>
+  <text x="206" y="112" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">positionLocal.add(vec3(0, 0,</text>
+  <text x="206" y="130" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">sin(time + y·3) ·</text>
+  <rect x="318" y="118" width="34" height="18" rx="9" fill="#fef3c7" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="335" y="131" textAnchor="middle" fontSize="10.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">0.4</text>
+  <text x="358" y="130" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">))</text>
+  <text x="335" y="178" textAnchor="middle" fontSize="10" fontWeight="600" fill="#b45309">↑ demo 拉這個值（wiggle 幅度）</text>
+
+  {/* Column 2 lower: raster */}
+  <rect x="184" y="200" width="228" height="70" rx="8" fill="#f1f5f9" stroke="#cbd5e1" strokeDasharray="4 3" />
+  <text x="298" y="224" textAnchor="middle" fontSize="11" fontWeight="600" fill="#334155">Rasterize</text>
+  <text x="298" y="242" textAnchor="middle" fontSize="10" fill="#475569">頂點連成三角形，切成 fragment</text>
+  <text x="298" y="258" textAnchor="middle" fontSize="10" fill="#475569">varying 在頂點之間內插（uv、toVertexStage 結果）</text>
+
+  {/* Column 3: fragment stage */}
+  <rect x="452" y="40" width="228" height="230" rx="8" fill="#fdf2f8" stroke="#f9a8d4" />
+  <text x="566" y="62" textAnchor="middle" fontSize="12" fontWeight="600" fill="#831843">Fragment stage（每個像素跑一次）</text>
+  <rect x="464" y="76" width="204" height="52" rx="4" fill="#fff" stroke="#f472b6" />
+  <text x="474" y="94" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">pattern = checker(uv · vec2(40, 5))</text>
+  <text x="474" y="112" fontSize="11" fontWeight="600" fontFamily="ui-monospace, monospace" fill="#be185d">colorNode = vec3(pattern, 0, 0)</text>
+  <rect x="464" y="136" width="204" height="30" rx="4" fill="#fff" stroke="#f472b6" />
+  <text x="474" y="155" fontSize="11" fontWeight="600" fontFamily="ui-monospace, monospace" fill="#be185d">roughnessNode = pattern</text>
+  <rect x="464" y="174" width="204" height="30" rx="4" fill="#fff" stroke="#cbd5e1" />
+  <text x="566" y="193" textAnchor="middle" fontSize="10.5" fill="#475569">lighting + shadow（three 內建）</text>
+  <rect x="464" y="212" width="204" height="48" rx="4" fill="#fff" stroke="#f472b6" />
+  <text x="474" y="230" fontSize="11" fontWeight="600" fontFamily="ui-monospace, monospace" fill="#be185d">opacityNode = fade</text>
+  <text x="474" y="248" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">outputNode（vec4，蓋掉以上全部）</text>
+
+  {/* Column 4: pixel */}
+  <rect x="704" y="120" width="40" height="40" rx="4" fill="url(#nm-checker)" stroke="#334155" />
+  <text x="724" y="176" textAnchor="middle" fontSize="10" fill="#334155">像素</text>
+
+  {/* arrows */}
+  <line x1="132" y1="95" x2="196" y2="95" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#nm-arrow)" />
+  <line x1="132" y1="211" x2="184" y2="211" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#nm-arrow)" />
+  <line x1="132" y1="135" x2="184" y2="235" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#nm-arrow)" />
+  <line x1="298" y1="160" x2="298" y2="200" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#nm-arrow)" />
+  <line x1="412" y1="235" x2="452" y2="235" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#nm-arrow)" />
+  <line x1="680" y1="140" x2="704" y2="140" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#nm-arrow)" />
+
+  <text x="380" y="310" textAnchor="middle" fontSize="10.5" fill="#64748b">紅框 = NodeMaterial 露出來的插槽；掛上去的 node 就變成該 stage 的 shader 程式碼</text>
+</svg>
+
+attribute 和 uniform 進 GPU，先跑 vertex stage，`positionNode` 決定每個頂點落在哪。頂點連成三角形後切成 fragment，`uv` 這類 varying 在頂點之間內插。fragment stage 依序套 `colorNode`、`roughnessNode`、內建 lighting，最後 `opacityNode` 與 `outputNode` 收尾。每個紅框都是 NodeMaterial 露出來的插槽，掛什麼 node 上去，那段 shader 就長什麼樣。黃圈的 `0.4` 是 wiggle 幅度，demo 把它做成 slider。
+
+<DemoFrame title="拉 amplitude 看 positionNode 讓 torus knot 扭成麵條，colorNode 的 checker 跟著走">
+  <NodeMaterialDemo />
+</DemoFrame>
+
+## 為什麼要換成 NodeMaterial
+
+`WebGPURenderer` 底下**所有** material 都靠 node system 生成 shader，`MeshStandardMaterial` 也是。差別只在一般版沒有把 node 插槽露出來。
+
+所以想「加料」就換 `MeshStandardNodeMaterial`：
+
+```js
+const material = new THREE.MeshStandardNodeMaterial({
+  color: 0xff0000,
+  metalness: 0.5,
+  roughness: 0.25,
+});
+```
+
+畫面完全一樣，原本的文件也都適用，只是多了一排 `colorNode`、`roughnessNode`、`positionNode`、`opacityNode`、`outputNode`、`emissiveNode`、`normalNode` 等插槽可以掛。
+
+硬是在一般版 material 上設 `colorNode` 也會動，但官方不建議，容易踩到 bug。
+
+## 為什麼 roughnessNode = 0 沒反應
+
+```js
+material.roughnessNode = 0;   // 沒變
+material.roughnessNode = 0.5; // 有變
+```
+
+插槽宣告收 `float()` node。`0` 是 JS number，被 library 當成 falsy 直接跳過；`0.5` 能動是靠 library 的寬容自動包成 node。
+
+```js
+material.roughnessNode = float(0); // 一定生效
+```
+
+原則：餵給 `*Node` 插槽的永遠是 node。`vec2()`、`vec3()`、`vec4()`、`float()` 就是最基本的包裝。
+
+## 為什麼 node 可以像 JS 一樣鏈起來
+
+```js
+const pattern = checker(
+  uv()
+    .add(time.mul(0.02))
+    .mul(vec2(40, 5))
+);
+material.colorNode = vec3(pattern, 0, 0);
+material.roughnessNode = pattern;
+```
+
+- `uv()` 是 UV 座標 node，`checker()` 拿它畫棋盤格。
+- `.mul(10)` 對 x、y 同乘；`.mul(vec2(40, 5))` 分別乘。
+- `time` 是 TSL 內建的時間 uniform，自己每幀更新，不用手動 `uniforms.uTime.value = elapsed`。
+- 每個 `.add()`、`.mul()` 回傳的還是 node，所以能一直接下去；存進變數就能餵給多個插槽。
+
+這就是 TSL 的核心：**不寫新語言、不 replace chunk，用 JS 把 node 拼起來就是 shader**。要換行、拆變數、加分號都隨你。
+
+## 為什麼 positionNode 直接塞 vec3 會讓物體消失
+
+```js
+material.positionNode = vec3(2, 0, 0); // 整個 mesh 不見了
+```
+
+`positionNode` 是「這個頂點最後的位置」。給常數，所有頂點都跑到同一點，三角形面積為零。
+
+要做的是**從原本位置出發加位移**：
+
+```js
+material.positionNode = positionLocal.add(vec3(2, 0, 0));
+```
+
+`positionLocal` 是頂點相對 model origin 的位置（`position` attribute，已套用 displacement）。
+
+把位移改成隨高度相位變化的 sine，就是 demo 裡的麵條：
+
+```js
+const zOffset = sin(time.add(positionLocal.y.mul(3))).mul(0.4);
+material.positionNode = positionLocal.add(vec3(0, 0, zOffset));
+```
+
+- `time` 單獨用會一直增加，物體飄出畫面；`sin()` 讓它來回擺。
+- `.add(positionLocal.y.mul(3))` 讓不同高度的頂點相位不同，才會扭而不是整體平移。
+- `.mul(0.4)` 控制幅度，就是 demo 的 slider。
+
+## 為什麼 outputNode 會蓋掉一切
+
+```js
+material.outputNode = vec4(1, 1, 1, 1); // 純白，沒陰影沒光
+```
+
+`outputNode` 位在 `colorNode` 和 lighting、shadow **之後**，是整條 pipeline 的最終輸出（vec4）。設了它，前面算的顏色和光照全部被丟掉。
+
+所以它適合拿來**當 debug view**：先把中間值餵進去看長什麼樣，確認了再換回正確的插槽。課程裡的地板漸隱就是這樣開發的：
+
+```js
+const fade = uv().sub(0.5).length().smoothstep(0.5, 0.2);
+material.outputNode = vec4(vec3(fade), 1); // 先看灰階
+material.opacityNode = fade;               // 確認後改掛 opacityNode
+material.transparent = true;               // 別忘了
+```
+
+- `uv().sub(0.5).length()`：以中心為原點的距離。
+- `remap(0.2, 0.5, 1, 0)` 能翻轉範圍但過渡太線性。
+- `smoothstep(a, b)` 過渡平滑，但輸出固定 0→1；把兩個參數反過來寫 `smoothstep(0.5, 0.2)` 就得到 1→0。
+
+## 為什麼要在意 vertex 還是 fragment
+
+TSL 把兩個 stage 的界線抹掉了：同一段 node 鏈，掛到 `positionNode` 就在 vertex 跑，掛到 `colorNode` 就在 fragment 跑。寫起來一樣，成本差很多。fragment 的執行次數是像素數，vertex 只有頂點數。
+
+貴的 node（例如 `mx_noise_vec3()` 這種 3D Perlin noise）掛在 `colorNode` 上每個像素都要算：
+
+```js
+const noise = mx_noise_vec3(uv().mul(4));
+material.colorNode = noise; // 每像素一次
+```
+
+三種寫法把它搬到 vertex stage，結果經 varying 內插後送到 fragment：
+
+```js
+const noise = vertexStage(mx_noise_vec3(uv().mul(4)));
+const noise = mx_noise_vec3(uv().mul(4)).toVertexStage();
+const noise = mx_noise_vec3(uv().mul(4)).toVarying('badAssNoise'); // 可以命名，debug 生成的 shader 時好找
+```
+
+畫面會變：noise 只在頂點上取樣，中間是線性內插。地板有點 subdivision 的話看起來還可以；不夠細就加 segment，仍然比每像素算便宜。
+
+## 用例
+
+- **改材質顏色不動 shader 原始碼**：`material.colorNode = vec3(1, 0.4, 0.1)`。比 `color` 屬性多的是後面能接 node 鏈。
+- **程序化材質**：`checker(uv().mul(vec2(40, 5)))` 同時餵 `colorNode` 和 `roughnessNode`，一個 pattern 控制兩個通道。
+- **頂點動畫**：`positionNode = positionLocal.add(...)`，配 `time` 和 `sin()`，取代以前的 `onBeforeCompile` 改 vertex chunk。
+- **邊緣漸隱地板**：`opacityNode = uv().sub(0.5).length().smoothstep(0.5, 0.2)` 加 `transparent: true`。
+- **debug 中間值**：暫時掛到 `outputNode`，看完再拆。
+- **完全自訂 shader**：`NodeMaterial` 搭 `vertexNode` / `fragmentNode`，地位相當於舊的 `RawShaderMaterial`。
+
+## Gotchas
+
+- **JS number 不是 node**。`roughnessNode = 0` 靜靜失效。用 `float(0)`。課程後面偶爾直接塞數字，是明知不會炸才這樣寫。
+- **`positionNode` 是絕對位置**，不是位移。永遠從 `positionLocal` 開始 `.add()`。
+- **`outputNode` 在 lighting 之後**。設了就沒有光影，`colorNode` 也白寫。
+- **`smoothstep()` 沒有輸出範圍參數**。要 1→0 就把 edge 反過來寫；要自訂範圍用 `remap()`。
+- **`opacityNode` 要配 `transparent: true`**，否則 alpha 被忽略。
+- **只從 `'three/tsl'` import node**。編輯器 auto-import 常抓到別的路徑或抓錯 node，看到莫名錯誤先檢查 import 區。
+- **變數名別跟 node 撞**。宣告 `const time = ...`、`const uv = ...`、`const color = ...` 會在該 scope 蓋掉同名 node，這類 bug 很難查。
+- **不要 `import * as TSL`**。每個 node 都要寫 `TSL.` 前綴，程式碼長一倍。
+- **vertex/fragment 的界線被抹掉了**，不會有錯誤提醒你效能差。看到貴的 node 掛在 fragment 插槽上，先想能不能 `.toVertexStage()`。
+- **R3F 寫法**：`<meshStandardNodeMaterial colorNode={...} />` 直接把 node 當 prop。node 在 module 層建一次；slider 改的是 `uniform().value`，不要每次 render 重建 node 鏈，那會重編 shader。
