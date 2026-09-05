@@ -1,0 +1,290 @@
+---
+title: Variables & References
+sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/variables-and-references
+lessonNumber: 'variables-and-references'
+order: 3
+summary: 'TSL 的 typed variable（vec2/vec3/vec4、color、float）很寬容：少給補 0、一個值三個用、可以 swizzle。reference node 則是 GPU 免費給你的資料：position、normal 各有 local / world / view 三個空間，還有 uv()、screenUV、materialColor、userData()。塞進 outputNode 就能一眼看出每個 reference 長什麼樣。'
+tags: [webgpu, tsl, swizzle, reference, positionWorld, normalWorld, screenUV, materialColor]
+---
+
+import { ReferencesDemo } from './variables-and-references';
+
+## TL;DR
+
+- `vec3(1)` 三個都是 1；`vec3()` 三個都是 0；`vec3(foo, 0)` 把一個 vec2 塞進前兩格。`colorNode` 收 vec3，塞 vec4 也吞得下去。
+- `.x .y .z .w` 和 `.r .g .b .a` 是同一件事。`foo.xxy` 直接得到一個 vec3，不用再包 `vec3()`。
+- `vec2(new THREE.Vector2(...))`、`color(new THREE.Color(...))` 只是**拿當下的值建 node**，之後改 instance 不會跟著動。
+- reference 是 TSL 內建、免費拿到的資料 node。`outputNode = vec4(ref, 1)` 就是它的 debug view。
+- position 和 normal 各有三個空間：`positionLocal` / `positionWorld` / `positionView`，`normalLocal` / `normalWorld` / `normalView`。差別只在乘了哪幾個 matrix。
+- `screenUV` 是像素在畫布上的 0～1 座標，跟 mesh 無關；`screenCoordinate` 是像素座標，看起來全白是因為幾乎都 ≥ 1。
+- `materialColor` 是 material 自己的 `map × color`。覆寫 `colorNode` 時用它相乘，就不會把 texture 弄丟。
+
+## 一張圖
+
+{/* Keep every <text> on one line: oxfmt splits them across lines and MDX then wraps the content in <p>, which SVG cannot render. */}
+
+<svg viewBox="0 0 850 330" className="mx-auto block w-full max-w-3xl" role="img" aria-label="reference node 的空間鏈：geometry attribute 進 local 空間，乘 modelWorldMatrix 到 world 空間，乘 cameraViewMatrix 到 view 空間；另一排是跟 mesh 無關的 screenUV、materialColor、userData；任一 reference 塞進 outputNode 就變成像素顏色">
+  <defs>
+    <marker id="vr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    </marker>
+    <linearGradient id="vr-pixel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stopColor="#dc2626" />
+      <stop offset="1" stopColor="#16a34a" />
+    </linearGradient>
+  </defs>
+
+  {/* Column 0: attributes */}
+  <rect x="12" y="40" width="110" height="150" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="67" y="62" textAnchor="middle" fontSize="12" fontWeight="600" fill="#334155">進 GPU 的東西</text>
+  <text x="67" y="84" textAnchor="middle" fontSize="9.5" fill="#64748b">attribute · 每頂點一份</text>
+  <rect x="22" y="94" width="90" height="24" rx="4" fill="#fff" stroke="#94a3b8" />
+  <text x="67" y="110" textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">position</text>
+  <rect x="22" y="126" width="90" height="24" rx="4" fill="#fff" stroke="#94a3b8" />
+  <text x="67" y="142" textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">normal</text>
+  <rect x="22" y="158" width="90" height="24" rx="4" fill="#fff" stroke="#94a3b8" />
+  <text x="67" y="174" textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">uv</text>
+
+  {/* Column 1: local space */}
+  <rect x="160" y="40" width="150" height="150" rx="8" fill="#eff6ff" stroke="#93c5fd" />
+  <text x="235" y="62" textAnchor="middle" fontSize="12" fontWeight="600" fill="#1e3a8a">Local（mesh 空間）</text>
+  <text x="172" y="110" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#1d4ed8">positionLocal</text>
+  <text x="172" y="142" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#1d4ed8">normalLocal</text>
+  <text x="172" y="174" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#1d4ed8">uv()</text>
+  <text x="235" y="84" textAnchor="middle" fontSize="9.5" fill="#64748b">mesh 轉動，顏色貼著表面不變</text>
+
+  {/* Column 2: world space */}
+  <rect x="420" y="40" width="150" height="150" rx="8" fill="#fdf2f8" stroke="#f9a8d4" />
+  <text x="495" y="62" textAnchor="middle" fontSize="12" fontWeight="600" fill="#831843">World（場景空間）</text>
+  <text x="432" y="110" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#be185d">positionWorld</text>
+  <text x="432" y="142" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#be185d">normalWorld</text>
+  <text x="495" y="84" textAnchor="middle" fontSize="9.5" fill="#64748b">mesh 轉動，顏色在表面上流動</text>
+
+  {/* Column 3: view space */}
+  <rect x="680" y="40" width="150" height="150" rx="8" fill="#f0fdf4" stroke="#86efac" />
+  <text x="755" y="62" textAnchor="middle" fontSize="12" fontWeight="600" fill="#14532d">View（相機空間）</text>
+  <text x="692" y="110" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#15803d">positionView</text>
+  <text x="692" y="142" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#15803d">normalView</text>
+  <text x="755" y="84" textAnchor="middle" fontSize="9.5" fill="#64748b">相機轉動才變，fresnel 用它</text>
+
+  {/* arrows: attributes → local */}
+  <line x1="112" y1="106" x2="160" y2="106" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#vr-arrow)" />
+  <line x1="112" y1="138" x2="160" y2="138" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#vr-arrow)" />
+  <line x1="112" y1="170" x2="160" y2="170" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#vr-arrow)" />
+
+  {/* arrow: local → world, with the matrix and the slider value */}
+  <line x1="310" y1="126" x2="420" y2="126" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#vr-arrow)" />
+  <text x="365" y="118" textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">× modelWorldMatrix</text>
+  <text x="365" y="142" textAnchor="middle" fontSize="9" fill="#64748b">normal 改乘</text>
+  <text x="365" y="154" textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill="#475569">modelNormalMatrix</text>
+  <rect x="318" y="46" width="94" height="20" rx="10" fill="#fef3c7" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="365" y="60" textAnchor="middle" fontSize="10" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">mesh.rotation</text>
+  <text x="365" y="80" textAnchor="middle" fontSize="9.5" fontWeight="600" fill="#b45309">demo 的 slider</text>
+  <line x1="365" y1="86" x2="365" y2="108" stroke="#f59e0b" strokeWidth="1.5" markerEnd="url(#vr-arrow)" />
+
+  {/* arrow: world → view */}
+  <line x1="570" y1="126" x2="680" y2="126" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#vr-arrow)" />
+  <text x="625" y="118" textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">× cameraViewMatrix</text>
+
+  {/* Row 2 left: references that ignore the mesh */}
+  <rect x="12" y="220" width="420" height="92" rx="8" fill="#f8fafc" stroke="#cbd5e1" strokeDasharray="4 3" />
+  <text x="222" y="240" textAnchor="middle" fontSize="12" fontWeight="600" fill="#334155">跟 mesh 位置無關的 reference</text>
+  <text x="24" y="262" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">screenUV</text>
+  <text x="120" y="262" fontSize="10" fill="#475569">像素在畫布上的 0～1 位置，表面像一扇窗</text>
+  <text x="24" y="282" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">materialColor</text>
+  <text x="120" y="282" fontSize="10" fill="#475569">material 自己的 map × color</text>
+  <text x="24" y="302" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">userData('foo')</text>
+  <text x="120" y="302" fontSize="10" fill="#475569">mesh.userData.foo，改了就更新</text>
+
+  {/* Row 2 right: outputNode debug view */}
+  <rect x="460" y="220" width="300" height="92" rx="8" fill="#fff" stroke="#f472b6" />
+  <text x="610" y="240" textAnchor="middle" fontSize="12" fontWeight="600" fill="#831843">debug view</text>
+  <text x="610" y="264" textAnchor="middle" fontSize="11" fontWeight="600" fontFamily="ui-monospace, monospace" fill="#be185d">outputNode = vec4(reference, 1)</text>
+  <text x="610" y="284" textAnchor="middle" fontSize="10" fill="#475569">在 lighting 之後，reference 的值直接變顏色</text>
+  <text x="610" y="300" textAnchor="middle" fontSize="10" fill="#475569">負值全黑、大於 1 全白，看不到就 .div()</text>
+  <line x1="495" y1="190" x2="560" y2="220" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#vr-arrow)" />
+  <line x1="760" y1="266" x2="796" y2="266" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#vr-arrow)" />
+  <rect x="800" y="246" width="40" height="40" rx="4" fill="url(#vr-pixel)" stroke="#334155" />
+  <text x="820" y="302" textAnchor="middle" fontSize="10" fill="#334155">像素</text>
+</svg>
+
+geometry 的 attribute 進 GPU 後先以 mesh 自己的空間存在，這就是 `positionLocal`、`normalLocal`、`uv()`。乘上 `modelWorldMatrix` 進入場景空間，得到 `positionWorld`、`normalWorld`；再乘 `cameraViewMatrix` 進入相機空間，得到 `positionView`、`normalView`。下排的 `screenUV`、`materialColor`、`userData()` 不在這條鏈上，mesh 怎麼動都不影響它們。任一個 reference 塞進 `outputNode`，值就直接變成像素顏色，這是看懂它們最快的方法。黃圈的 `mesh.rotation` 就是 `modelWorldMatrix` 的內容，demo 把它做成 slider。
+
+<DemoFrame title="點一個 reference，再拉 rotation：Local 系列貼著表面不動，World 系列的顏色會流過去，screenUV 完全不理 mesh">
+  <ReferencesDemo />
+</DemoFrame>
+
+## 為什麼 vec3() 這麼寬容
+
+`colorNode` 文件上寫收 vec3，實際上 vec4 也收，第四個值當 alpha。這種寬容在 TSL 裡到處都是：
+
+```js
+material.colorNode = vec3(1, 0, 0);
+material.colorNode = vec3(1); // (1, 1, 1)
+material.colorNode = vec3(); // (0, 0, 0)
+```
+
+一個 vector 的分量可以拆出來再組：
+
+```js
+const foo = vec2(0.5, 1);
+material.colorNode = vec3(foo.x, foo.y, 0);
+material.colorNode = vec3(foo.r, foo.g, 0); // 同一件事
+material.colorNode = vec3(foo, 0); // 整個 vec2 塞進前兩格
+```
+
+- `.x .y .z .w` 等於 `.r .g .b .a`，看你當它是座標還是顏色。
+- 拆分量可以重排、可以重複，這叫 swizzle：`foo.yx`、`foo.xx`、`foo.xxy`。
+- swizzle 出三個分量就已經是 vec3，`material.colorNode = foo.xxy` 不用再包一層。
+
+也可以拿 three.js 的 class 建 node：
+
+```js
+const foo = vec2(new THREE.Vector2(0.5, 1));
+const bar = color(new THREE.Color('crimson'));
+```
+
+但要記得這只是**用當下的值建 node**。之後改 `Vector2` 的值，shader 不會跟著變。要能動態更新得靠 uniform，後面的課再談。
+
+`color()` 收的格式跟 `THREE.Color` 一樣：hex 字串、hex 數字、三個數字、`{ r, g, b }` 物件、`Color` instance。其他 typed variable 還有 `float()`、`int()`、`uint()`、`bool()`、`ivec2~4`、`uvec2~4`、`mat2~4`，用到再查。
+
+## 為什麼要叫它 reference
+
+TSL 把 GPU 裡本來就有的資料包成 node 直接給你：頂點位置、法線、UV、螢幕座標、model 和 camera 的矩陣。課程把這類 node 統稱 reference，取的是「拿來參照」的意思。TSL 裡真的有一個 `ReferenceNode` class，是其中一部分 node 的 base，但不是全部；名字別混在一起。
+
+想知道某個 reference 長什麼樣，最快的方法是塞進 `outputNode`：
+
+```js
+const material = new THREE.MeshStandardNodeMaterial();
+material.outputNode = vec4(positionLocal, 1);
+```
+
+`outputNode` 在 lighting 之後，前一課講過。塞進去的值不會被光影動到，等於一個 debug view。vec3 的 reference 補一個 1 當 alpha；vec2 的補 `1, 1`：
+
+```js
+material.outputNode = vec4(uv(), 1, 1);
+```
+
+`uv()` 之所以是函式，是因為一個 geometry 可以有多組 UV，傳 index 就能選別組。
+
+## 為什麼 positionLocal 動不了、positionWorld 會動
+
+課程在 torus knot 上掛 `TransformControls`（G 移動、R 旋轉、S 縮放），然後比較三個 position reference：
+
+```js
+material.outputNode = vec4(positionLocal, 1); // 移動 mesh，顏色不變
+material.outputNode = vec4(positionWorld, 1); // 移動 mesh，顏色跟著變
+material.outputNode = vec4(positionGeometry, 1); // 跟 positionLocal 一樣，但在 displacement 之前
+```
+
+- `positionGeometry`：`position` attribute 的原值。
+- `positionLocal`：套過 displacement 之後的值。沒有 displacement 時兩者相同。
+- `positionWorld`：`positionLocal` 乘 model matrix，是頂點在場景裡的絕對位置。
+
+normal 是同一條鏈。傳統 shader 要自己乘 `modelNormalMatrix`，TSL 也給你這個 node：
+
+```js
+material.outputNode = vec4(modelNormalMatrix.mul(normalLocal), 1);
+```
+
+matrix 在前、值在後，跟 GLSL 一樣。但既然常用，TSL 直接給算好的版本：
+
+```js
+material.outputNode = vec4(normalWorld, 1); // 場景空間
+material.outputNode = vec4(normalView, 1); // 相機空間，fresnel 會用到
+```
+
+demo 裡拉 rotation 就能看到差別。`positionLocal`、`normalLocal` 的顏色跟著 mesh 一起轉；`positionWorld`、`normalWorld` 的顏色在表面上流動，因為每個頂點在場景裡的位置真的變了。
+
+model 和 camera 相關的 reference 名字都很直白，看到就懂：
+
+- model：`modelPosition`（mesh 原點的位置）、`modelDirection`（+z 指向哪）、`modelScale`、`modelViewMatrix`、`modelNormalMatrix`、`modelWorldMatrix`、`modelWorldMatrixInverse`。
+- camera：`cameraPosition`、`cameraNear`、`cameraFar`、`cameraViewMatrix`、`cameraProjectionMatrix`、`cameraProjectionMatrixInverse`。
+
+## 為什麼 screenCoordinate 看起來全白
+
+```js
+material.outputNode = vec4(screenUV, 1, 1); // 左上 (0, 0) 到右下 (1, 1)
+material.outputNode = vec4(screenCoordinate, 1, 1); // 幾乎全白
+```
+
+`screenUV` 是像素在畫布上的 normalized 座標，跟 mesh 沒關係，表面像一扇看得到後面座標的窗。
+
+`screenCoordinate` 是**像素座標**：左上角 (0, 0)，右邊一格 (1, 0)，再右邊 (2, 0)。畫面上絕大多數像素的值都 ≥ 1，顏色就飽和成白色。除以一個大數就看得到漸層了：
+
+```js
+material.outputNode = vec4(screenCoordinate.div(1000), 1, 1);
+```
+
+它算的是 render pixel，pixel ratio 2 的螢幕值會漲兩倍快。
+
+`viewportUV`、`viewportCoordinate` 是同一組概念，但相對於 renderer 的 viewport。`renderer.setViewport(x, y, w, h)` 只畫畫布的一部分時，兩者才會跟 screen 版本不同。
+
+## 為什麼 materialColor 能把 map 撿回來
+
+課程切到地板做這個練習：想要 checker 的黑格全黑、白格顯示原本的 texture。
+
+直接覆寫 `colorNode` 會把 map 弄丟：
+
+```js
+const pattern = vec3(checker(uv().mul(4)));
+material.colorNode = pattern; // checker 有了，texture 沒了
+```
+
+`materialColor` 這個 reference 就是 material 目前的 `map × color`（`color` 預設白色）。單獨掛上去畫面跟沒覆寫一樣；跟 pattern 相乘就是要的效果：
+
+```js
+material.colorNode = materialColor.mul(pattern);
+```
+
+同系列還有 `materialOpacity`、`materialEmissive`、`materialNormal`、`materialAO`、`materialMetalness`、`materialRoughness`。有哪些取決於 material 種類。這組 node 很少人知道，但要「在原本的材質上加料」時最好用。
+
+## 為什麼同一個 material 可以每個 mesh 不一樣
+
+`userData()` 會去讀 object 的 `userData` 屬性：
+
+```js
+mesh.userData.foo = new THREE.Color('#705DF2');
+material.outputNode = vec4(userData('foo'), 1);
+```
+
+跟 `vec2(new THREE.Vector2())` 那種快照不同，這個會跟著更新：
+
+```js
+setTimeout(() => {
+  mesh.userData.foo.set('orange');
+}, 2000);
+```
+
+多個 mesh 共用一個 material、又想各自有不同輸出，就靠它。
+
+`attribute()` 則是直接讀 geometry 的 attribute：
+
+```js
+material.outputNode = vec4(attribute('uv'), 1, 1);
+material.outputNode = vec4(attribute('position'), 1);
+```
+
+這兩個已經有 `uv()` 和 `positionGeometry`，`attribute()` 的價值在自訂 attribute，後面有專門一課。
+
+## 用例
+
+- **看懂任何 reference**：`material.outputNode = vec4(ref, 1)`，看完拆掉。
+- **只需要一個 vec2 的某個分量**：`foo.xxy`、`vec3(foo, 0)`，不用手動拆再組。
+- **fresnel、邊緣光**：拿 `normalView` 跟視線方向做 dot，後面的課會做。
+- **依場景位置變化的效果**：用 `positionWorld` 而不是 `positionLocal`，mesh 移動時效果留在原地。
+- **螢幕空間效果**：`screenUV` 做全螢幕漸層、掃描線；`screenCoordinate.div(n)` 做像素級圖樣。
+- **在原本材質上疊圖樣**：`colorNode = materialColor.mul(pattern)`，map 和 color 都保留。
+- **共用 material、各 mesh 不同色**：`userData('foo')` 配 `mesh.userData.foo`。
+
+## Gotchas
+
+- **`vec2(new THREE.Vector2())` 是快照**。建完 node 後改 instance 沒用。要動態更新等 uniform 那一課。
+- **swizzle 出幾個分量就是幾維**。`foo.xxy` 已經是 vec3，再包 `vec3()` 沒錯但多餘。
+- **`outputNode` 是 debug 工具，不是成品**。它在 lighting 之後，掛著就沒有光影。看完記得拆。
+- **matrix 乘法有順序**。`modelNormalMatrix.mul(normalLocal)`，matrix 在前。反過來結果不對。
+- **`positionLocal` 和 `positionGeometry` 通常一樣**。只有掛了 displacement 才有差；沒差時用哪個都行，但意義不同。
+- **`screenCoordinate` 值很大**。看起來全白不是壞了，除個大數再看。pixel ratio 會影響它的範圍。
+- **`materialColor` 不只是 `color`**。它是 `map × color`，覆寫 `colorNode` 想保留 texture 就用它，不要自己重新 sample。
+- **從現在起課程不再提醒要 import 哪些 node**。看到未定義的名字，先去 `'three/tsl'` 補 import。
+- **R3F 寫法**：切換 `outputNode` 等於換 shader。demo 用 `key={reference}` 讓 material 重新掛載，不要在 render 中改同一個 material 的插槽。mesh 的 rotation 走一般的 `rotation` prop，`modelWorldMatrix` 會自己更新。
