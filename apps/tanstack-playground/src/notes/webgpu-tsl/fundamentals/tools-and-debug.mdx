@@ -1,0 +1,335 @@
+---
+title: Tools & Debug
+sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/tools-and-debug
+lessonNumber: 'tools-and-debug'
+order: 4
+summary: 'node 抽象層讓人只能用猜的。這一課把猜的部分拆掉：Editor / Transpiler / TSL Graph 三個外部工具做 node ↔ shader 的來回轉換，renderer.debug.getShaderAsync() 撈出這個場景真正編出來的 program，.toVar() 命名、.debug() 只印一段，Inspector 則接管 profiling 和 tweak UI。'
+tags: [webgpu, tsl, debug, getShaderAsync, toVar, inspector, tsl-editor]
+---
+
+import { ToolsDebugDemo } from './tools-and-debug';
+
+## TL;DR
+
+- node 鏈只是一張圖，compile 過後才是真的 WGSL（或 GLSL）program。每個 debug 工具的差別，就在它接在這條線的哪一段。
+- 外部三件，都不需要你的場景：**Editor**（貼 TSL 看生成的 shader）、**Transpiler**（舊 GLSL 轉 TSL）、**TSL Graph**（拖節點連線）。
+- `const program = await renderer.debug.getShaderAsync(scene, camera, mesh)` 回傳 `{ vertexShader, fragmentShader }` 兩個字串。
+- 搜不到想看的那一段 → `.toVar('fade')` 強制建變數並命名；只想看一小段 → `.debug()` 直接印到 console。
+- `renderer.inspector = new Inspector()` 打開 Profiler：Viewer / Performance / Memory / Timeline / Console / Settings。`.toInspector('FloorFade')` 把某個 node 的畫面送進 Viewer。
+- `renderer.inspector.createParameters('Torus')` 就是內建版 lil-gui，而且顏色可以直接抄 hex，不用做色彩空間轉換。
+- 不熟 WGSL 就 `forceWebGL: true`，同一段 node 會生出 GLSL。
+
+## 一張圖
+
+{/* Keep every <text> on one line: oxfmt splits them across lines and MDX then wraps the content in <p>, which SVG cannot render. */}
+
+<svg viewBox="0 0 880 420" className="mx-auto block w-full max-w-3xl" role="img" aria-label="TSL 的編譯管線與 debug 工具接點：你寫的 node 鏈經 TSL builder 編成 WGSL 或 GLSL program，GPU 每幀執行成像素；掛在 node 上的 toVar/debug/toInspector、外部的 Editor/Transpiler/TSL Graph、撈整支 program 的 getShaderAsync、以及 runtime 的 Inspector，各自接在不同階段">
+  <defs>
+    <marker id="td-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    </marker>
+    <radialGradient id="td-fade" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stopColor="#cbd5e1" />
+      <stop offset="1" stopColor="#0f172a" />
+    </radialGradient>
+  </defs>
+
+  {/* ① node chain */}
+  <rect x="14" y="44" width="206" height="132" rx="8" fill="#eff6ff" stroke="#93c5fd" />
+  <text x="117" y="64" textAnchor="middle" fontSize="12" fontWeight="600" fill="#1e3a8a">① 你寫的 node 鏈</text>
+  <text x="24" y="90" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">const fade = uv()</text>
+  <text x="24" y="106" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">  .sub(0.5).length()</text>
+  <text x="24" y="122" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#0f172a">  .smoothstep(0.5, 0.2)</text>
+  <rect x="30" y="130" width="122" height="19" rx="9" fill="#fef3c7" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="37" y="144" fontSize="10.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">.toVar('fade')</text>
+  <text x="117" y="166" textAnchor="middle" fontSize="10" fontWeight="600" fill="#b45309">↑ demo 的 checkbox</text>
+
+  {/* ② builder */}
+  <rect x="256" y="44" width="132" height="132" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="322" y="64" textAnchor="middle" fontSize="12" fontWeight="600" fill="#334155">② TSL builder</text>
+  <text x="322" y="92" textAnchor="middle" fontSize="10" fill="#475569">把 node 圖攤平</text>
+  <text x="322" y="108" textAnchor="middle" fontSize="10" fill="#475569">成一支程式</text>
+  <text x="322" y="134" textAnchor="middle" fontSize="10" fill="#475569">語言看 backend：</text>
+  <text x="322" y="152" textAnchor="middle" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">WGSL / GLSL</text>
+
+  {/* ③ program */}
+  <rect x="424" y="44" width="224" height="132" rx="8" fill="#fdf2f8" stroke="#f9a8d4" />
+  <text x="536" y="64" textAnchor="middle" fontSize="12" fontWeight="600" fill="#831843">③ 生成的 program（字串）</text>
+  <text x="434" y="90" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">vertexShader</text>
+  <text x="434" y="106" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">fragmentShader</text>
+  <rect x="432" y="116" width="208" height="19" rx="4" fill="#fef3c7" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="438" y="130" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#92400e">fade = smoothstep( 0.5, 0.2, ... );</text>
+  <text x="536" y="153" textAnchor="middle" fontSize="9.5" fill="#64748b">有名字才搜得到；沒 toVar 就展開在算式裡</text>
+  <text x="536" y="167" textAnchor="middle" fontSize="9.5" fill="#64748b">整支通常上千行</text>
+
+  {/* ④ gpu */}
+  <rect x="684" y="44" width="132" height="132" rx="8" fill="#f0fdf4" stroke="#86efac" />
+  <text x="750" y="64" textAnchor="middle" fontSize="12" fontWeight="600" fill="#14532d">④ GPU 每幀跑</text>
+  <text x="750" y="90" textAnchor="middle" fontSize="10" fill="#166534">vertex → fragment</text>
+  <rect x="716" y="104" width="68" height="46" rx="4" fill="url(#td-fade)" stroke="#334155" />
+  <text x="750" y="166" textAnchor="middle" fontSize="10" fill="#166534">像素</text>
+
+  {/* pipeline arrows */}
+  <line x1="220" y1="110" x2="256" y2="110" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#td-arrow)" />
+  <text x="238" y="102" textAnchor="middle" fontSize="8.5" fill="#64748b">編一次</text>
+  <line x1="388" y1="110" x2="424" y2="110" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#td-arrow)" />
+  <line x1="648" y1="110" x2="684" y2="110" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#td-arrow)" />
+  <text x="666" y="102" textAnchor="middle" fontSize="8.5" fill="#64748b">每幀</text>
+
+  {/* tool taps */}
+  <line x1="117" y1="216" x2="117" y2="180" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 3" markerEnd="url(#td-arrow)" />
+  <line x1="322" y1="216" x2="322" y2="180" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 3" markerEnd="url(#td-arrow)" />
+  <line x1="536" y1="216" x2="536" y2="180" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 3" markerEnd="url(#td-arrow)" />
+  <line x1="750" y1="216" x2="750" y2="180" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 3" markerEnd="url(#td-arrow)" />
+
+  {/* tools under ① */}
+  <rect x="14" y="216" width="206" height="152" rx="8" fill="#fff" stroke="#93c5fd" strokeDasharray="4 3" />
+  <text x="117" y="236" textAnchor="middle" fontSize="11" fontWeight="600" fill="#1e3a8a">掛在 node 上</text>
+  <text x="24" y="260" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">.toVar('fade')</text>
+  <text x="24" y="274" fontSize="9" fill="#64748b">在 program 裡命名這個值</text>
+  <text x="24" y="298" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">.debug()</text>
+  <text x="24" y="312" fontSize="9" fill="#64748b">只把這一段印到 console</text>
+  <text x="24" y="336" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">.toInspector('FloorFade')</text>
+  <text x="24" y="350" fontSize="9" fill="#64748b">把它的畫面送進 Viewer</text>
+
+  {/* tools under ② */}
+  <rect x="256" y="216" width="132" height="152" rx="8" fill="#fff" stroke="#cbd5e1" strokeDasharray="4 3" />
+  <text x="322" y="236" textAnchor="middle" fontSize="11" fontWeight="600" fill="#334155">外部工具</text>
+  <text x="266" y="260" fontSize="10" fontWeight="600" fill="#0f172a">Editor</text>
+  <text x="266" y="274" fontSize="9" fill="#64748b">貼 TSL，看 shader</text>
+  <text x="266" y="298" fontSize="10" fontWeight="600" fill="#0f172a">Transpiler</text>
+  <text x="266" y="312" fontSize="9" fill="#64748b">舊 GLSL 轉成 TSL</text>
+  <text x="266" y="336" fontSize="10" fontWeight="600" fill="#0f172a">TSL Graph</text>
+  <text x="266" y="350" fontSize="9" fill="#64748b">拖節點、連線</text>
+
+  {/* tools under ③ */}
+  <rect x="424" y="216" width="224" height="152" rx="8" fill="#fff" stroke="#f9a8d4" strokeDasharray="4 3" />
+  <text x="536" y="236" textAnchor="middle" fontSize="11" fontWeight="600" fill="#831843">撈整支 program</text>
+  <text x="434" y="260" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">const program = await</text>
+  <text x="434" y="276" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">  renderer.debug.getShaderAsync(</text>
+  <text x="434" y="292" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">    scene, camera, mesh)</text>
+  <text x="434" y="316" fontSize="9" fill="#64748b">拿到兩個字串，複製到編輯器再讀</text>
+  <text x="434" y="338" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">forceWebGL: true</text>
+  <text x="434" y="352" fontSize="9" fill="#64748b">不熟 WGSL 就改看 GLSL</text>
+
+  {/* tools under ④ */}
+  <rect x="684" y="216" width="132" height="152" rx="8" fill="#fff" stroke="#86efac" strokeDasharray="4 3" />
+  <text x="750" y="236" textAnchor="middle" fontSize="11" fontWeight="600" fill="#14532d">Inspector</text>
+  <text x="694" y="258" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">renderer.inspector =</text>
+  <text x="694" y="270" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">  new Inspector()</text>
+  <text x="694" y="292" fontSize="9" fill="#475569">Performance · Memory</text>
+  <text x="694" y="306" fontSize="9" fill="#475569">Timeline · Viewer</text>
+  <text x="694" y="320" fontSize="9" fill="#475569">Console · Settings</text>
+  <text x="694" y="342" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">createParameters()</text>
+  <text x="694" y="356" fontSize="9" fill="#64748b">內建版 lil-gui</text>
+
+  <text x="440" y="396" textAnchor="middle" fontSize="10.5" fill="#64748b">虛線 = 這個工具看得到的東西在管線的哪一段；看不到想看的，通常是接錯段</text>
+</svg>
+
+node 鏈只是一張圖，compile 之後才變成真正的 WGSL（或 GLSL）program，之後每幀在 GPU 上跑。每個 debug 工具的差別只有一個：它接在這條線的哪一段。外部工具不碰你的場景，只做 node ↔ shader 的來回轉換；`getShaderAsync()` 撈的是這個場景真正編出來的那一支；Inspector 看的是 runtime 的耗時與 buffer。`.toVar('fade')` 掛在最前面的 node 上，作用是叫 builder 在 program 裡把這個值存成一個叫 `fade` 的變數，你才搜得到它。黃圈就是 demo 的 checkbox。
+
+<DemoFrame title="勾掉 .toVar('fade')，同一條 node 鏈、同一個畫面，但生成的 shader 裡那個名字消失了">
+  <ToolsDebugDemo />
+</DemoFrame>
+
+## 為什麼需要一整課講工具
+
+前三課都在拼 node，畫面對了就當作對了。問題是 node 之間隔著一層抽象：你不知道 builder 到底生了什麼，於是踩到效能坑也不會有人提醒你，出錯時也不知道從哪裡找。
+
+這一課的東西分兩堆：**外部工具**（開網頁用，不需要你的專案）和**內部工具**（寫在程式裡）。
+
+## 為什麼先開 Editor
+
+[threejs.org/examples/webgpu_tsl_editor.html](https://threejs.org/examples/webgpu_tsl_editor.html)
+
+左邊貼 TSL，右邊立刻看到生成的 shader，可以切 WGSL / GLSL、fragment / vertex。功能有限，但驗證一個猜想只要幾秒。
+
+型別轉換的順序會影響結果：
+
+```js
+const { float, int, add } = await import('three/tsl');
+
+const foo = float(1);
+const bar = int(2.8);
+output = add(bar, foo);
+```
+
+`bar` 是 int，`2.8` 先被截成 `3`；加完之後又因為 `fragColor` 要 vec4 而轉回 float。把兩個參數對調：
+
+```js
+output = add(foo, bar);
+```
+
+這次 `foo` 是 float 又排在前面，於是 `bar` 被轉成 float，加完不用再轉。同一個算式，兩種輸出。
+
+重複的 node 會不會被重算，也可以直接看：
+
+```js
+const { add, rand, uv } = await import('three/tsl');
+
+output = add(rand(uv()), rand(uv())); // rand(uv()) 被建了兩次
+```
+
+```js
+const test = rand(uv());
+output = add(test, test); // 存成變數，只建一次
+```
+
+**存進變數不只是程式碼好看，是真的少一份指令。**
+
+## 為什麼還需要 Transpiler 和 TSL Graph
+
+[threejs.org/examples/webgpu_tsl_transpiler.html](https://threejs.org/examples/webgpu_tsl_transpiler.html)
+
+手上有一整包舊的 GLSL function（那些 noise 就是典型），一行一行改成 TSL 很痛。Transpiler 貼進去就轉。它大多數時候是對的，轉錯就去 three.js 的 GitHub issues 回報。
+
+[tsl-graph.xyz](https://www.tsl-graph.xyz)
+
+TSL Graph 是 Bhushan Wagh 做的視覺化編輯器：加節點、連線、看結果。喜歡用圖思考的人會很適應。它還在快速開發中。
+
+## 為什麼 getShaderAsync 要 await
+
+想看整支生成的 shader，`renderer.debug` 上就有：
+
+```js
+const program = await renderer.debug.getShaderAsync(scene, camera, mesh);
+console.log(program.vertexShader);
+console.log(program.fragmentShader);
+```
+
+三個參數缺一不可，因為同一個 material 在不同 scene、不同 camera 下會編出不同的 program（燈光數量、shadow、fog 都會進去）。它回傳 Promise，忘了 `await` 就只會拿到一個 Promise 物件。
+
+可能會看到這則警告：
+
+```
+THREE.RendererInspector: Unable to inspect node outside of frame scope.
+Use "renderer.setAnimationLoop()".
+```
+
+意思是 renderer 還沒開始跑 frame。它仍然拿得到東西。要消掉警告有兩條路：搬進 animation loop（每幀印一次，不實用），或在前面先 `await renderer.init()`。**選第二條。**
+
+看不懂 WGSL 的話，讓 renderer 改用 WebGL backend，同一段 node 會生出 GLSL：
+
+```js
+const renderer = new THREE.WebGPURenderer({
+  canvas: canvas,
+  antialias: true,
+  forceWebGL: true,
+});
+```
+
+生成的 shader 很長。丟進編輯器再讀，別在 console 裡捲。
+
+## 為什麼要 toVar 才找得到那一段
+
+TSL 本來就會在「有意義的時候」自己建變數，但名字是它取的，你不知道要搜什麼。`toVar()` 是把這件事變成你決定的：
+
+```js
+const fade = uv().sub(0.5).length().smoothstep(0.5, 0.2).toVar('fade');
+```
+
+再撈一次 fragment shader，搜 `fade` 就直接跳到那一行。WGSL 那邊會長成一個宣告加一個賦值：
+
+```wgsl
+var<private> fade : f32;
+// ...
+fade = smoothstep( 0.5, 0.2, length( ... ) );
+```
+
+demo 就是在示範這件事：勾掉 checkbox，畫面一模一樣，fragment shader 少掉那兩行，`fade` 這個名字消失，值被直接展開進算式裡。
+
+`toVar()` 之後還有別的用途（需要一個真的能被重複賦值的變數時），那是後面的課。
+
+## 為什麼有了 getShaderAsync 還要 debug()
+
+因為整支太長了。只想確認某個 node 生成什麼，就把 `debug()` 接在它後面：
+
+```js
+const fade = uv().sub(0.5).length().smoothstep(0.5, 0.2).toVar('fade').debug();
+```
+
+console 會拿到這個 node 對應的那一小段（旁邊偶爾會夾帶幾行別的指令，無妨）。
+
+有一個前提：**這個 node 必須真的被用在一個正在被 render 的 material 上**。沒被用到就不會編譯，不會編譯就什麼都不會印。
+
+## 為什麼 Inspector 值得裝
+
+three.js 近期加的除錯面板。它掛在 renderer 上：
+
+```js
+import { Inspector } from 'three/addons/inspector/Inspector.js';
+
+renderer.inspector = new Inspector();
+```
+
+畫面角落多一顆按鈕，打開就是 Profiler，分頁各管一件事：
+
+- **Viewer**：預覽 render target 之類的視覺 buffer，預設列出 shadow map。也吃你自己的 node。
+- **Performance**：frame rate，以及 CPU / GPU 各花多少時間在哪些工作上。
+- **Memory**：各種 buffer 的數量和佔用。追記憶體洩漏就看這裡。
+- **Timeline**：按錄影、跑幾幀、停。之後可以逐幀展開那一幀發生的所有呼叫。不用再用猜的。
+- **Console**：接住大部分的 log。也能用 `renderer.inspector.console.addMessage(type, value)` 送自己的訊息進去。它接不到讓整個 app 掛掉的 JavaScript error，所以取代不了瀏覽器 console。
+- **Settings**：全域開關，最常用的是 **Force WebGL**，讓支援 WebGPU 的瀏覽器也跑 WebGL，用來比對兩個 backend 的差異。
+
+把 node 送進 Viewer 用 `toInspector()`：
+
+```js
+const fade = uv().sub(0.5).length().smoothstep(0.5, 0.2).toVar('fade').debug().toInspector('FloorFade');
+```
+
+r185 的 `toInspector()` 有點脾氣：它會被鏈上其他 node 影響，把前面的 `toVar()` 和 `debug()` 拿掉，預覽有時就消失了。跟 `debug()` 一樣，node 沒被用到（例如把 `material.opacityNode = fade` 註解掉）預覽也會不見。
+
+預覽可以放大，但要縮放自如還是老方法快：把 material 貼到一顆 box 上，配 `OrbitControls` 自己轉。
+
+TSL Graph 也能以 Inspector 分頁的形式跑：
+
+```js
+import TSLGraphEditor from 'three/addons/inspector/extensions/tsl-graph/TSLGraphEditor.js';
+
+renderer.inspector = new Inspector();
+renderer.inspector.addTab(new TSLGraphEditor());
+
+material.userData.graphId = 'torus-physical';
+```
+
+`graphId` 標在想調的物件的 material 上。這個 extension 還很早期。
+
+## 為什麼可以把 lil-gui 移除
+
+Inspector 內建一個 **Parameters** 分頁，用法跟 lil-gui、Dat.gui 幾乎一樣：
+
+```js
+const gui = renderer.inspector.createParameters('Torus');
+
+gui.add(material, 'roughness', 0, 1);
+gui.add(material, 'metalness', 0, 1);
+gui.addColor(material, 'color');
+gui.add(material, 'wireframe');
+```
+
+少一個相依，而且顏色不用再做色彩空間轉換——面板上看到的 hex 可以直接貼回程式碼。
+
+## 用例
+
+- **懷疑某段 node 生出來很貴**：貼進 Editor，數指令。
+- **舊專案的 GLSL noise 要搬過來**：先丟 Transpiler，再手動校一遍。
+- **效果不對，想確認 builder 到底生了什麼**：`.toVar('name')` 命名，`getShaderAsync()` 撈整支，搜名字。
+- **只想確認一個 node**：接 `.debug()`，看 console。
+- **中間值看不出來**：`.toInspector('Name')` 進 Viewer，或老方法——把 material 貼到一顆 box 上。
+- **掉幀**：Inspector 的 Performance 看 CPU/GPU 分佈，Timeline 逐幀展開。
+- **記憶體一直漲**：Memory 分頁盯 buffer 數量。
+- **WebGPU 和 WebGL 表現不同**：Settings 的 Force WebGL 當場切換比對。
+- **調參數**：`createParameters()`，不用再裝 lil-gui。
+
+## Gotchas
+
+- **`getShaderAsync()` 是 Promise**。忘了 `await` 只會印出一個 Promise 物件。
+- **`Unable to inspect node outside of frame scope` 不是錯誤**。前面補一個 `await renderer.init()` 就沒了；別為了消警告把它塞進 animation loop，那會每幀印一次。
+- **`getShaderAsync()` 綁 scene + camera + object 三者**。換 camera、加一盞燈，編出來的 program 就不一樣，要重撈。
+- **`.debug()` 和 `.toInspector()` 的 node 沒被用到就完全沒有輸出**。沒編譯的東西不存在。看不到先檢查它有沒有真的掛在某個 material 上。
+- **`toInspector()` 在 r185 會被鄰居影響**。拿掉 `toVar()` / `debug()` 預覽可能就不見了。這是版本問題，不是你寫錯。
+- **Inspector 和 TSLGraphEditor 都很新**。API 每個版本都在動，跟著 three.js 版本走。
+- **Inspector 有些功能只有 WebGPU backend 有**。要比較就用 Settings 的 Force WebGL 切，不要為了它改 renderer 的 `forceWebGL` 再重載。
+- **`forceWebGL: true` 只是換語言看**。debug 完記得改回 `false`，否則整個專案都在跑 WebGL。
+- **R3F 寫法**：renderer 從 `useThree((state) => state.gl)` 拿，型別是 `WebGLRenderer`，要 cast 成 `WebGPURenderer` 才看得到 `.debug.getShaderAsync`。撈 program 的元件必須放在 `<Canvas>` 裡面。換 node 鏈時 material 要 `key` remount（不同 node 鏈 = 不同 shader），撈 program 的元件也給同一個 `key`，讓 effect 重新跑一次，否則拿到的還是舊 program。
+- **R3F 頁面裡不建議直接掛 Inspector**。它會把面板 append 到 `renderer.domElement.parentElement`，在 R3F 就是 `<Canvas>` 外層那個 div，整片蓋在 demo 上；沒有 parent 時它還會 observe `document.body` 等著掛。要用就開獨立頁面。
