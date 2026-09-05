@@ -1,17 +1,18 @@
 @import 'tailwindcss';
 @plugin "@tailwindcss/typography";
 
-@layer components {
-  .prose pre {
-    @apply my-4 rounded-lg text-sm;
-  }
-  .prose :not(pre) > code {
-    @apply rounded bg-gray-100 px-1.5 py-0.5 font-mono text-sm;
-  }
-  .prose :not(pre) > code::before,
-  .prose :not(pre) > code::after {
-    content: none;
-  }
+/* Unlayered on purpose: @tailwindcss/typography emits into @layer utilities, and a later
+   cascade layer beats any specificity. Inside @layer components these overrides lost
+   (backticks from code::before, font-weight 600, pre margins all leaked through). */
+.prose pre {
+  @apply my-4 rounded-lg text-sm;
+}
+.prose :not(pre) > code {
+  @apply rounded bg-gray-100 px-1.5 py-0.5 font-mono text-sm font-normal;
+}
+.prose :not(pre) > code::before,
+.prose :not(pre) > code::after {
+  content: none;
 }
 
 @keyframes rocket-oscillate {
