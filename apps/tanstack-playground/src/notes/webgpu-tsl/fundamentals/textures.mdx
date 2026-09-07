@@ -1,0 +1,286 @@
+---
+title: Textures
+sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/textures
+lessonNumber: 'textures'
+order: 6
+summary: 'texture() 把貼圖變成一次查表：你給座標，它回 vec4。座標那一端可以自己算（uv().mul()、rotateUV()），複雜幾何乾脆不用 UV，改用 triplanarTexture() 按 world position 取三次再照 normal 混。回來的顏色那一端還有一整組節點：mix、blendDodge / blendBurn / blendColor、saturation、grayscale、vibrance、hue。'
+tags: [webgpu, tsl, texture, uv, rotateUV, triplanar, mix, blend, hue, saturation]
+---
+
+import { TexturesDemo } from './textures';
+
+## TL;DR
+
+- `texture(map)` 是一次**查表**：進去一組座標，出來一個 `vec4`。第二個參數不給就自動用 `uv()`。
+- 回的是 vec4，alpha 一起帶著。`colorNode` 官方寫要 vec3，但收 vec4 也認，alpha 會被用到。
+- `colorSpace`、`wrapS`、`wrapT`、`magFilter`、`minFilter` 這些設在 texture 上的屬性照樣生效——它們都不是座標運算。
+- 但 `repeat`、`rotation`、`center`、`offset` **只有在你不給第二個參數時才會被套用**。自己給座標，就自己乘：`uv().mul(3)`。
+- 旋轉用 `rotateUV(coord, angle, center)`，它是 `rotate()` 的捷徑。
+- 第三個參數是 mipmap level，前提是那張 texture 真的有 mipmap。
+- UV 不堪用的幾何（雕塑、程序生成的地形）改用 `triplanarTexture()`：照 xy / yz / zx 各取一次，再按 normal 的方向混起來。
+- 它的 `positionNode` / `normalNode` 換成 `positionWorld` / `normalWorld`，圖樣就長在場景裡而不是長在物件上。
+- 顏色有自己一組節點：`mix()`、`blendDodge()`、`blendBurn()`、`blendColor()`、`saturation()`、`grayscale()`、`luminance()`、`vibrance()`、`hue()`。
+- 要一個 0→1 來回跑的值，不用自己 remap sine，`oscSine()` 就是。預設吃 `time`，一秒一圈太快，通常寫 `oscSine(time.mul(0.2))`。
+- `hue()` 最被低估：顏色要偏移或加隨機，在色相環上動比直接加 vec3 安全得多。
+
+## 一張圖
+
+{/* Keep every <text> on one line: oxfmt splits them across lines and MDX then wraps the content in <p>, which SVG cannot render. */}
+
+<svg viewBox="0 0 880 470" className="mx-auto block w-full max-w-3xl" role="img" aria-label="TSL 取樣貼圖的資料流：uvChecker 先上傳到 GPU，fragment stage 算出查表座標（uv().mul(scale)，或 triplanar 的 world position），texture() 查表回一個 vec4，再經過 mix / hue 等顏色節點變成 colorNode。下方比較 scale 為 1 時整張圖剛好貼一次，scale 為 3 時 uv 超出 1 被 wrap 繞回來，變成三乘三塊">
+  <defs>
+    <marker id="tex-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    </marker>
+    <pattern id="tex-src" width="52" height="52" patternUnits="userSpaceOnUse" x="44" y="70">
+      <rect width="26" height="26" fill="#e2e8f0" />
+      <rect x="26" width="26" height="26" fill="#64748b" />
+      <rect y="26" width="26" height="26" fill="#64748b" />
+      <rect x="26" y="26" width="26" height="26" fill="#e2e8f0" />
+    </pattern>
+    <pattern id="tex-1x" width="60" height="60" patternUnits="userSpaceOnUse" x="165" y="300">
+      <rect width="30" height="30" fill="#e2e8f0" />
+      <rect x="30" width="30" height="30" fill="#64748b" />
+      <rect y="30" width="30" height="30" fill="#64748b" />
+      <rect x="30" y="30" width="30" height="30" fill="#e2e8f0" />
+    </pattern>
+    <pattern id="tex-3x" width="20" height="20" patternUnits="userSpaceOnUse" x="599" y="300">
+      <rect width="10" height="10" fill="#e2e8f0" />
+      <rect x="10" width="10" height="10" fill="#64748b" />
+      <rect y="10" width="10" height="10" fill="#64748b" />
+      <rect x="10" y="10" width="10" height="10" fill="#e2e8f0" />
+    </pattern>
+    <pattern id="tex-3x-mark" width="40" height="40" patternUnits="userSpaceOnUse" x="599" y="300">
+      <rect width="10" height="10" fill="#f59e0b" />
+    </pattern>
+    <linearGradient id="tex-hue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stopColor="#ef4444" />
+      <stop offset="0.17" stopColor="#eab308" />
+      <stop offset="0.34" stopColor="#22c55e" />
+      <stop offset="0.5" stopColor="#06b6d4" />
+      <stop offset="0.67" stopColor="#3b82f6" />
+      <stop offset="0.84" stopColor="#a855f7" />
+      <stop offset="1" stopColor="#ef4444" />
+    </linearGradient>
+  </defs>
+
+  {/* ① the texture, uploaded once */}
+  <rect x="12" y="36" width="168" height="196" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="96" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#334155">① 上傳一次</text>
+  <rect x="44" y="70" width="104" height="104" fill="url(#tex-src)" stroke="#334155" />
+  <rect x="44" y="70" width="26" height="26" fill="#f59e0b" />
+  <text x="96" y="192" textAnchor="middle" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">uvChecker</text>
+  <text x="96" y="207" textAnchor="middle" fontSize="9" fill="#64748b">colorSpace / wrap / filter</text>
+  <text x="96" y="220" textAnchor="middle" fontSize="9" fill="#64748b">在 CPU 這邊設好</text>
+
+  {/* ② where the lookup coordinate comes from */}
+  <rect x="204" y="36" width="248" height="196" rx="8" fill="#eff6ff" stroke="#93c5fd" />
+  <text x="328" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#1e3a8a">② 查表座標（fragment stage）</text>
+  <rect x="216" y="68" width="224" height="78" rx="6" fill="#fffbeb" stroke="#f59e0b" />
+  <rect x="386" y="80" width="31" height="13" rx="3" fill="#fef3c7" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="228" y="90" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">texture(uvChecker, uv().mul(scale))</text>
+  <text x="228" y="107" fontSize="9" fill="#92400e">geometry 自己的 UV，0→1 掃過整張圖一次</text>
+  <text x="228" y="120" fontSize="9" fill="#92400e">wrap 決定超過 1 之後怎麼繞回來</text>
+  <text x="328" y="138" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="#92400e">scale = demo 的 slider</text>
+  <rect x="216" y="152" width="224" height="74" rx="6" fill="#fff" stroke="#93c5fd" />
+  <text x="228" y="169" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">triplanarTexture(</text>
+  <text x="234" y="180" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">texture(map), null, null,</text>
+  <text x="234" y="191" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">scale, positionWorld, normalWorld)</text>
+  <text x="228" y="207" fontSize="8.5" fill="#1d4ed8">不用 UV：xy / yz / zx 各取一次</text>
+  <text x="228" y="219" fontSize="8.5" fill="#1d4ed8">再按 normal 的方向混起來</text>
+
+  {/* ③ the lookup itself */}
+  <rect x="476" y="36" width="160" height="196" rx="8" fill="#fdf2f8" stroke="#f9a8d4" />
+  <text x="556" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#831843">③ 查表</text>
+  <text x="556" y="82" textAnchor="middle" fontSize="10" fontFamily="ui-monospace, monospace" fill="#0f172a">座標 → texel</text>
+  <text x="556" y="104" textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill="#be185d">vec4(r, g, b, a)</text>
+  <text x="556" y="128" textAnchor="middle" fontSize="9" fill="#64748b">回的是四維，alpha 也在</text>
+  <text x="556" y="142" textAnchor="middle" fontSize="9" fill="#64748b">colorNode 收 vec4 沒問題</text>
+  <text x="556" y="168" textAnchor="middle" fontSize="9" fill="#64748b">wrap / filter / colorSpace</text>
+  <text x="556" y="181" textAnchor="middle" fontSize="9" fill="#64748b">在這一步生效</text>
+  <text x="556" y="205" textAnchor="middle" fontSize="9" fill="#64748b">第三個參數 = mipmap level</text>
+
+  {/* ④ the colour chain */}
+  <rect x="660" y="36" width="208" height="196" rx="8" fill="#f0fdf4" stroke="#86efac" />
+  <text x="764" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#14532d">④ 顏色鏈</text>
+  <text x="672" y="80" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">mix / blendDodge / blendBurn</text>
+  <text x="672" y="95" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">blendColor / saturation</text>
+  <text x="672" y="110" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">grayscale / vibrance / hue</text>
+  <rect x="672" y="122" width="184" height="24" rx="4" fill="url(#tex-hue)" stroke="#334155" />
+  <text x="764" y="160" textAnchor="middle" fontSize="9" fill="#166534">hue() 在這條環上移動，不會走出髒色</text>
+  <text x="764" y="182" textAnchor="middle" fontSize="10" fontFamily="ui-monospace, monospace" fill="#15803d">→ material.colorNode</text>
+  <text x="764" y="203" textAnchor="middle" fontSize="9" fill="#166534">demo 的按鈕換的就是這一格</text>
+  <text x="764" y="220" textAnchor="middle" fontSize="9" fill="#166534">→ 螢幕像素</text>
+
+  {/* pipeline arrows */}
+  <line x1="180" y1="134" x2="204" y2="134" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#tex-arrow)" />
+  <line x1="452" y1="134" x2="476" y2="134" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#tex-arrow)" />
+  <line x1="636" y1="134" x2="660" y2="134" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#tex-arrow)" />
+
+  {/* scale = 1 */}
+  <rect x="12" y="254" width="426" height="198" rx="8" fill="#f8fafc" stroke="#cbd5e1" strokeDasharray="4 3" />
+  <text x="225" y="276" textAnchor="middle" fontSize="12" fontWeight="600" fill="#334155">scale = 1</text>
+  <text x="225" y="292" textAnchor="middle" fontSize="9.5" fill="#64748b">uv 0→1 剛好掃過整張圖一次</text>
+  <rect x="165" y="300" width="120" height="120" fill="url(#tex-1x)" stroke="#334155" />
+  <rect x="165" y="300" width="30" height="30" fill="#f59e0b" />
+  <text x="225" y="438" textAnchor="middle" fontSize="9" fill="#64748b">u: 0 → 1 ・ 一個橘格</text>
+
+  {/* scale = 3 */}
+  <rect x="450" y="254" width="418" height="198" rx="8" fill="#fffbeb" stroke="#f59e0b" strokeDasharray="4 3" />
+  <text x="659" y="276" textAnchor="middle" fontSize="12" fontWeight="600" fill="#92400e">scale = 3</text>
+  <text x="659" y="292" textAnchor="middle" fontSize="9.5" fill="#b45309">uv 變成 0→3，超過 1 靠 wrap 繞回來</text>
+  <rect x="599" y="300" width="120" height="120" fill="url(#tex-3x)" stroke="#334155" />
+  <rect x="599" y="300" width="120" height="120" fill="url(#tex-3x-mark)" />
+  <text x="659" y="438" textAnchor="middle" fontSize="9" fill="#b45309">u: 0 → 3 ・ 三排橘格</text>
+</svg>
+
+貼圖不是貼紙，是一張查表：`texture()` 收一組座標，回那個位置的 `vec4`。TSL 讓你在兩端各插一手——進去的座標可以自己算（`uv().mul(scale)`，或乾脆不用 UV，走 triplanar 的 world position），出來的顏色可以再串一條 `mix` / `hue` / `saturation`。`colorSpace`、`wrap`、`filter` 是 sampler 的狀態，怎麼查都算數；`repeat` 和 `rotation` 只在你沒給座標時才生效。黃圈的 `scale` 就是進去那一端唯一在動的值，demo 把它做成 slider。下面兩塊在講同一件事：scale 從 1 變 3，uv 的上限跟著變成 3，超出 1 的部分靠 `wrapS` / `wrapT` 繞回來，於是同一張圖被排成三乘三。
+
+<DemoFrame title="拉 scale 數地板的橘格；按鈕換的是地板的 colorNode；取消勾選看 torus 從 triplanar 退回自己的 UV">
+  <TexturesDemo />
+</DemoFrame>
+
+## 為什麼是「查表」不是「貼上去」
+
+原生 material 的 `map` 屬性把整件事包起來了，你只知道圖會出現在物件上。TSL 把它拆開：
+
+```js
+material.colorNode = texture(uvChecker);
+```
+
+`texture()` 回的是 `vec4()`，第四維是 alpha。`colorNode` 文件上寫要 vec3，但你丟 vec4 進去它收，而且 alpha 真的會被用到——這是少數「多給一維反而有意義」的地方。
+
+只寫一個參數時，它自動拿 `uv()` 當座標。這個預設藏著一整組行為：texture 上設的 `colorSpace`、`wrapS`、`wrapT`、`repeat`、`rotation`、`center`、`magFilter`、`minFilter` 全部照舊生效。換句話說，這一行跟原生的 `map` 幾乎等價。
+
+```js
+uvChecker.wrapS = THREE.MirroredRepeatWrapping;
+uvChecker.wrapT = THREE.MirroredRepeatWrapping;
+uvChecker.repeat.set(3, 3);
+uvChecker.rotation = 1;
+```
+
+要動手腳，就把座標接管過來：
+
+```js
+material.colorNode = texture(uvChecker, uv());
+```
+
+看起來沒差，行為卻變了：**`repeat`、`rotation`、`center`、`offset` 全被忽略了**。原因不難想——這四個屬性合起來就是 texture 的一個變換矩陣，`TextureNode` 只有在 `uvNode === null` 時才把它乘上去。你自己給座標，那一步整段跳過。`wrapS` / `wrapT` 反而還在，因為它們不是座標運算，是 sampler 讀到界外時的行為。
+
+所以重複要自己乘：
+
+```js
+material.colorNode = texture(uvChecker, uv().mul(3));
+```
+
+旋轉用 `rotateUV()`，參數是座標、角度、旋轉中心：
+
+```js
+material.colorNode = texture(uvChecker, rotateUV(uv().mul(3), -1, vec2(0)));
+```
+
+`rotateUV()` 是 `rotate()` 的捷徑，省掉自己配維度。
+
+第三個參數是 mipmap level：
+
+```js
+material.colorNode = texture(uvChecker, rotateUV(uv().mul(2), -1, vec2(0)), 5);
+```
+
+mipmap 是同一張圖預先縮好的一疊小版本，平常由 min/mag filter 自動挑，用來擋掉遠處或斜角看過去的閃爍。手動指定 level 就是強迫它用某一層，數字愈大愈模糊——前提是那張 texture 真的有 mipmap，否則這個參數等於沒寫。
+
+## 為什麼有 triplanar
+
+UV 是幾何自己帶的。box、plane、sphere 的 UV 都很體面，但雕塑、掃描模型、程序生成的地形常常沒有堪用的 UV——貼上去不是被拉長就是接縫滿地。
+
+triplanar 的想法很土但有效：**不管 UV，改用 3D 座標取三次**。拿 `position.yz` 取一次（等於從 x 軸看過去投影），`position.zx` 取一次，`position.xy` 取一次，然後按 normal 的朝向決定三者各佔多少權重——面朝上就以 zx 那一張為主，面朝側面就換另一張。
+
+```js
+material.colorNode = triplanarTexture(texture(uvChecker), null, null, float(1), positionLocal, normalLocal);
+```
+
+六個參數依序是：x 平面的 texture（要包成 node，所以是 `texture()` 而不是裸的 texture）、y 平面、z 平面（後兩個給 `null` 就重用第一張）、scale（**愈大貼圖愈密**，因為它是乘在 position 上）、取樣用的位置、混合用的 normal。後三個都有預設值，只想快速看效果的話 `triplanarTexture(texture(map))` 就夠了。
+
+把最後兩個換成 world 空間，意義就變了：
+
+```js
+material.colorNode = triplanarTexture(texture(uvChecker), null, null, float(1), positionWorld, normalWorld);
+```
+
+圖樣從此長在**場景**裡而不是長在物件上。物件不動看不出差別，一移動就會發現貼圖像是固定在空氣中被物件掃過去——這和上一課用 `positionWorld` 餵 noise 是同一招。
+
+代價是取樣三次而不是一次，而且目前沒有參數可以調平面之間的過渡寬度，交界處會比講究的實作硬一點。堪用，不精緻。
+
+## 為什麼顏色要另外一組節點
+
+這一段本來可以併進 Math 那一課，但顏色的節點放在灰階數字上看不出所以然，非得配一張貼圖才感覺得到差別。
+
+先準備一個材質顏色當混合對象。`materialColor` 這個 reference node 直接讀 material 的 `color`，所以只要 material 上有 `color: 'crimson'`，shader 裡就拿得到：
+
+```js
+material.colorNode = mix(texture(uvChecker).rgb, materialColor, 0.5);
+```
+
+`mix(a, b, t)` 是最基本的那一個，`t` 為 0 全拿 a，為 1 全拿 b。要看清楚中間的過程，就給它一個會來回跑的 `t`。你可以自己 `time.sin().remap(-1, 1, 0, 1)`，但有現成的：
+
+```js
+const oscillation = oscSine(time.mul(0.2));
+material.colorNode = mix(texture(uvChecker).rgb, materialColor, oscillation);
+```
+
+`oscSine()` 不給參數就吃 `time`，週期是一秒——快到看不清楚，所以幾乎都要 `time.mul(0.2)` 減速。
+
+其餘幾個各有脾氣：
+
+- `blendDodge(base, blend)`：往亮的方向推。blend 愈亮，base 被提得愈狠，很容易整片爆掉。
+- `blendBurn(base, blend)`：往暗的方向推，對比拉高。blend 愈暗，壓得愈深。
+- `blendColor(a, b)`：模擬 `THREE.NormalBlending`，**兩個參數都要 vec4，而且吃的是 alpha**。兩邊 alpha 都是 1 的話它沒事做，所以只有在真的要按透明度疊色時才用得上：
+
+  ```js
+  material.colorNode = blendColor(vec4(texture(uvChecker).rgb, 0.7), vec4(materialColor, 0.5));
+  ```
+
+- `saturation(color, amount)`：1 是原樣，0 是去彩度，超過 1 就過飽和。
+- `grayscale(color)` / `luminance(color)`：同一件事，前者回 vec3 後者回 float。它們**不是三通道取平均**，而是按人眼的亮度感知加權（綠的權重最高），所以看起來比 `saturation(color, 0)` 自然。
+- `vibrance(color, amount)`：只補那些本來就不夠飽和的顏色，已經很艷的留著。0 是原樣，1 最強。比 `saturation` 溫和，不容易把膚色炸掉。
+
+## 為什麼 hue() 值得單獨講
+
+shader 裡顏色一律是 `vec3`。要讓一個顏色「偏一點」或「隨機一點」，直覺是往三個分量加值——然後就會得到一堆說不出是什麼的濁色。原因是 RGB 空間裡兩個好看的顏色，中間那條直線經常穿過灰。
+
+改成在**色相環**上動就沒這個問題。環上每一點都是飽和的顏色，沿著環走過去，中間每一步也都是飽和的顏色。
+
+```js
+material.colorNode = hue(texture(uvChecker).rgb, time);
+```
+
+第二個參數是在環上轉多少，**單位是弧度**。餵 `time` 就是一直繞；要每個實例一個乾淨的隨機色，得把 0~1 的亂數撐滿一圈：`hue(color, hash(i).mul(TWO_PI))`。少乘那個 `TWO_PI`，一整批東西的顏色只會落在環上不到六分之一的範圍，看起來像沒隨機到。做程序生成的東西時，這一個節點省下的除錯時間比它看起來多得多。
+
+## 用例
+
+- **要自己控制貼圖座標**：`texture(map, 你的座標)`，然後 `repeat` / `rotation` 都自己來。
+- **只是想重複貼**：不給第二個參數，直接設 `map.repeat.set(3, 3)`，讓 three.js 處理。
+- **要在 shader 裡轉 UV**：`rotateUV(coord, angle, vec2(0))`，中心點自己指定。
+- **想刻意糊掉**：第三個參數指定較高的 mipmap level，不用另外準備一張模糊圖。
+- **模型 UV 很糟**：`triplanarTexture(texture(map))` 先看效果，再決定要不要調 scale。
+- **圖樣要固定在世界裡**：triplanar 的後兩個參數換成 `positionWorld` / `normalWorld`。
+- **要一個 0→1 來回的值**：`oscSine(time.mul(0.2))`，不用自己 remap。
+- **貼圖要染上材質顏色**：`mix(texture(map).rgb, materialColor, t)`。
+- **要自然的黑白**：`grayscale()`，不要用 `saturation(color, 0)`。
+- **顏色要隨機或漸變**：`hue(color, 弧度)`，隨機值記得 `.mul(TWO_PI)` 撐滿一圈，別直接加 vec3。
+- **只想救回不夠鮮豔的部分**：`vibrance()` 而不是 `saturation()`。
+
+## Gotchas
+
+- **給了第二個參數，`repeat` / `rotation` / `center` / `offset` 就失效**。畫面沒變化不是設錯值，是那條路整段被跳過了。`wrapS` / `wrapT` 不受影響，因為它們是 sampler 行為不是座標運算。
+- **`texture()` 回 vec4**。接到只要 vec3 的地方記得 `.rgb`，否則 alpha 會混進去做出你沒預期的事。
+- **mipmap level 參數需要 texture 真的有 mipmap**。沒有的話這個參數靜靜地不起作用，不會報錯。
+- **`saturation()` 不是 `saturate()`**。後者是把值夾在 [0, 1]，名字像但完全無關，打錯了畫面照樣出得來。
+- **`grayscale()` 不是三通道平均**。它用亮度加權，所以綠色比藍色重。想要真正的平均得自己寫。
+- **`blendColor()` 要 vec4，而且兩邊 alpha 都是 1 就等於白做**。它的整個意義在於按透明度疊。
+- **`oscSine()` 預設的週期是一秒**。直接用 `oscSine()` 會快到看不出在幹嘛，先 `time.mul(0.2)`。
+- **triplanar 的 scale 是乘在 position 上**，所以 scale 愈大貼圖愈密——和 `uv().mul(n)` 同方向，但和「scale 大 = 東西大」的直覺相反。
+- **triplanar 目前沒有 fade 參數**。平面交界處是硬切，要柔和過渡得自己寫一版。
+- **triplanar 取樣三次**。一張貼圖三次查表，在滿版的地形或大量物件上不是免費的。
+- **CanvasTexture 記得設 `colorSpace = THREE.SRGBColorSpace`**。忘了設會整體偏亮偏灰，而且很難一眼看出是這個原因。
+- **R3F 寫法**：換 `colorNode`（顏色按鈕、triplanar 打勾）等於換一支 shader，demo 用 `key` 讓 material 重新掛載。scale 不能這樣做——每動一格就重編一次 shader 會卡死，所以它走 `uniform()`，`onChange` 裡直接改 `.value`，material 不重掛、shader 不重編。同一個 `uvScale` 同時餵地板的 `uv().mul()` 和 torus 的 `scaleNode`，兩邊一起動。
