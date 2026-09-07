@@ -17,7 +17,7 @@ updates:
     directory: '/'
     schedule:
       interval: 'weekly'
-    # Only propose versions that have aged past pnpm 11's default
+    # Only propose versions that have aged past pnpm 12's default
     # minimumReleaseAge (24h supply-chain policy). A few days of margin keeps
     # the lockfile from ever carrying a too-fresh package that would fail
     # `pnpm install` in CI; majors soak longer to surface breakage first.
