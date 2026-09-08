@@ -1,0 +1,336 @@
+---
+title: Uniforms & Attributes
+sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/uniforms-and-attributes
+lessonNumber: 'uniforms-and-attributes'
+order: 7
+summary: '前面用的都是 three.js 準備好的資料，這一課換成自己塞。uniform() 是一個值全體共用，改 .value 不會重編 shader；型別很寬，vec2 / color / 甚至直接丟 THREE.Vector2 和 THREE.Color 都行。一整組值用 uniformArray() 上傳，再用 element() 按 index 取。attribute 則是每個頂點一份，Float32Array 包成 BufferAttribute 後可以掛在 geometry 上用 attribute() 拿，也可以完全不掛，直接 bufferAttribute() 交給 TSL。'
+tags: [webgpu, tsl, uniform, uniformArray, element, attribute, bufferAttribute, varying]
+---
+
+import { UniformsAttributesDemo } from './uniforms-and-attributes';
+
+## TL;DR
+
+- `materialColor`、`positionWorld`、`uv()` 這些都是 three.js 幫你準備好的。這一課講怎麼塞**自己的**資料。
+- **uniform**：JS 這端建、shader 那端讀，整批頂點同一個值，vertex 和 fragment 兩個 stage 都能用。
+- **attribute**：每個頂點各自一份，只存在於 vertex stage，要給 fragment 就得經過 varying，拿到的是內插後的值。
+- 幾乎所有事都繞著 `uniform()` 一個 node 轉：`const frequency = uniform(2)`，之後 JS 改 `frequency.value`。
+- 改 `.value` 只是換一個上傳的數字，**shader 不重編**。這是 uniform 存在的全部理由。
+- 型別很寬：`uniform(vec2(2, 0.25))`、`uniform(color('crimson'))`、bool、vec3、vec4、矩陣都收。
+- node 和 three.js class 二選一：`uniform(new THREE.Vector2(2, 0.25))` 跟 `uniform(vec2(2, 0.25))` 得到的是同一個東西。
+- 相關的值包成一個 vec2 比開兩個 uniform 好：`frequencies.x` 管密度、`frequencies.y` 管速度，tweak 就改 `frequencies.value.x`。
+- 一整組值用 `uniformArray([...])` 一次上傳，再用 `colors.element(index)` 取。index 會被自動轉成 int（順便 floor）。
+- 變數叫 `_color` 不是龜毛：`color` 是 TSL 自己的 node 名，同名會蓋掉。
+- attribute 的老路：`new Float32Array(count)` → `new THREE.BufferAttribute(array, 1)` → `geometry.setAttribute('random', buf)` → `attribute('random')`。
+- 捷徑是連 geometry 都不用碰：`bufferAttribute(randomBuffer, 'float')`，TSL 自己把 buffer 接上 shader。
+- `colorNode` 收到 float 會自動補成 vec3，所以丟一個 0~1 的數進去就是灰階，不用自己 `vec3()`。
+
+## 一張圖
+
+{/* Keep every <text> on one line: oxfmt splits them across lines and MDX then wraps the content in <p>, which SVG cannot render. */}
+
+<svg viewBox="0 0 880 480" className="mx-auto block w-full max-w-3xl" role="img" aria-label="自己的資料進 GPU 的兩條路：JavaScript 這端的 uniform 是一個值、Float32Array 包成的 bufferAttribute 是每個頂點一份；vertex stage 裡 uniform 四個頂點都一樣、attribute 每個頂點不同；fragment stage 裡 uniform 還是同一個值，attribute 變成內插後的 varying；最後兩條路都變成 colorNode 畫成像素。下方比較 frequencies.x 為 2 和為 8 時同一支 shader 的條紋密度">
+  <defs>
+    <marker id="ua-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    </marker>
+    <linearGradient id="ua-cycle" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stopColor="#0f172a" />
+      <stop offset="1" stopColor="#e2e8f0" />
+    </linearGradient>
+    <pattern id="ua-ramp2" width="54" height="62" patternUnits="userSpaceOnUse" x="40" y="320">
+      <rect width="54" height="62" fill="url(#ua-cycle)" />
+    </pattern>
+    <pattern id="ua-ramp8" width="54" height="15.5" patternUnits="userSpaceOnUse" x="478" y="320">
+      <rect width="54" height="15.5" fill="url(#ua-cycle)" />
+    </pattern>
+    <linearGradient id="ua-varying" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stopColor="#c7d2de" />
+      <stop offset="0.33" stopColor="#1e293b" />
+      <stop offset="0.66" stopColor="#7c8b9c" />
+      <stop offset="1" stopColor="#dbe4ee" />
+    </linearGradient>
+  </defs>
+
+  {/* ① JavaScript side: the two ways to send your own data */}
+  <rect x="12" y="36" width="206" height="210" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="115" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#334155">① JavaScript 這一端</text>
+  <rect x="24" y="66" width="182" height="80" rx="6" fill="#fffbeb" stroke="#f59e0b" />
+  <text x="34" y="84" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">const frequencies =</text>
+  <text x="42" y="97" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">uniform(vec2(2, 0.25))</text>
+  <text x="115" y="115" textAnchor="middle" fontSize="9" fill="#92400e">一個值，整批頂點共用</text>
+  <text x="115" y="131" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="#92400e">demo 的 slider 改 .value</text>
+  <rect x="24" y="156" width="182" height="80" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="34" y="174" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">new Float32Array(count)</text>
+  <text x="34" y="187" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">bufferAttribute(buf,</text>
+  <text x="42" y="200" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">'float')</text>
+  <text x="115" y="217" textAnchor="middle" fontSize="9" fill="#64748b">count 個值</text>
+  <text x="115" y="230" textAnchor="middle" fontSize="9" fill="#64748b">每個頂點各拿一份</text>
+
+  {/* ② vertex stage */}
+  <rect x="242" y="36" width="200" height="210" rx="8" fill="#eff6ff" stroke="#93c5fd" />
+  <text x="342" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#1e3a8a">② vertex stage</text>
+  <text x="342" y="70" textAnchor="middle" fontSize="9" fill="#1d4ed8">每個頂點跑一次</text>
+  <circle cx="262" cy="96" r="5" fill="#1d4ed8" />
+  <text x="276" y="94" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#92400e">frequencies.x = 2.00</text>
+  <text x="276" y="105" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#1e40af">random = 0.83</text>
+  <circle cx="262" cy="128" r="5" fill="#1d4ed8" />
+  <text x="276" y="126" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#92400e">frequencies.x = 2.00</text>
+  <text x="276" y="137" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#1e40af">random = 0.12</text>
+  <circle cx="262" cy="160" r="5" fill="#1d4ed8" />
+  <text x="276" y="158" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#92400e">frequencies.x = 2.00</text>
+  <text x="276" y="169" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#1e40af">random = 0.57</text>
+  <circle cx="262" cy="192" r="5" fill="#1d4ed8" />
+  <text x="276" y="190" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#92400e">frequencies.x = 2.00</text>
+  <text x="276" y="201" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#1e40af">random = 0.91</text>
+  <text x="342" y="222" textAnchor="middle" fontSize="9" fill="#92400e">橘色四行都一樣，藍色四行都不同</text>
+  <text x="342" y="236" textAnchor="middle" fontSize="8.5" fill="#64748b">attribute 只活在這一格</text>
+
+  {/* ③ fragment stage */}
+  <rect x="466" y="36" width="200" height="210" rx="8" fill="#fdf2f8" stroke="#f9a8d4" />
+  <text x="566" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#831843">③ fragment stage</text>
+  <text x="566" y="70" textAnchor="middle" fontSize="9" fill="#be185d">每個像素跑一次</text>
+  <text x="478" y="90" fontSize="9" fontFamily="ui-monospace, monospace" fill="#92400e">frequencies.x</text>
+  <rect x="478" y="96" width="176" height="16" rx="3" fill="#fef3c7" stroke="#f59e0b" />
+  <text x="566" y="107" textAnchor="middle" fontSize="8.5" fill="#92400e">2.00 — 每個像素同一個值</text>
+  <text x="478" y="132" fontSize="9" fontFamily="ui-monospace, monospace" fill="#1e40af">random（varying）</text>
+  <rect x="478" y="138" width="176" height="20" rx="3" fill="url(#ua-varying)" stroke="#64748b" />
+  <text x="566" y="176" textAnchor="middle" fontSize="8.5" fill="#64748b">頂點之間自動內插</text>
+  <text x="566" y="190" textAnchor="middle" fontSize="8.5" fill="#64748b">所以這裡拿到的不是原值</text>
+  <text x="566" y="204" textAnchor="middle" fontSize="8.5" fill="#64748b">是兩點之間的混合</text>
+  <text x="566" y="228" textAnchor="middle" fontSize="9" fill="#831843">兩條路在這裡都變成 colorNode 的材料</text>
+
+  {/* ④ pixels */}
+  <rect x="690" y="36" width="178" height="210" rx="8" fill="#f0fdf4" stroke="#86efac" />
+  <text x="779" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#14532d">④ 畫出來</text>
+  <rect x="702" y="72" width="72" height="22" fill="#0b5d79" />
+  <rect x="702" y="94" width="72" height="22" fill="#5ed6c2" />
+  <rect x="702" y="116" width="72" height="22" fill="#feedaa" />
+  <rect x="702" y="138" width="72" height="22" fill="#fc8f74" />
+  <rect x="702" y="160" width="72" height="22" fill="#cf2c65" />
+  <rect x="702" y="72" width="72" height="110" fill="none" stroke="#334155" />
+  <rect x="786" y="72" width="24" height="27.5" fill="#94a3b8" />
+  <rect x="810" y="72" width="24" height="27.5" fill="#475569" />
+  <rect x="834" y="72" width="24" height="27.5" fill="#cbd5e1" />
+  <rect x="786" y="99.5" width="24" height="27.5" fill="#64748b" />
+  <rect x="810" y="99.5" width="24" height="27.5" fill="#e2e8f0" />
+  <rect x="834" y="99.5" width="24" height="27.5" fill="#334155" />
+  <rect x="786" y="127" width="24" height="27.5" fill="#cbd5e1" />
+  <rect x="810" y="127" width="24" height="27.5" fill="#334155" />
+  <rect x="834" y="127" width="24" height="27.5" fill="#94a3b8" />
+  <rect x="786" y="154.5" width="24" height="27.5" fill="#475569" />
+  <rect x="810" y="154.5" width="24" height="27.5" fill="#94a3b8" />
+  <rect x="834" y="154.5" width="24" height="27.5" fill="#e2e8f0" />
+  <rect x="786" y="72" width="72" height="110" fill="none" stroke="#334155" />
+  <text x="738" y="196" textAnchor="middle" fontSize="8.5" fill="#166534">torus</text>
+  <text x="738" y="208" textAnchor="middle" fontSize="8" fontFamily="ui-monospace, monospace" fill="#14532d">uniformArray</text>
+  <text x="822" y="196" textAnchor="middle" fontSize="8.5" fill="#166534">floor</text>
+  <text x="822" y="208" textAnchor="middle" fontSize="8" fontFamily="ui-monospace, monospace" fill="#14532d">bufferAttribute</text>
+  <text x="779" y="230" textAnchor="middle" fontSize="9" fill="#166534">→ 螢幕像素</text>
+
+  {/* pipeline arrows */}
+  <line x1="218" y1="141" x2="242" y2="141" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#ua-arrow)" />
+  <line x1="442" y1="141" x2="466" y2="141" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#ua-arrow)" />
+  <line x1="666" y1="141" x2="690" y2="141" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#ua-arrow)" />
+
+  {/* frequencies.x = 2 */}
+  <rect x="12" y="268" width="418" height="196" rx="8" fill="#f8fafc" stroke="#cbd5e1" strokeDasharray="4 3" />
+  <text x="221" y="290" textAnchor="middle" fontSize="12" fontWeight="600" fill="#334155">frequencies.x = 2</text>
+  <text x="221" y="304" textAnchor="middle" fontSize="9.5" fill="#64748b">一個單位高度剛好兩圈</text>
+  <text x="67" y="317" textAnchor="middle" fontSize="8.5" fill="#94a3b8">y 大</text>
+  <rect x="40" y="320" width="54" height="124" fill="url(#ua-ramp2)" stroke="#334155" />
+  <text x="67" y="458" textAnchor="middle" fontSize="8.5" fill="#94a3b8">y 小</text>
+  <line x1="108" y1="436" x2="108" y2="330" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#ua-arrow)" />
+  <text x="116" y="386" fontSize="8.5" fill="#64748b">time</text>
+  <line x1="150" y1="320" x2="150" y2="444" stroke="#cbd5e1" strokeWidth="1" />
+  <line x1="150" y1="444" x2="412" y2="444" stroke="#cbd5e1" strokeWidth="1" />
+  <text x="144" y="324" textAnchor="end" fontSize="8" fill="#94a3b8">1</text>
+  <text x="144" y="447" textAnchor="end" fontSize="8" fill="#94a3b8">0</text>
+  <polyline points="150,444 281,320 281,444 412,320" fill="none" stroke="#475569" strokeWidth="2" />
+  <text x="281" y="459" textAnchor="middle" fontSize="9" fill="#64748b">橫軸是 positionWorld.y，.fract() 每滿 1 就歸零</text>
+
+  {/* frequencies.x = 8 */}
+  <rect x="450" y="268" width="418" height="196" rx="8" fill="#fffbeb" stroke="#f59e0b" strokeDasharray="4 3" />
+  <text x="659" y="290" textAnchor="middle" fontSize="12" fontWeight="600" fill="#92400e">frequencies.x = 8</text>
+  <text x="659" y="304" textAnchor="middle" fontSize="9.5" fill="#b45309">同一支 shader，只有上傳的數字變了</text>
+  <text x="505" y="317" textAnchor="middle" fontSize="8.5" fill="#d97706">y 大</text>
+  <rect x="478" y="320" width="54" height="124" fill="url(#ua-ramp8)" stroke="#334155" />
+  <text x="505" y="458" textAnchor="middle" fontSize="8.5" fill="#d97706">y 小</text>
+  <line x1="588" y1="320" x2="588" y2="444" stroke="#fcd34d" strokeWidth="1" />
+  <line x1="588" y1="444" x2="850" y2="444" stroke="#fcd34d" strokeWidth="1" />
+  <text x="582" y="324" textAnchor="end" fontSize="8" fill="#d97706">1</text>
+  <text x="582" y="447" textAnchor="end" fontSize="8" fill="#d97706">0</text>
+  <polyline points="588,444 620.75,320 620.75,444 653.5,320 653.5,444 686.25,320 686.25,444 719,320 719,444 751.75,320 751.75,444 784.5,320 784.5,444 817.25,320 817.25,444 850,320" fill="none" stroke="#b45309" strokeWidth="2" />
+  <text x="719" y="459" textAnchor="middle" fontSize="9" fill="#b45309">同一段橫軸切成八圈，node graph 一行沒改</text>
+</svg>
+
+自己的資料只有兩條路進 GPU：uniform 是一個值，整批頂點和整批像素共用；attribute 是一條陣列，每個頂點從裡面領走自己那一格。差別在 ② 這一格看得最清楚——橘色四行完全一樣，藍色四行各不相同。attribute 只活在 vertex stage，要給 fragment 就得走 varying，所以 ③ 拿到的藍色是頂點之間內插出來的漸層，不是原本那四個數字。黃圈的 `frequencies` 就是 demo 的 slider：下面兩塊是同一支 shader、同一張 node graph，只有上傳的數字從 2 變成 8，條紋就從兩圈變成八圈。
+
+<DemoFrame title="拉 positionFrequency 數條紋，拉 timeFrequency 調速度；按鈕換 torus 的 colorNode，取消勾選看地板收掉 attribute">
+  <UniformsAttributesDemo />
+</DemoFrame>
+
+## 為什麼一個 uniform() 就夠
+
+先做一個會動的圖樣來玩。用高度當基礎，`fract()` 讓它每滿 1 就歸零，再減掉 `time` 讓它往上跑：
+
+```js
+const pattern = positionWorld.y.sub(time).fract();
+material.colorNode = pattern;
+```
+
+`colorNode` 要 vec3，`pattern` 是 float，TSL 自動補成三個分量，所以直接接就有灰階。
+
+減 `time` 為什麼是往上跑？固定看某一條紋，它滿足 `y - t = 常數`，也就是 `y = 常數 + t`——時間變大，這條紋所在的高度跟著變大。要往下就改成 `add`。
+
+問題是這樣寫死了：條紋多寬、跑多快都改不了。這就是 `uniform()` 的位置：
+
+```js
+const frequency = uniform(2);
+const pattern = positionWorld.y.mul(frequency).sub(time).fract();
+```
+
+之後 JS 這端只要動 `.value`：
+
+```js
+gui.add(frequency, 'value', 0, 10, 0.01).name('frequency');
+```
+
+注意 tweak 綁的是 `frequency` 的 `'value'` 屬性，不是 `frequency` 本身，所以預設的 label 會是 `value`，得自己 `.name()` 改掉。
+
+重點不在寫法有多短，在**改 `.value` 只是換一個上傳的數字，node graph 一行沒動，shader 不重編**。同樣一件事如果寫成常數，每動一格就得重新編譯一支 shader，畫面會卡到不能用。uniform 存在的理由就是這個。
+
+## 為什麼相關的值要包成一個 vec2
+
+現在想再控制速度。直覺是再開一個 `uniform()`，但更好的做法是把兩個相關的值裝進同一個：
+
+```js
+const frequencies = uniform(vec2(2, 0.25));
+const pattern = positionWorld.y.mul(frequencies.x).sub(time.mul(frequencies.y)).fract();
+```
+
+`.x` 管密度、`.y` 管速度，swizzle 直接取。tweak 那邊改成綁 `frequencies.value` 的 `x` 和 `y`：
+
+```js
+gui.add(frequencies.value, 'x', 0, 10, 0.01).name('positionFrequency');
+gui.add(frequencies.value, 'y', 0, 10, 0.01).name('timeFrequency');
+```
+
+顏色也一樣收：
+
+```js
+const _color = uniform(color('crimson'));
+material.colorNode = _color.mul(pattern);
+```
+
+變數名前面那條底線不是風格問題。`color` 是 TSL 自己的 node 名，你 import 進來了，再宣告一個同名的 `const color` 就把它蓋掉，後面所有用到 `color()` 的地方一起壞。課程用 `_color` 繞過去，這比想一個「更好的名字」省事。
+
+還有一件容易漏掉的事：**node 和 three.js 的 class 可以互換**。
+
+```js
+const frequencies = uniform(new THREE.Vector2(2, 0.25));
+const _color = uniform(new THREE.Color('crimson'));
+```
+
+不是「也能用」，是**完全同一件事**。`uniform()` 看到參數是 node，會把裡面的常數值挖出來，最後存進 `UniformNode` 的還是那個 `Vector2` / `Color`（three.js `src/nodes/core/UniformNode.js` 的 `uniform()` 就寫在那裡）。所以 `.value` 一定是個 three.js 物件，`gui.addColor(_color, 'value')` 才會動。要在 JS 這端反覆改值的，直接寫 class 版本比較順手。
+
+`bool()`、`vec3()`、`vec4()`、各種矩陣也都收，型別這一塊不用擔心。
+
+## 為什麼有 uniformArray 和 element()
+
+現在要的不是漸層，是幾條分明的色帶，而且顏色要從 JS 給。開五個 `uniform()` 當然可以，但那是五個 uniform、五個 tweak、五個變數名。
+
+`uniformArray()` 一次上傳一整組：
+
+```js
+const colors = uniformArray([
+  new THREE.Color(0x0b5d79),
+  new THREE.Color(0x5ed6c2),
+  new THREE.Color(0xfeedaa),
+  new THREE.Color(0xfc8f74),
+  new THREE.Color(0xcf2c65),
+]);
+```
+
+取的時候要一個 0 到 4 的 index。手上的 `pattern` 是 0 到 1，乘上長度再往下取整就是了：
+
+```js
+const pattern = positionWorld.y
+  .mul(frequencies.x)
+  .sub(time.mul(frequencies.y))
+  .fract()
+  .mul(colors.array.length)
+  .floor()
+  .toInt();
+
+material.colorNode = colors.element(pattern);
+```
+
+`floor()` 和 `toInt()` 其實可以省——`element()` 會把參數轉成 `int()`，轉的過程順便就 floor 了。寫出來只是讓意圖明白，不寫也不會錯。
+
+`colors.array.length` 比硬寫 `5` 好，但別誤會它是活的：**這一行只在建 node graph 的當下讀一次**。之後你往 `colors.array` 裡加第六個顏色，`mul()` 裡那個 5 不會自己變成 6，畫面上就是最後一個顏色永遠取不到。
+
+## 為什麼 attribute 可以不掛在 geometry 上
+
+attribute 是另一條路：每個頂點一份。地板雖然是平的，但它有細分，所以有很多頂點可以塞東西。
+
+TSL 之前的老路完全沒變：
+
+```js
+const count = geometry.attributes.position.count;
+const randomArray = new Float32Array(count);
+for (let i = 0; i < count; i++) randomArray[i] = Math.random();
+
+const randomBuffer = new THREE.BufferAttribute(randomArray, 1);
+geometry.setAttribute('random', randomBuffer);
+```
+
+頂點數從現成的 attribute 借（`position` 一定有），`BufferAttribute` 的第二個參數 `1` 是每個頂點佔幾格。掛好之後用 `attribute()` 按名字拿：
+
+```js
+const random = attribute('random');
+material.colorNode = random;
+```
+
+一樣靠自動轉型變成 vec3，所以看到的是灰階的雜點。
+
+但這裡多繞了一圈：buffer 掛在 geometry 上、shader 再按名字去找。TSL 提供的捷徑是把中間那一步整段拿掉——
+
+```js
+const random = bufferAttribute(randomBuffer, 'float');
+material.colorNode = random;
+```
+
+`geometry.setAttribute()` 不用了，名字也不用取了。TSL 拿到 buffer 自己去接 shader（`BufferAttributeNode.setup()` 看到參數是 `BufferAttribute` 就取它的 `.array` 自己包一份）。少一個字串常數要對，就少一個地方會打錯。
+
+代價是這個 buffer 不再屬於任何 geometry，所以**沒有人幫你檢查長度**。陣列比頂點少，多出來的頂點就讀到別人的資料；多了就是白算。`PlaneGeometry(6, 6, 24, 24)` 的頂點數是 `25 × 25`，不是 `24 × 24`——邊界那一排也是頂點。
+
+還有一件圖上畫的事：`colorNode` 是 fragment stage 的東西，而 attribute 只到 vertex stage。中間那一段 varying 是 TSL 自動接的，所以畫面上看到的是頂點之間**內插後**的漸層，不是你塞進去的那些數字本身。想看到原值，得讓每個 fragment 剛好對上一個頂點，那基本上做不到。
+
+## 用例
+
+- **值要能在執行時調**：`uniform()`，然後只改 `.value`。寫死成常數等於每次調整都重編 shader。
+- **要接 GUI**：tweak 綁的是 `.value`，記得 `.name()` 換掉預設 label。
+- **兩個值本來就相關**：包成一個 `uniform(vec2(...))`，用 `.x` / `.y` 取，別開兩個。
+- **要在 JS 這端反覆改**：`uniform(new THREE.Vector2(...))` / `uniform(new THREE.Color(...))`，`.value` 直接是物件，`.set()` 和 `addColor()` 都能用。
+- **一整組值（調色盤、關鍵點、偏移量）**：`uniformArray([...])` 配 `element(index)`。
+- **0~1 的值要當 index**：`.mul(array.length).floor().toInt()`，長度用 `array.length` 不要硬寫。
+- **每個頂點要一份自己的隨機值**：`Float32Array(count)` → `BufferAttribute` → `bufferAttribute(buf, 'float')`。
+- **buffer 之後還要給別人用（另一個 material、匯出、之後要更新）**：那就走 `geometry.setAttribute()` + `attribute('名字')`，捷徑塞進去的 buffer 只有那一支 shader 看得到。
+- **想快速看一個 0~1 的中間值**：直接丟給 `colorNode`，自動轉型會幫你變灰階。
+
+## Gotchas
+
+- **`const color = ...` 會蓋掉 TSL 的 `color()` node**。課程的 `_color` 是為了這個。同類的還有 `time`、`uv`、`texture`、`mix`，都是很好用的變數名，也都是 node 名。
+- **改 `.value` 不重編 shader，改 node graph 會**。slider 走 uniform，選項切換才換 node，這條線劃錯就會卡。
+- **tweak 要綁 `.value`，不是 uniform 本身**。而且預設 label 就叫 `value`，兩個 uniform 放一起會看不出誰是誰。
+- **`uniform(vec2(...))` 和 `uniform(new THREE.Vector2(...))` 是同一個東西**，不是兩種選擇。`uniform()` 收到 node 會把常數值挖出來，`.value` 最後都是 three.js 物件。
+- **`colors.array.length` 只在建 graph 時讀一次**。之後改陣列長度，`mul()` 裡的數字不會跟著變，最後幾個顏色就永遠取不到。
+- **`element()` 的 index 會被轉成 int**。轉的時候順便 floor，所以 `floor().toInt()` 是寫給人看的，不是必要的。
+- **`uniformArray` 的元素在 GPU 上會被 padding 對齊**（`UniformArrayNode` 自己算了一個 `paddedType`）。所以它佔的記憶體不等於 `length × 元素大小`，塞幾千個之前先想一下。
+- **attribute buffer 的長度沒人幫你檢查**。走 `bufferAttribute()` 捷徑時它跟 geometry 完全脫鉤，長度不對不會報錯，只會畫出怪東西。
+- **`PlaneGeometry(w, h, 24, 24)` 有 25 × 25 個頂點**。用 `geometry.attributes.position.count` 拿最保險，別自己乘。
+- **`bufferAttribute()` 的第二個參數不要省**。node 的型別只能從它得知——這時候還沒有 attribute 可以推。
+- **fragment stage 拿到的 attribute 是內插後的值**。畫面上看到的漸層不是你塞進去的數字，中間那一段 varying 是 TSL 自動接的。
+- **attribute 只在 vertex stage 存在**。要在 fragment 做逐頂點的判斷（例如「這個頂點屬於第幾群」）會被內插毀掉，那種需求得改用別的做法。
+- **R3F 寫法**：換 `colorNode`（三個按鈕、地板的打勾）等於換一支 shader，demo 用 `key` 讓 material 重新掛載。兩個 slider 和顏色不能這樣做，它們走 `uniform()`，`onChange` 裡直接改 `.value.x` / `.value.y` / `.value.set()`，material 不重掛、shader 不重編。`randomBuffer` 在 module scope 就建好，因為它的長度綁死在 `<planeGeometry>` 的細分數上，兩邊得一起改。
