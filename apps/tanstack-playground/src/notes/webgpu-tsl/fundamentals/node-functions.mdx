@@ -1,0 +1,498 @@
+---
+title: Node Functions
+sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/node-functions
+lessonNumber: 'node-functions'
+order: 8
+summary: 'Fn() 把散開的 node 包成一支可重用的函式，但它真正的價值不是重用。Fn() 的 body 是普通 JavaScript，只在建 node graph 的當下跑一次；它留下的是 shader 原始碼。If()、Loop()、Discard() 只有在這個 body 裡才有 stack 可以掛，寫進去的分支和迴圈是 GPU 每個 fragment 各自執行的。參數用陣列或物件解構都行，預設值要用 node。第二個參數給 layout 才會真的產生一支獨立的 shader function。'
+tags: [webgpu, tsl, Fn, If, Loop, Discard, assign, layout, oneMinus, step]
+---
+
+import { NodeFunctionsDemo } from './node-functions';
+
+## TL;DR
+
+- `Fn()` 收一個普通的 JavaScript function，回傳一個可以呼叫的 node function。箭頭函式或 `function` 都行，沒有差別。
+- **body 只跑一次**，在建 node graph 的時候。裡面放 `console.log()`，Console 就只出現一次，不管之後畫了幾百萬個 fragment。
+- 那一次執行留下的是 shader 原始碼。之後 GPU 執行的是那份原始碼，不是你的 JavaScript。
+- 參數預設是一個陣列，`parameters[0]`、`parameters[1]` 很難讀，所以解構它：`Fn(([ coordinates, center, radius ]) => ...)`。
+- 把 `[ ]` 換成 `{ }` 就改成物件參數，呼叫時 `circle({ radius: float(0.1) })`，參數一多就值得。
+- 預設值是 JavaScript 的預設值，但**要填 node**：`radius = float(0.25)` 可以，`radius = 0.25` 會出事。
+- 變數不要叫 `distance`、`color`、`time`——那些都是 TSL 的 node 名，同名就在這個 scope 蓋掉它。
+- `If()` 大寫 I，不是 `if()`。JS 的 `if` 在建圖時就決定了，之後改條件不重編就沒用。
+- `If()` 裡面不能用 `=` 重新指派，要用 `line.assign(...)`。`=` 只會換掉 JavaScript 變數指到哪個 node，跟 shader 無關。
+- 要被 `assign()` / `addAssign()` 改的那個變數，宣告時就得 `.toVar()`。少了它畫面是錯的，而且不會報錯。
+- 反轉一個 0~1 的值用 `.oneMinus()`，等同 `float(1).sub(x)`。`1 - x` 不合法，node 不能當減數的右邊起點。
+- `not()` 可以直接鏈：`inverted.not()`。條件是 bool node 才鏈得動，這是「參數請用 node」的另一個理由。
+- `Else()` / `ElseIf()` 不是獨立的 import，是 `If()` 回傳值上的方法：`If(a, fn).ElseIf(b, fn).Else(fn)`。
+- `Discard()` 有三種寫法：包在 `If()` 裡、`Discard(condition)`、或鏈成 `condition.discard()`。
+- `Loop(count, ({ i }) => ...)` 產生的是 shader 裡的 `for`。`console.log` 一樣只印一次。
+- `Loop()` 的 `i` 預設是 int，`i.mul(span)` 會把 `span` 一起轉成 int 然後四捨五入掉。用 `i.toFloat()`，或叫 `Loop()` 直接給 float。
+- 累加用 `addAssign()`。所有算術 node 都自動有 `Assign` 版本：`mulAssign`、`subAssign`、`divAssign`。
+- `Fn()` 的第二個參數是 layout。不給，指令就直接展開在呼叫處；給了，shader 裡才有一支真的 function。
+- 給 layout 之後參數不能省，每一個都要傳，型別還要對。這是它唯一的代價。
+
+## 一張圖
+
+{/* Keep every <text> on one line: oxfmt splits them across lines and MDX then wraps the content in <p>, which SVG cannot render. Code-ish strings go through {'...'} so JSX does not eat the braces and angle brackets. */}
+
+<svg viewBox="0 0 880 480" className="mx-auto block w-full max-w-3xl" role="img" aria-label="Fn() 的資料流：JavaScript 這一端整個 body 只跑一次、留下一段 shader 原始碼；原始碼裡才有真正的 for 迴圈和 if 分支；GPU 每個 fragment 各跑一遍那段原始碼；最後畫出同心圓。下方比較沒有 layout 時 circle() 的指令被展開在每個呼叫處，和有 layout 時 shader 裡多出一支獨立 function">
+  <defs>
+    <marker id="nf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    </marker>
+  </defs>
+
+  {/* ① JavaScript side: the Fn body, run exactly once */}
+  <rect x="12" y="36" width="206" height="210" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="115" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#334155">① JavaScript 這一端</text>
+  <text x="115" y="70" textAnchor="middle" fontSize="9" fill="#64748b">整個 body 只跑一次</text>
+  <rect x="24" y="78" width="182" height="64" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="34" y="94" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">{'const circle = Fn(({'}</text>
+  <text x="44" y="106" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">radius, thickness,</text>
+  <text x="44" y="118" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">inverted, discarded</text>
+  <text x="34" y="130" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">{'}) => { …node 指令… })'}</text>
+  <rect x="24" y="150" width="182" height="42" rx="6" fill="#fffbeb" stroke="#f59e0b" />
+  <text x="115" y="166" textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill="#92400e">count = uniform(5)</text>
+  <text x="115" y="181" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="#92400e">demo 的 slider 改這一個</text>
+  <rect x="24" y="200" width="182" height="42" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="34" y="215" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">{"Loop(count, ({ i }) => {"}</text>
+  <text x="44" y="226" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">{"console.log('loop!')"}</text>
+  <text x="34" y="237" fontSize="8.5" fill="#b45309">{'}) → Console 只印 1 次'}</text>
+
+  {/* ② the emitted shader source */}
+  <rect x="242" y="36" width="200" height="210" rx="8" fill="#eff6ff" stroke="#93c5fd" />
+  <text x="342" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#1e3a8a">② 產生的 shader</text>
+  <text x="342" y="70" textAnchor="middle" fontSize="9" fill="#1d4ed8">那一次執行留下的原始碼</text>
+  <rect x="254" y="78" width="176" height="130" rx="6" fill="#fff" stroke="#93c5fd" />
+  <text x="262" y="94" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">{'fn fn0(coordinates: vec2f,'}</text>
+  <text x="272" y="105" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">{'radius: f32, …) -> f32 {'}</text>
+  <text x="272" y="116" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">{'if (!inverted) { … }'}</text>
+  <text x="272" y="127" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">return line;</text>
+  <text x="262" y="138" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">{'}'}</text>
+  <text x="262" y="156" fontSize="8" fontFamily="ui-monospace, monospace" fill="#64748b">{'// main() 裡'}</text>
+  <text x="262" y="167" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">{'for (var i = 0.0;'}</text>
+  <text x="276" y="178" fontSize="8" fontFamily="ui-monospace, monospace" fill="#92400e">{'i < count; i += 1.0) {'}</text>
+  <text x="272" y="189" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">{'lines += fn0(…);'}</text>
+  <text x="262" y="200" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">{'}'}</text>
+  <text x="342" y="224" textAnchor="middle" fontSize="9" fill="#1e3a8a">迴圈和分支是被「寫」進來的</text>
+  <text x="342" y="237" textAnchor="middle" fontSize="8.5" fill="#64748b">不是 JavaScript 跑出來的</text>
+
+  {/* ③ GPU runtime */}
+  <rect x="466" y="36" width="200" height="210" rx="8" fill="#fdf2f8" stroke="#f9a8d4" />
+  <text x="566" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#831843">③ GPU 執行</text>
+  <text x="566" y="70" textAnchor="middle" fontSize="9" fill="#be185d">每個 fragment 各跑一遍</text>
+  <rect x="478" y="78" width="176" height="18" rx="3" fill="#fce7f3" stroke="#f9a8d4" />
+  <text x="566" y="91" textAnchor="middle" fontSize="8" fontFamily="ui-monospace, monospace" fill="#831843">一個像素 uv=(0.72, 0.335)，距中心 0.275</text>
+  <text x="478" y="112" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">i = 0 → radius 0.075 → 0</text>
+  <text x="478" y="126" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">i = 1 → radius 0.175 → 0</text>
+  <text x="478" y="140" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#be185d">i = 2 → radius 0.275 → 1</text>
+  <text x="478" y="154" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">i = 3 → radius 0.375 → 0</text>
+  <text x="478" y="168" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">i = 4 → radius 0.475 → 0</text>
+  <line x1="478" y1="176" x2="654" y2="176" stroke="#f9a8d4" strokeWidth="1" />
+  <text x="478" y="190" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#831843">lines = 1 → 這個像素是白的</text>
+  <text x="566" y="212" textAnchor="middle" fontSize="8.5" fill="#be185d">迴圈真正跑起來是在這一格</text>
+  <text x="566" y="225" textAnchor="middle" fontSize="8.5" fill="#64748b">If 和 Discard 也是每個像素各判斷一次</text>
+  <text x="566" y="238" textAnchor="middle" fontSize="8.5" fill="#64748b">同一支 shader，幾百萬份同時跑</text>
+
+  {/* ④ pixels */}
+  <rect x="690" y="36" width="178" height="210" rx="8" fill="#f0fdf4" stroke="#86efac" />
+  <text x="779" y="56" textAnchor="middle" fontSize="12" fontWeight="600" fill="#14532d">④ 畫出來</text>
+  <rect x="714" y="76" width="130" height="130" fill="#0f172a" />
+  <circle cx="779" cy="141" r="14" fill="none" stroke="#f8fafc" strokeWidth="3" />
+  <circle cx="779" cy="141" r="26" fill="none" stroke="#f8fafc" strokeWidth="3" />
+  <circle cx="779" cy="141" r="38" fill="none" stroke="#f8fafc" strokeWidth="3" />
+  <circle cx="779" cy="141" r="50" fill="none" stroke="#f8fafc" strokeWidth="3" />
+  <circle cx="779" cy="141" r="62" fill="none" stroke="#f8fafc" strokeWidth="3" />
+  <text x="779" y="224" textAnchor="middle" fontSize="9" fill="#166534">count 圈同心圓，一支 shader 畫完</text>
+  <text x="779" y="237" textAnchor="middle" fontSize="8.5" fill="#64748b">radius 每圈加上 i × span</text>
+
+  {/* pipeline arrows */}
+  <line x1="218" y1="141" x2="242" y2="141" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#nf-arrow)" />
+  <line x1="442" y1="141" x2="466" y2="141" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#nf-arrow)" />
+  <line x1="666" y1="141" x2="690" y2="141" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#nf-arrow)" />
+
+  {/* ⑤ without layout */}
+  <rect x="12" y="268" width="418" height="196" rx="8" fill="#f8fafc" stroke="#cbd5e1" strokeDasharray="4 3" />
+  <text x="221" y="290" textAnchor="middle" fontSize="12" fontWeight="600" fill="#334155">Fn(fn) — 沒有 layout</text>
+  <text x="221" y="306" textAnchor="middle" fontSize="9.5" fill="#64748b">circle() 的指令直接展開在呼叫的地方</text>
+  <rect x="24" y="316" width="394" height="102" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="36" y="334" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">{'fn main() {'}</text>
+  <text x="50" y="350" fontSize="9" fontFamily="ui-monospace, monospace" fill="#64748b">{'// 第 1 處呼叫，整段展開'}</text>
+  <text x="50" y="366" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">{'let a = abs(distance(uv, c) - r0);'}</text>
+  <text x="50" y="382" fontSize="9" fontFamily="ui-monospace, monospace" fill="#64748b">{'// 第 2 處呼叫，再展開一次'}</text>
+  <text x="50" y="398" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">{'let b = abs(distance(uv, c) - r1);'}</text>
+  <text x="36" y="412" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">{'}'}</text>
+  <text x="221" y="438" textAnchor="middle" fontSize="9.5" fill="#334155">TSL 不知道參數型別，就不敢做成 function</text>
+  <text x="221" y="453" textAnchor="middle" fontSize="9" fill="#64748b">呼叫兩處，指令就有兩份</text>
+
+  {/* ⑥ with layout */}
+  <rect x="450" y="268" width="418" height="196" rx="8" fill="#fffbeb" stroke="#f59e0b" strokeDasharray="4 3" />
+  <text x="659" y="290" textAnchor="middle" fontSize="12" fontWeight="600" fill="#92400e">Fn(fn, layout) — 有 layout</text>
+  <text x="659" y="306" textAnchor="middle" fontSize="9.5" fill="#b45309">shader 裡多一支真的 function</text>
+  <rect x="462" y="316" width="394" height="102" rx="6" fill="#fff" stroke="#f59e0b" />
+  <text x="474" y="334" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">{'fn fn0(coordinates: vec2f, radius: f32, …) -> f32 {'}</text>
+  <text x="488" y="350" fontSize="9" fontFamily="ui-monospace, monospace" fill="#92400e">{'…只有這一份…'}</text>
+  <text x="474" y="366" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">{'}'}</text>
+  <text x="474" y="382" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">{'fn main() {'}</text>
+  <text x="488" y="398" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">{'let a = fn0(…, r0);  let b = fn0(…, r1);'}</text>
+  <text x="474" y="412" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">{'}'}</text>
+  <text x="659" y="438" textAnchor="middle" fontSize="9.5" fill="#92400e">型別講清楚了，TSL 才生得出 function</text>
+  <text x="659" y="453" textAnchor="middle" fontSize="9" fill="#b45309">代價：每個參數都得傳，型別要對</text>
+</svg>
+
+`Fn()` 收的是一個普通的 JavaScript function，而它只會被執行一次——在建 node graph 的當下。那一次執行留下的不是結果，是 ② 那段 shader 原始碼：`If()` 變成裡面的 `if`，`Loop()` 變成裡面的 `for`。所以 `console.log` 只印一次，而迴圈真正跑起來是在 ③，每個 fragment 各跑一遍。黃框的 `count` 是 demo 的 slider，它是一個 uniform，換數字只是換 `for` 的上限，shader 不重編。下面兩塊畫出來的像素完全一樣，差別只在有沒有給 `layout`——沒有就整段展開，有就多一支真的 function。
+
+<DemoFrame title="拉 count 看迴圈跑幾圈，radius / thickness / span 調形狀；inverted 走 If()、discarded 走 Discard()；上排兩顆按鈕畫面相同，只有產生的 shader 不一樣">
+  <NodeFunctionsDemo />
+</DemoFrame>
+
+## 為什麼不是普通的 JavaScript function
+
+先講清楚 `Fn()` **不是**什麼。它不是「TSL 版的 function」，因為普通的 JavaScript function 本來就能重用 node：
+
+```js
+const circle = (coordinates, center, radius, thickness) =>
+  coordinates.distance(center).sub(radius).abs().step(thickness.div(2)).oneMinus();
+```
+
+這樣寫完全能動。呼叫它會得到一個 node，接到 `colorNode` 上就畫得出來。所以如果目標只是「不要把 node 寫得像義大利麵」，你不需要 `Fn()`。
+
+`Fn()` 換來的是三件普通 function 給不了的事：
+
+1. **一個 stack**。`If()` 的實作是 `currentStack.If(...)`，`currentStack` 只在 `Fn()` 的 body 執行期間有值。在外面呼叫 `If()`，`currentStack` 是 `null`，直接爆。`Loop()`、`Discard()`、`assign()` 同理——`assign()` 甚至有一句專門的錯誤訊息叫你把它移進 `Fn()` 裡。
+2. **一個可以被命名的邊界**。給了 layout，TSL 才知道要在 shader 裡開一支 function（下面會講）。
+3. **參數的解構和預設值**。這一項倒真的是純 JavaScript，只是配合得剛好。
+
+參數那邊有個小意外：`Fn()` 把所有引數塞進**一個**參數，預設是陣列。
+
+```js
+const circle = Fn((parameters) => {
+  // parameters[0], parameters[1], parameters[2]…
+});
+```
+
+`parameters[2]` 是什麼？三個月後你不會記得。所以解構它，順便取名字：
+
+```js
+const circle = Fn(([coordinates, center, radius, thickness]) => {
+  const distanceToCenter = coordinates.distance(center);
+  // ...
+});
+```
+
+把 `[ ]` 換成 `{ }` 就變成物件參數，呼叫時只給你在意的那幾個：
+
+```js
+material.colorNode = vec3(circle({ radius: float(0.1) }));
+```
+
+參數少的時候陣列比較短，參數多的時候物件比較不會傳錯位置。沒有標準答案。
+
+還有一個變數命名的坑，跟這一課的主題無關但一定會遇到：
+
+```js
+const distance = coordinates.distance(center); // ← 這一行之後，distance() node 沒了
+```
+
+`distance` 是 TSL 的 node 名。你在這個 scope 宣告一個同名的 `const`，就把它蓋掉。課程用 `distanceToCenter`，理由只有這個。`color`、`time`、`uv`、`texture`、`mix` 都是同一類。
+
+## 為什麼預設值一定要包成 node
+
+解構的預設值是 JavaScript 的功能，所以這樣寫看起來很自然：
+
+```js
+const circle = Fn(({ coordinates = uv(), center = vec2(0.5), radius = 0.25, thickness = 0.02 }) => {
+  // ...
+});
+```
+
+然後就壞了。
+
+壞在哪裡值得說清楚，因為不是每個原生數字都會出事。`distanceToCenter.sub(radius)` 沒問題——鏈的起點是 node，TSL 會把 `0.25` 轉成 float。真正炸掉的是**你把那個原生值當成 node 來用**的地方：`thickness.div(2)` 裡的 `thickness` 是一個 JavaScript 數字，`.div` 根本不存在。下一節的 `inverted.not()` 也是同一回事。
+
+所以規則不是「TSL 不收原生數字」，而是**你分不清哪一個之後會被當 node 用，所以預設值一律填 node**。
+
+```js
+const circle = Fn(({
+  coordinates = uv(),
+  center = vec2(0.5),
+  radius = float(0.25),
+  thickness = float(0.02),
+}) => {
+  // ...
+});
+```
+
+呼叫的時候也一樣，`circle({ radius: float(0.1) })` 比 `circle({ radius: 0.1 })` 安全。
+
+## 為什麼 If() 不是 if()
+
+圈畫好之後，想讓使用者選要不要反轉。用 JavaScript 寫是這樣：
+
+```js
+let someCondition = true;
+const circle = Fn(({ ... }) => {
+  if (someCondition) {
+    // 反轉
+  }
+});
+```
+
+這段**會動**。但它的作用時機是「node graph 被編譯的那一刻」。之後把 `someCondition` 改成 `false`，畫面不會變——因為 shader 早就編好了，裡面根本沒有這個分支，只有當時那一邊的指令。要它變，得重編 node，那就回到上一課講的效能問題。
+
+`If()`（大寫 I）產生的是 shader 裡的分支：
+
+```js
+const circle = Fn(({ ..., inverted = bool(false) }) => {
+  // ...
+  If(inverted, () => {
+    // 這裡的指令會被寫進 shader 的 if 區塊
+  });
+  return line;
+});
+```
+
+差別在哪裡，一個 `console.log` 就看得出來：
+
+```js
+If(inverted, () => {
+  console.log('This is inside the If');
+});
+```
+
+不管 `inverted` 是 `bool(true)` 還是 `bool(false)`，**這行永遠印一次**。因為 `If()` 的第二個參數就是一個普通的 JavaScript function，TSL 呼叫它一次，收下裡面產生的 node，寫進 shader。`console.log` 是那一次呼叫的副作用，跟條件無關。
+
+這也是圖裡 ① 和 ③ 分成兩格的原因。
+
+## 為什麼 assign() 不是 =
+
+既然 `If()` 的 body 只是在「收集指令」，那 JavaScript 的重新指派就沒有意義：
+
+```js
+If(inverted, () => {
+  line = line.oneMinus(); // ← 只是把 JS 變數指到另一個 node
+});
+```
+
+`line` 這個 JavaScript 變數指去哪裡，shader 一無所知。要改的是 shader 裡那個變數，所以要用 node 的方式：
+
+```js
+If(inverted, () => {
+  line.assign(line.oneMinus());
+});
+```
+
+但這樣還不夠。`line` 得先是 shader 裡的一個**變數**，`assign()` 才有東西可以寫：
+
+```js
+const line = lineSDF.abs().step(thickness.div(2)).toVar();
+```
+
+課程沒有加 `.toVar()`。在這個 repo 的 three 0.185 上照著寫，畫面是錯的——顏色整片反過來、圈數也不對，而且不會有任何錯誤訊息。加上去就正常了。這是把兩個版本都跑過、比對畫面得到的結論。
+
+順便說 `oneMinus()`。想寫「1 減掉它」，直覺是：
+
+```js
+const line = 1 - lineSDF.abs().step(thickness.div(2)); // ← 不合法
+```
+
+`1 - node` 這件事 JavaScript 做不到，node 沒辦法當減法右邊的運算元。合法的寫法是從 node 起頭：
+
+```js
+const line = float(1).sub(lineSDF.abs().step(thickness.div(2)));
+```
+
+或者用專門做這件事的 node，短很多：
+
+```js
+const line = lineSDF.abs().step(thickness.div(2)).oneMinus();
+```
+
+條件那邊也有個小收穫。想在「**不是** inverted」的時候反轉，可以用 `not()` node：
+
+```js
+If(not(inverted), () => { ... });
+```
+
+但既然 `inverted` 是 `bool()` node，直接鏈更順：
+
+```js
+If(inverted.not(), () => { ... });
+```
+
+`inverted` 如果是原生 `false`，這行就沒得鏈。這是「參數請用 node」第二次派上用場。
+
+同一家族還有 `Else()`、`ElseIf()`、`Switch()`、`and()`、`or()`、`greaterThan()`、`lessThan()`、`greaterThanEqual()`、`lessThanEqual()`。注意 `Else()` 和 `ElseIf()` 跟其他的不一樣，**它們不是可以 import 的 node**，是 `If()` 回傳值上的方法：
+
+```js
+If(a, () => {})
+  .ElseIf(b, () => {})
+  .Else(() => {});
+```
+
+## 為什麼 Discard 有好幾種寫法
+
+`Discard()` 告訴 fragment shader「這個位置什麼都不要畫」。條件是兩個：`discarded` 為真，而且 `line` 小於等於 0（用「小於等於」比用「等於」安全，浮點數不保證剛好是 0）。
+
+從最囉唆的寫起：
+
+```js
+If(line.lessThanEqual(0).and(discarded), () => {
+  Discard();
+});
+```
+
+`Discard()` 自己收條件，`If()` 就可以省掉：
+
+```js
+Discard(line.lessThanEqual(0).and(discarded));
+```
+
+`discard()` 還能直接鏈在條件上，這是課程最後留下的版本：
+
+```js
+line.lessThanEqual(0).and(discarded).discard();
+```
+
+也可以全部用獨立 node 寫，但這個 case 反而更難讀：
+
+```js
+and(lessThanEqual(line, 0), discarded).discard();
+```
+
+都對，選一種讀起來像句子的。
+
+## 為什麼 Loop() 的 i 要講清楚是 float
+
+要畫五個圈，就是把 `circle()` 呼叫五次然後加起來。`Loop()` 產生 shader 裡的 `for`：
+
+```js
+const circles = Fn(({ ..., count = int(5), span = float(0.1) }) => {
+  const lines = float(0).toVar(); // 同樣要 toVar()，addAssign() 才寫得進去
+
+  Loop(count, ({ i }) => {
+    lines.addAssign(circle({ coordinates, center, radius, thickness, inverted, discarded }));
+  });
+
+  return lines;
+});
+```
+
+`addAssign()` 是「加上去然後存回去」。所有算術 node 都自動有這個 `Assign` 版本——`mulAssign`、`subAssign`、`divAssign` 都是同一套機制生出來的，不用另外 import。
+
+`Loop()` 一樣是建圖時跑一次：裡面放 `console.log('loop!')`，Console 只有一個 `loop!`，但 shader 裡有一個真的迴圈。
+
+現在把五個圈散開，半徑隨 `i` 遞增：
+
+```js
+radius: radius.add(i.mul(span));
+```
+
+沒有錯誤，但五個圈還是疊在一起。`i` 是 int，`i.mul(span)` 讓 `span` 跟著轉成 int，`0.1` 就被抹成 `0`。
+
+第一種解法是當場轉：
+
+```js
+radius: radius.add(i.toFloat().mul(span));
+```
+
+第二種是叫 `Loop()` 一開始就給 float 的 `i`。這時候第一個參數要換成物件：
+
+```js
+Loop({ start: float(0), end: count, type: 'float', condition: '<', name: 'i' }, ({ i }) => {
+  // i 已經是 float，直接 i.mul(span)
+});
+```
+
+`start` 省略就是 0（型別跟著 `type` 走）、`condition` 預設 `'<'`、`name` 預設 `'i'`，這三個大多可以省。真正非給不可的是 `end`，而 `type` 是你要 float 的 `i` 才需要——它預設是 `'int'`。
+
+還有兩個參數在迴圈裡必須關掉。`discarded` 如果傳進每個圈，第一個圈就會把「不是我」的地方全丟掉，其他圈畫在哪裡都沒用；`inverted` 也一樣，要反轉的是最後的結果，不是每一個圈。所以迴圈裡固定傳 `bool(false)`，出了迴圈再對 `lines` 做一次：
+
+```js
+Loop(..., ({ i }) => {
+  lines.addAssign(circle({ ..., inverted: bool(false), discarded: bool(false) }));
+});
+
+If(inverted, () => {
+  lines.assign(lines.oneMinus());
+});
+lines.lessThanEqual(0).and(discarded).discard();
+```
+
+## 為什麼 layout 值得那點麻煩
+
+到這裡 `circle()` 和 `circles()` 看起來已經是兩支函式了。把產生的 shader 印出來看看：
+
+```js
+const program = await renderer.debug.getShaderAsync(scene, camera, mesh);
+console.log(program.fragmentShader);
+```
+
+裡面**一支 function 都沒有**。`circle()` 的指令被整段展開在呼叫它的地方。這在只呼叫一處的時候沒差；但如果 shader 裡有兩三個地方用到 `circle()`，那些指令就會被複製兩三份。
+
+TSL 不是不想做，是不知道怎麼做。要開一支 shader function，得先寫出它的簽章，而簽章需要每個參數的型別——那些型別 TSL 只能從你手上拿。給 `Fn()` 第二個參數：
+
+```js
+const circle = Fn(
+  ({ ... }) => {
+    // ...
+  },
+  {
+    coordinates: 'vec2',
+    center: 'vec2',
+    radius: 'float',
+    thickness: 'float',
+    inverted: 'bool',
+    discarded: 'bool',
+    return: 'float',
+  },
+);
+```
+
+再印一次 shader，那支 function 就在裡面了（名字是自動編號的 `fnN`，這個 demo 印出來是 `fn4`）。想在 shader 裡找到某個中間值，`toVar()` 可以幫它取名：
+
+```js
+material.colorNode = vec3(circles({ radius: float(0.075) }).toVar('circlesOutput'));
+```
+
+代價是 layout 之後 TSL 變嚴格：每個參數都得傳，型別要對，預設值幫不了你。所以這是一個有條件的優化——同一支 shader 裡呼叫多處，或者這個函式要給別人用，才值得。
+
+## 用例
+
+- **一段 node 要在多處重用**：普通 JavaScript function 就夠，不必動用 `Fn()`。
+- **需要 `If()` / `Loop()` / `Discard()` / `assign()`**：必須包在 `Fn()` 裡，它們要的 stack 只有 `Fn()` 的 body 有。
+- **參數三四個以內**：陣列解構 `Fn(([a, b, c]) => ...)`，呼叫端短。
+- **參數多、而且常常只想改其中一兩個**：物件解構 `Fn(({ a, b, c }) => ...)`，呼叫端寫 `circle({ radius: float(0.1) })`。
+- **條件要在執行時改**：`If()` 配 bool node（uniform 推出來的），不要用 JavaScript 的 `if`。
+- **條件在開發時就固定**（例如「這個材質永遠不反轉」）：JavaScript 的 `if` 反而更好，被排除的那半段連進 shader 都不會進。
+- **要反轉一個 0~1 的值**：`.oneMinus()`。
+- **要在 `If()` 裡改一個 node**：`x.assign(...)`，不是 `x = ...`。
+- **同一個形狀畫很多次**：`Loop()` + `addAssign()`，別在 JavaScript 裡跑 `for` 疊 node。
+- **迴圈索引要參與小數運算**：`Loop({ end: count, type: 'float' }, ...)`，或當場 `i.toFloat()`。
+- **函式要給別人用、或在 shader 裡呼叫多處**：加 layout。
+- **只呼叫一處、還在調整參數**：先別加 layout，它會讓每次改動都要同步兩個地方。
+- **想確認 TSL 到底產生了什麼**：`renderer.debug.getShaderAsync()` 配 `toVar('名字')` 去 shader 裡找。
+
+## Gotchas
+
+- **`Fn()` 的 body 只跑一次**。裡面的 `console.log`、`Math.random()`、`Date.now()` 都只發生在建圖那一刻。想要每個 fragment 不一樣的隨機值，要用 `hash()` / `rand()` 這種 node。
+- **`If()` 的 body 也只跑一次**，不管條件真假。它是在收集指令，不是在執行邏輯。`Loop()` 一樣。
+- **`If()` 裡不能用 `=`**。`line = line.oneMinus()` 改的是 JavaScript 變數，shader 完全不知道。要 `line.assign(...)`。
+- **要被 `assign()` 改的變數，宣告時要 `.toVar()`**。課程寫 `const line = lineSDF.abs().step(...)` 就直接 `line.assign(...)`；在這個 repo 的 three 0.185 上照抄，畫面是錯的——顏色反過來、圈數也不對，而且完全不報錯。加上 `.toVar()`（`lines` 那個累加器也要）才正常。這是實際跑出來比對的，不是推測：拿掉 `.toVar()` 重整頁面就會看到。
+- **`If()` 在 `Fn()` 外面會爆**。它的實作是 `currentStack.If(...)`，而 `currentStack` 只在 `Fn()` body 執行期間有值，外面是 `null`。`assign()` 的錯誤訊息甚至直接寫著「請放進 Fn() 裡」。
+- **`Else()` 和 `ElseIf()` 不是 import 得到的 node**，是 `If()` 回傳值上的方法。`Switch()` 才是 import 得到的，而它的 `Case()` / `Default()` 同樣是鏈上去的。
+- **`1 - node` 不合法**。從 node 起頭：`float(1).sub(x)`，或直接 `x.oneMinus()`。
+- **鏈式 `.step()` 的參數順序跟獨立的 `step()` 相反**。three.js 裡 `stepElement = (x, edge) => step(edge, x)`，所以 `x.step(edge)` 是 `step(edge, x)`。搞反了圈就會反過來。
+- **`thickness` 要除以 2**。`lineSDF.abs()` 在圈的內外都往上長，不除 2 的話畫出來的線是你要的兩倍寬。
+- **變數名別跟 node 名撞**：`distance`、`color`、`time`、`uv`、`texture`、`mix`。撞了就是那個 scope 裡再也用不到那個 node。
+- **預設值和引數都用 node**。`radius = 0.25` 會讓型別協商失去依據，`inverted = false` 會讓 `inverted.not()` 直接不存在。
+- **`Loop()` 的 `i` 預設是 int**。`i.mul(0.1)` 會把 `0.1` 轉成 int 變 0，而且不報錯，只是畫面沒動靜。
+- **`@types/three` 沒有宣告 `Loop()` 的 `name`**。`LoopNode.d.ts` 裡那一行是註解掉的，帶著 TODO。runtime 收，TypeScript 不收——課程的 `name: 'i'` 照抄會編不過，而它本來就是預設值。
+- **迴圈裡的 `discarded` 和 `inverted` 要關掉**。每個圈都 discard 的話，第一個圈就會把其他圈的位置全丟光。
+- **沒有 layout 就沒有 function**。`Fn()` 本身只是「一組指令」，TSL 會把它整段展開在呼叫處。
+- **layout 只給字串是另一件事**。`Fn(fn, 'float')` 只設定回傳型別，不會產生 function；要 function 得給完整的參數型別物件。
+- **產生的 function 名字是自動編號的**。`FnNode.setLayout()` 用 `'fn' + fnId++` 命名，而那個計數器是整個 app 共用的——這個 demo 印出來是 `fn4()`，不是 `fn0()`。要自己取名得改用完整的 `{ name, type, inputs }` 形式。
+- **有 layout 之後參數不能省**。TSL 會照 layout 的 inputs 一項一項去拿，少傳一個就是壞掉，而且型別要對得上。
+- **R3F 寫法**：`radius`、`thickness`、`span`、`count` 四個 slider 全走 `uniform()`，包括 `Loop()` 的上限——迴圈上限在 shader 裡是一個變數，換數字不重編。兩個 `Fn` 版本（有無 layout）畫出來一模一樣，所以 demo 直接把產生的 fragment shader 撈出來，數裡面有幾支 `fn`。
+- **`getShaderAsync()` 不要在正在跑的畫面上呼叫**。它會自己走一遍 `compileAsync()` 和 `_objects.get()`，在 render loop 還在跑的時候呼叫，下一幀就可能丟 `Failed to execute 'writeBuffer' on 'GPUQueue'`，然後整個 canvas 停住不動。這個 demo 原本想把產生的 shader 撈出來顯示，就是踩到這個才拿掉的。要看 shader 就照課程那樣，在 setup 階段印一次到 Console。
+- **`uniform(false)` 會直接丟例外**。`NodeBuilder.getNodeUniform()` 只認得 float / int / uint / vec2~4 / color / mat2~4，bool 不在名單上，錯誤訊息是 `Uniform "bool" not implemented`。demo 的 `inverted` / `discarded` 因此存成 float uniform，再用 `.greaterThan(0.5)` 轉回 bool node——`If()` 和 `Discard()` 要的本來就是一個 bool node，不在乎它從哪來。
