@@ -1,0 +1,535 @@
+---
+title: Patterns
+sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/patterns
+lessonNumber: 'patterns'
+order: 9
+summary: '十個 pattern 全部只寫 fragment、全部從 uv() 起頭，練的是把 node 串成一條鏈。fract() 讓值重複，floor() 切出格子；hash() 只吃一個數，丟 vec2 進去只會用到 x。noise 多給一維 time 就會變形，mx_noise_float() 的範圍是 -1 到 1。最後的水池用三條鏈分別做出水底、泡沫、睡蓮，再照 mask 用兩次 mix() 疊起來；只有水底過 parallaxUV()，所以平面看起來有深度。parallaxUV() 回傳的是 vec3，要當 vec2 用得自己取 .xy。'
+tags: [webgpu, tsl, uv, fract, floor, checker, remap, hash, rand, mx_noise_float, mx_worley_noise_float, parallaxUV, mix]
+---
+
+import { PatternsDemo } from './patterns';
+
+## TL;DR
+
+- 這一課是練習：把 Three.js Journey 的 Shader Patterns 挑十個用 TSL 重做。全部只動 fragment，全部從 `uv()` 起頭。
+- material 用 `MeshBasicNodeMaterial`，不受光影影響，畫面就是 `colorNode` 算出來的顏色。
+- `colorNode` 要 vec3。`vec3(uv(), 1)` 把 vec2 依序填進前兩格；`vec3(uv().x)` 一個值填滿三格。
+- 要重複就 `fract()`：`uv().x.mul(10).fract()` 是十段 0 到 1。`mod(1)` 效果一樣。
+- 要切格子就 `floor()`：同一格裡的每個 fragment 拿到同一個數，亂數才會一格一個顏色。
+- 鏈式和獨立 node 可以混用。兩個對稱的東西相加時，`add(a, b)` 比 `a.add(b)` 好讀。
+- 棋盤自己拼要兩軸各 `step(0.5)`、相加、`sub(1).abs()`。直接用 `checker(uv().mul(10))` 也行，黑白剛好相反。
+- `uv().distance(0.5)` 不用寫 `vec2(0.5)`。TSL 取兩邊比較長的型別，`0.5` 自動升成 vec2。
+- `atan()` 回來的角度是 -π 到 π。`remap(PI.negate(), PI, 0, 1)` 轉成 0 到 1，`-PI` 不能寫。
+- `hash()` 只吃一個數，`hash(gridUv)` 等於 `hash(gridUv.x)`。把兩軸編成一個格子編號，或改用 `rand(gridUv)`。
+- `mx_noise_float()` 的範圍是 -1 到 1，負的那一半直接是黑的。
+- noise 加上 `time` 再 `fract()`，等高線就會自己往低處流。
+- noise 要變形就多給一維：`vec3(uv, time)`。
+- `mx_worley_noise_float()` 回傳到最近那個點的距離。`pow(3)` 變成 caustics 的網，`step()` 變成一顆顆圓盤。
+- Inigo Quilez 的 palette 用 TSL Transpiler 轉成帶 layout 的 `Fn()`，記得註明作者。
+- mask 的套路：noise → `abs()` / `step()` → `oneMinus()` 讓要的地方是 1 → `mix(底, 上層, mask)`。
+- `parallaxUV(uv(), 0.5)` 讓平面上的圖看起來在更深的地方。它回傳 vec3，要當 vec2 用就接 `.xy`。
+- `let final` 重新指派只是讓 JavaScript 變數指到更大的 graph，跟上一課的 `assign()` 無關。
+
+## 一張圖
+
+{/* Keep every <text> on one line: oxfmt splits them across lines and MDX then wraps the content in <p>, which SVG cannot render. Code-ish strings go through {'...'} so JSX does not eat the braces and angle brackets. */}
+
+<svg viewBox="0 0 880 550" className="mx-auto block w-full max-w-3xl" role="img" aria-label="水池 pattern 的資料流：uv、time、由 vertex 算好的視線方向進到 fragment；三條鏈各跑一遍，水底經過 parallaxUV 推深再算 Worley noise 上色，泡沫用 Perlin noise 做成 mask，睡蓮用 Worley noise 做 mask 和顏色；兩次 mix 照 mask 疊起來畫出水池。下方側面圖說明 parallaxDepth 讓 caustics 改拿視線穿過水面後、假想水底上那一點的 uv">
+  <defs>
+    <marker id="pt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    </marker>
+    <marker id="pt-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#b45309" />
+    </marker>
+    <radialGradient id="pt-lily">
+      <stop offset="0" stopColor="#d7e689" />
+      <stop offset="1" stopColor="#329a89" />
+    </radialGradient>
+    <clipPath id="pt-pond">
+      <circle cx="764" cy="350" r="66" />
+    </clipPath>
+  </defs>
+
+  {/* ① what enters the GPU */}
+  <rect x="12" y="12" width="856" height="62" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="24" y="38" fontSize="12" fontWeight="600" fill="#334155">① 輸入</text>
+  <text x="24" y="54" fontSize="9" fill="#64748b">fragment 拿到的</text>
+  <rect x="110" y="20" width="166" height="44" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="193" y="37" textAnchor="middle" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">uv()</text>
+  <text x="193" y="54" textAnchor="middle" fontSize="8.5" fill="#64748b">每個頂點一份，內插到每個像素</text>
+  <rect x="286" y="20" width="150" height="44" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="361" y="37" textAnchor="middle" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">time</text>
+  <text x="361" y="54" textAnchor="middle" fontSize="8.5" fill="#64748b">每幀一個值，整片共用</text>
+  <rect x="446" y="20" width="190" height="44" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="541" y="37" textAnchor="middle" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">positionViewDirection</text>
+  <text x="541" y="54" textAnchor="middle" fontSize="8.5" fill="#64748b">vertex 從 position 算好，內插過來</text>
+  <text x="660" y="38" fontSize="9.5" fill="#334155">這一課只寫 colorNode</text>
+  <text x="660" y="54" fontSize="9" fill="#64748b">vertex 那一段交給 three.js</text>
+
+  {/* ② fragment: three chains */}
+  <text x="12" y="98" fontSize="12" fontWeight="600" fill="#334155">② fragment</text>
+  <text x="204" y="98" fontSize="9" fill="#64748b">每個像素，三條鏈各跑一遍</text>
+  <text x="660" y="98" fontSize="12" fontWeight="600" fill="#334155">③ 疊起來 → ④ 畫出來</text>
+
+  {/* lane A: caustics */}
+  <rect x="12" y="108" width="624" height="128" rx="8" fill="#eff6ff" stroke="#93c5fd" />
+  <text x="24" y="126" fontSize="11" fontWeight="600" fill="#1e3a8a">水底 caustics</text>
+  <text x="262" y="126" fontSize="9" fill="#1d4ed8">唯一先過 parallaxUV() 的一條</text>
+  <rect x="24" y="136" width="220" height="90" rx="6" fill="#fff" stroke="#93c5fd" />
+  <text x="34" y="150" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">depthUv = parallaxUV(uv(),</text>
+  <rect x="34" y="155" width="200" height="30" rx="4" fill="#fffbeb" stroke="#f59e0b" />
+  <text x="134" y="167" textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill="#92400e">parallaxDepth（課程寫 0.5）</text>
+  <text x="134" y="180" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="#92400e">demo 的 slider 改這一個</text>
+  <text x="34" y="197" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">).xy</text>
+  <text x="34" y="209" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">causticsInput = vec3(</text>
+  <text x="46" y="220" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">depthUv.mul(6), time.mul(0.3))</text>
+  <rect x="262" y="136" width="150" height="90" rx="6" fill="#fff" stroke="#93c5fd" />
+  <text x="272" y="160" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">mx_worley_noise_float()</text>
+  <text x="272" y="173" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.pow(3)</text>
+  <text x="272" y="198" fontSize="8.5" fill="#64748b">到最近那個點的距離</text>
+  <text x="272" y="211" fontSize="8.5" fill="#64748b">pow(3) 只留分界附近亮</text>
+  <rect x="430" y="136" width="130" height="90" rx="6" fill="#fff" stroke="#93c5fd" />
+  <text x="438" y="160" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">mix(color(0x1b3956),</text>
+  <text x="438" y="173" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">color(0x11eeff), …)</text>
+  <text x="438" y="203" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#1e3a8a">= depthColor</text>
+  <line x1="244" y1="181" x2="260" y2="181" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+  <line x1="412" y1="181" x2="428" y2="181" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+  <rect x="570" y="153" width="56" height="56" rx="3" fill="#1b3956" />
+  <path d="M570 170 L584 164 L598 172 L612 161 L626 166 M584 164 L581 153 M612 161 L609 153 M598 172 L596 188 L582 195 L570 191 M596 188 L611 193 L626 187 M582 195 L585 209 M611 193 L614 209" fill="none" stroke="#11eeff" strokeWidth="1.4" strokeLinejoin="round" />
+
+  {/* inputs bus, drawn after lane A so the lane's fill does not hide the arrow */}
+  <line x1="193" y1="64" x2="193" y2="80" stroke="#64748b" strokeWidth="1.5" />
+  <line x1="361" y1="64" x2="361" y2="80" stroke="#64748b" strokeWidth="1.5" />
+  <line x1="541" y1="64" x2="541" y2="80" stroke="#64748b" strokeWidth="1.5" />
+  <line x1="134" y1="80" x2="541" y2="80" stroke="#64748b" strokeWidth="1.5" />
+  <line x1="134" y1="80" x2="134" y2="134" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+
+  {/* lane B: foam */}
+  <rect x="12" y="246" width="624" height="84" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="24" y="264" fontSize="11" fontWeight="600" fill="#334155">水面泡沫 foam</text>
+  <text x="262" y="264" fontSize="9" fill="#64748b">直接用 uv()，貼在水面上</text>
+  <rect x="24" y="272" width="220" height="50" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="34" y="285" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">foamInput = vec3(uv().mul(5),</text>
+  <text x="46" y="297" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">time.mul(0.1))</text>
+  <text x="34" y="314" fontSize="8.5" fill="#64748b">第三維給 time，noise 才會變形</text>
+  <rect x="262" y="272" width="150" height="50" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="272" y="291" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">mx_noise_float()</text>
+  <text x="272" y="310" fontSize="8.5" fill="#64748b">範圍 -1 到 1</text>
+  <rect x="430" y="272" width="130" height="50" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="438" y="286" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.abs().step(0.05)</text>
+  <text x="438" y="298" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.oneMinus()</text>
+  <text x="438" y="314" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#334155">= foamMask</text>
+  <line x1="244" y1="297" x2="260" y2="297" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+  <line x1="412" y1="297" x2="428" y2="297" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+  <rect x="573" y="272" width="50" height="50" rx="3" fill="#0f172a" />
+  <path d="M573 284 C581 278, 589 292, 598 285 S 614 279, 623 287 M580 322 C584 310, 596 312, 600 302 S 612 296, 616 306 S 620 318, 623 314 M573 305 C578 300, 583 309, 588 304" fill="none" stroke="#fff" strokeWidth="1.2" />
+
+  {/* lane C: lily pads */}
+  <rect x="12" y="340" width="624" height="106" rx="8" fill="#f0fdf4" stroke="#86efac" />
+  <text x="24" y="358" fontSize="11" fontWeight="600" fill="#14532d">睡蓮 lily pads</text>
+  <text x="262" y="358" fontSize="9" fill="#15803d">也用 uv()，同一個 noise 用兩次</text>
+  <rect x="24" y="366" width="220" height="72" rx="6" fill="#fff" stroke="#86efac" />
+  <text x="34" y="392" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">lilyPadInput = vec3(uv().mul(4), 0)</text>
+  <text x="34" y="410" fontSize="8.5" fill="#64748b">第三維固定 0，睡蓮不會動</text>
+  <rect x="262" y="366" width="150" height="72" rx="6" fill="#fff" stroke="#86efac" />
+  <text x="272" y="392" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">mx_worley_noise_float()</text>
+  <text x="272" y="410" fontSize="8.5" fill="#64748b">離點近 = 值小 = 圓盤裡</text>
+  <rect x="430" y="366" width="130" height="72" rx="6" fill="#fff" stroke="#86efac" />
+  <text x="438" y="379" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.step(0.2).oneMinus()</text>
+  <text x="438" y="391" fontSize="9" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#14532d">= lilyPadMask</text>
+  <text x="438" y="405" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">mix(…, lilyPadNoise</text>
+  <text x="450" y="416" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.div(0.2))</text>
+  <text x="438" y="430" fontSize="9" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#14532d">= lilyPadColor</text>
+  <line x1="244" y1="402" x2="260" y2="402" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+  <line x1="412" y1="402" x2="428" y2="402" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+  <rect x="570" y="374" width="56" height="56" rx="3" fill="#0f172a" />
+  <circle cx="583" cy="387" r="8" fill="#fff" />
+  <circle cx="608" cy="385" r="7" fill="#fff" />
+  <circle cx="596" cy="408" r="9" fill="#fff" />
+  <circle cx="618" cy="418" r="6" fill="#fff" />
+  <circle cx="578" cy="420" r="5" fill="#fff" />
+
+  {/* lanes into the mix column */}
+  <line x1="626" y1="181" x2="658" y2="181" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+  <line x1="623" y1="297" x2="658" y2="297" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+  <line x1="626" y1="402" x2="658" y2="402" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+
+  {/* ③ two mix() calls, ④ the pond */}
+  <rect x="660" y="108" width="208" height="338" rx="8" fill="#faf5ff" stroke="#d8b4fe" />
+  <text x="672" y="130" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">let final = mix(depthColor,</text>
+  <text x="684" y="142" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">foamColor, foamMask)</text>
+  <text x="672" y="158" fontSize="8.5" fill="#6b21a8">foamMask 是 1 的地方換成泡沫色</text>
+  <text x="672" y="182" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">final = mix(final,</text>
+  <text x="684" y="194" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">lilyPadColor, lilyPadMask)</text>
+  <text x="672" y="210" fontSize="8.5" fill="#6b21a8">lilyPadMask 是 1 的地方蓋上睡蓮</text>
+  <text x="764" y="234" textAnchor="middle" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#581c87">colorNode = final</text>
+  <line x1="764" y1="242" x2="764" y2="278" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#pt-arrow)" />
+  <g clipPath="url(#pt-pond)">
+    <rect x="698" y="284" width="132" height="132" fill="#1b3956" />
+    <path d="M698 318 L722 306 L746 322 L772 300 L798 312 L830 298 M722 306 L716 284 M772 300 L768 284 M798 312 L806 284 M746 322 L742 352 L716 364 L698 356 M742 352 L770 360 L796 344 L830 352 M796 344 L798 312 M716 364 L722 392 L698 404 M722 392 L750 400 L770 360 M750 400 L748 416 M770 360 L792 390 L830 386 M792 390 L786 416" fill="none" stroke="#11eeff" strokeWidth="1.6" strokeLinejoin="round" opacity="0.85" />
+    <path d="M700 336 C716 326, 730 346, 748 336 S 780 324, 800 338 S 822 350, 830 342 M712 398 C724 386, 742 392, 754 380 S 780 370, 792 378" fill="none" stroke="#e5f7ff" strokeWidth="1.6" />
+    <circle cx="736" cy="302" r="11" fill="url(#pt-lily)" />
+    <circle cx="802" cy="372" r="13" fill="url(#pt-lily)" />
+    <circle cx="722" cy="378" r="9" fill="url(#pt-lily)" />
+    <circle cx="790" cy="318" r="8" fill="url(#pt-lily)" />
+  </g>
+  <circle cx="764" cy="350" r="66" fill="none" stroke="#334155" strokeWidth="1.5" />
+  <text x="764" y="434" textAnchor="middle" fontSize="9" fill="#581c87">平平一片，水底卻像在下面</text>
+
+  {/* what parallaxDepth does, side view */}
+  <rect x="12" y="462" width="856" height="80" rx="8" fill="#fffbeb" stroke="#f59e0b" />
+  <text x="24" y="484" fontSize="11.5" fontWeight="700" fill="#92400e">parallaxDepth 在做什麼（側面看，近似）</text>
+  <text x="24" y="502" fontSize="9.5" fill="#92400e">鏡頭看到水面上的 P，caustics 卻改拿 Q 正上方的 uv 來算</text>
+  <text x="24" y="518" fontSize="9" fill="#b45309">值愈大 P、Q 離愈遠，鏡頭一動就滑愈多，看起來愈深；0 就是貼在水面</text>
+  <line x1="450" y1="494" x2="856" y2="494" stroke="#3b82f6" strokeWidth="2" />
+  <line x1="450" y1="524" x2="856" y2="524" stroke="#1b3956" strokeWidth="1.5" strokeDasharray="5 3" />
+  <text x="700" y="489" fontSize="8.5" fill="#1d4ed8">水面（泡沫、睡蓮在這）</text>
+  <text x="700" y="536" fontSize="8.5" fill="#1b3956">假想的水底</text>
+  <circle cx="470" cy="470" r="4" fill="#334155" />
+  <text x="462" y="474" textAnchor="end" fontSize="8.5" fill="#334155">鏡頭</text>
+  <line x1="470" y1="470" x2="605" y2="524" stroke="#64748b" strokeWidth="1.2" />
+  <circle cx="530" cy="494" r="3" fill="#1d4ed8" />
+  <text x="526" y="488" textAnchor="end" fontSize="9" fontWeight="700" fill="#1d4ed8">P</text>
+  <circle cx="605" cy="524" r="3" fill="#1b3956" />
+  <text x="611" y="535" fontSize="9" fontWeight="700" fill="#1b3956">Q</text>
+  <line x1="605" y1="524" x2="605" y2="494" stroke="#0891b2" strokeWidth="1.2" strokeDasharray="2 2" />
+  <circle cx="605" cy="494" r="3" fill="#11eeff" stroke="#0891b2" />
+  <text x="611" y="510" fontSize="8.5" fill="#0e7490">← caustics 拿這裡的 uv</text>
+  <line x1="846" y1="497" x2="846" y2="521" stroke="#b45309" strokeWidth="1.5" markerStart="url(#pt-amber)" markerEnd="url(#pt-amber)" />
+  <text x="838" y="512" textAnchor="end" fontSize="8.5" fontWeight="700" fill="#92400e">parallaxDepth</text>
+</svg>
+
+平面上每個像素拿到自己的 `uv()`，三條 node 鏈各自把它變成一樣東西：水底的顏色、泡沫的 mask、睡蓮的 mask 和顏色。mask 只有 0 和 1，兩次 `mix()` 照著它決定每個像素最後露出哪一層。三條鏈裡只有水底先過 `parallaxUV()`，所以鏡頭一動，caustics 會在泡沫和睡蓮底下滑動。黃框的 `parallaxDepth` 決定它滑多少，demo 把它做成 slider。
+
+<DemoFrame title="鏡頭會自己左右晃；拉 parallaxDepth 看水底跟水面分開，按鈕一次只看一層">
+  <PatternsDemo />
+</DemoFrame>
+
+## 為什麼每一個 pattern 都從 uv() 開始
+
+`uv` 是 geometry 上的 attribute，每個頂點一份。到了 fragment，GPU 按像素位置把它內插開來，於是平面上每個像素都拿到一組自己的 (x, y)：左下 (0, 0)，右上 (1, 1)。
+
+所以一個 pattern 就是一支「給我位址，我回你顏色」的函式。shader 只有一支，每個像素餵進去的位址不同，畫出來就不同。
+
+`colorNode` 要的是 vec3，第一件事就是把 vec2 放進去：
+
+```js
+material.colorNode = vec3(uv().x, uv().y, 1);
+material.colorNode = vec3(uv(), 1); // 一樣：vec2 依序填進前兩格
+```
+
+灰階只需要一個數：
+
+```js
+material.colorNode = vec3(uv().x); // 一個值填滿三格
+```
+
+這兩個縮寫在 Variables & References 講過，這一課每個 pattern 都用得到。
+
+material 選 `MeshBasicNodeMaterial` 也是同一個理由：它不算光影，`colorNode` 給什麼就畫什麼，你看到的就是 pattern 本身。
+
+## 為什麼 fract() 會重複、floor() 會切格子
+
+任何一個數都能拆成兩半：`x = floor(x) + fract(x)`。`uv().x.mul(10)` 從 0 走到 10，拆開來看：
+
+- `fract()` 留小數。0 到 1、0 到 1……走十遍，是一把鋸子。它回答「我在這一格的哪裡」。
+- `floor()` 留整數。0、1、2 一路往上，是一道樓梯。它回答「我在第幾格」。
+
+```js
+// Pattern 3：十條漸層
+material.colorNode = vec3(uv().x.mul(10).fract());
+
+// Pattern 7：十乘十的格子，每格一個編號
+const gridUv = uv().mul(10).floor();
+material.colorNode = vec3(gridUv, 0);
+```
+
+第二段畫出來幾乎整片黃色，這不是 bug。`gridUv` 的值是 0 到 9，顏色超過 1 就被截成 1，所以除了最左一欄和最下一列，每格都是 (1, 1, 0)。除以 10 就看得到格子。
+
+`fract()` 也可以寫成 `mod(1)`。鏈式和獨立 node 同樣可以互換，`vec3(fract(mul(uv().x, 10)))` 跟上面那行完全一樣，只是比較難讀。
+
+## 為什麼自己拼的棋盤要 sub(1).abs()
+
+兩軸各自做一次 Pattern 3，再用 `step(0.5)` 切成一半黑一半白，每個軸就是 0 或 1。相加之後有三種值：
+
+| x 軸 | y 軸 | 相加 | `sub(1).abs()` |
+| ---- | ---- | ---- | -------------- |
+| 0    | 0    | 0    | 1              |
+| 1    | 0    | 1    | 0              |
+| 0    | 1    | 1    | 0              |
+| 1    | 1    | 2    | 1              |
+
+棋盤要的是「兩軸一樣就白，不一樣就黑」。0 和 2 都是「一樣」，減 1 取絕對值剛好把它們都變成 1。
+
+```js
+material.colorNode = vec3(
+  add(
+    uv().x.mul(10).fract().step(0.5),
+    uv().y.mul(10).fract().step(0.5)
+  ).sub(1).abs()
+);
+```
+
+這裡用獨立的 `add()`，因為兩個參數長得一模一樣，上下對齊一眼就看得出只差 x 和 y。
+
+TSL 其實有現成的 `checker()`。它的做法不一樣：座標乘 2、兩軸各自 `floor()`、相加、`mod(2)`，看格子編號的奇偶。
+
+```js
+material.colorNode = vec3(checker(uv().mul(10)));
+```
+
+因為內部先乘了 2，`checker(uv().mul(10))` 的格子大小跟上面手拼的一樣。但奇偶是反過來的，要一模一樣就再接 `.oneMinus()`。
+
+## 為什麼 distance(0.5) 不用寫 vec2(0.5)
+
+Pattern 5 是放射漸層，就是每個像素到中心的距離。三種寫法畫出來一樣：
+
+```js
+material.colorNode = vec3(uv().distance(vec2(0.5)));
+material.colorNode = vec3(uv().sub(0.5).length());
+material.colorNode = vec3(uv().distance(0.5));
+```
+
+`0.5` 沒包成 `vec2` 也行。`distance()` 會比較兩邊的型別長度，取長的那個，所以 `0.5` 被升成 `vec2(0.5)`。這跟誰寫在前面無關，`distance(0.5, uv())` 一樣成立。
+
+Math 那課說「型別看第一個參數」，講的是 `add()`、`mul()` 這類運算子，而且兩邊長度一樣，例如 int 碰上 float。長度不一樣，長的那邊贏。
+
+## 為什麼角度要 remap 一次
+
+Pattern 6 是繞著中心轉一圈的漸層。先把原點搬到中間，再用 `atan()` 算角度：
+
+```js
+const polarUv = uv().sub(0.5);
+const angle = atan(polarUv.x, polarUv.y);
+material.colorNode = vec3(angle);
+```
+
+這樣畫出來大半片是黑的或白的。`atan()` 回來的是 -π 到 π，顏色只看得到 0 到 1 那一小段。
+
+要轉成 0 到 1，手動是加 π、除以 2π，TSL 連 `TWO_PI` 都準備好了：
+
+```js
+material.colorNode = vec3(angle.add(PI).div(TWO_PI));
+```
+
+或者直接說「從哪個範圍，轉到哪個範圍」：
+
+```js
+material.colorNode = vec3(angle.remap(PI.negate(), PI, 0, 1));
+```
+
+`PI` 是 node，不是 JavaScript 的數字，所以 `-PI` 沒有意義，要寫 `PI.negate()`。跟 `1 - node` 不合法是同一件事。
+
+## 為什麼 hash(gridUv) 跟 hash(gridUv.x) 一樣
+
+Pattern 7 要每一格一個亂數。格子切好了，丟進 `hash()`：
+
+```js
+const gridUv = uv().mul(10).floor();
+const random = hash(gridUv);
+material.colorNode = vec3(random);
+```
+
+畫出來是十條直的，每一欄同一個灰。
+
+`hash()` 的第一步是把輸入轉成**一個** `uint`。TSL 把大型別轉成小型別時只留前面的分量，vec2 轉成純量就只剩 `.x`。所以 y 被丟掉了，同一欄的十格拿到同一個輸入。
+
+解法一：自己把兩軸編成一個不重複的號碼。x 乘 10 再加 y，一百格剛好是 0 到 99：
+
+```js
+const subdivisions = 10;
+const gridUv = uv().mul(subdivisions).floor();
+const random = hash(gridUv.x.mul(subdivisions).add(gridUv.y));
+```
+
+解法二：改用本來就吃 vec2 的 `rand()`：
+
+```js
+const random = rand(gridUv);
+```
+
+兩種都是偽亂數：同一個輸入永遠回同一個值，所以重新整理畫面也不會變。
+
+## 為什麼 noise 加上 time 再 fract() 會流動
+
+Pattern 8 是一圈圈會流動的線。起點是 Perlin noise：
+
+```js
+const perlinUv = uv().mul(5);
+const perlinNoise = mx_noise_float(perlinUv);
+material.colorNode = vec3(perlinNoise);
+```
+
+大片黑色是因為 `mx_noise_float()` 的範圍是 -1 到 1，負的那一半全被截成 0。這一課不用處理它，因為接下來會 `fract()`。
+
+把 noise 想成一張地形圖，值就是高度。接下來每一步：
+
+```js
+material.colorNode = vec3(
+  perlinNoise
+    .mul(5)     // 地形拉高五倍，等高線變密
+    .add(time)  // 整片地形一起往上長
+    .fract()    // 每一個整數高度切一刀
+    .step(0.8)  // 每一層只留最上面 20%
+);
+```
+
+`fract()` 之後畫面上就是等高線。`add(time)` 讓每個像素的值一起變大，某個高度剛好碰到那一刀的位置就一直往低處退。所以線會往低處爬，山頂不斷冒出新的一圈。
+
+沒有任何東西真的在移動，移動的是門檻。每幀要做的事全在 shader 裡，JavaScript 一行更新都不用寫。
+
+## 為什麼 noise 多給一維就會動
+
+Pattern 9 和水池都用這一招：
+
+```js
+const worleyUv = uv().mul(10);
+const worleyNoise = mx_worley_noise_float(vec3(worleyUv, time));
+```
+
+`vec3(uv, time)` 把 2D 的位址變成 3D。可以想成一塊 3D 的 noise 積木，`uv` 決定你在切面上的哪裡，`time` 決定這一刀切在多深。時間一走，切面往下移，花紋就在原地變形。
+
+對照組是 `uv().add(time)`：切面沒換，整張圖往一個方向平移。要「流過去」用它，要「原地翻湧」就給第三維。
+
+速度用 `time.mul()` 調：水池的 caustics 是 `0.3`，泡沫是 `0.1`。睡蓮給 `0`，就是一直停在同一個切面。
+
+`mx_worley_noise_float()` 本身回傳的是「到最近那個隨機點的距離」：點上是 0，愈靠近兩個點之間的分界愈大。同一個值有兩種用法：
+
+- `pow(3)`：中間的值被壓暗，只剩分界附近亮。這就是 caustics 的網。
+- `step(0.2).oneMinus()`：距離小於 0.2 的地方變 1。這就是一顆顆圓盤，也就是睡蓮。
+
+## 為什麼 palette 要自己轉成 Fn()
+
+Pattern 9 的顏色來自 Inigo Quilez 的 palette。公式只有一行：`a + b × cos(2π × (c × t + d))`。`t` 是輸入，其他四個 vec3 各管一件事：
+
+- `a`：中心亮度，cos 在它上下擺。
+- `b`：擺多大。
+- `c`：`t` 從 0 走到 1 的途中擺幾次。
+- `d`：R、G、B 各自錯開多少。錯開，顏色才不是灰的。
+
+原版是 GLSL。Tools & Debug 那課介紹的 TSL Transpiler 可以直接轉，結果是一支帶 layout 的 `Fn()`，就是上一課講的那種：
+
+```js
+// By Inigo Quilez (https://iquilezles.org/articles/palettes/)
+export const palette = Fn(([t, a, b, c, d]) => {
+  return a.add(b.mul(cos(mul(6.283185, c.mul(t).add(d)))));
+}, { t: 'float', a: 'vec3', b: 'vec3', c: 'vec3', d: 'vec3', return: 'vec3' });
+
+material.colorNode = palette(
+  worleyNoise,
+  vec3(0.5, 0.3, 0.4),
+  vec3(0.9, 0.5, 0.4),
+  vec3(1.0, 1.0, 1.0),
+  vec3(0.0, 0.1, 0.2)
+);
+```
+
+Transpiler 的輸出會帶 `/*@__PURE__*/`，那是給 bundler 的 tree-shaking 提示，拿掉沒差。輸出的樣子也會跟著 three.js 版本變，以你手上那一版為準。別人的演算法就要註明作者，第一行那個註解不是裝飾。
+
+四個 vec3 跟最後的顏色很難直覺對上，實務上是邊調邊看。
+
+## 為什麼一片平面看得出深度
+
+視差是這樣：眼睛一移動，近的東西滑得多，遠的滑得少。水池只有一片平面，要讓 caustics 看起來在水底，就讓它跟水面上的東西動得不一樣。
+
+`parallaxUV()` 做的事寫出來只有一行：
+
+```js
+const parallaxUV = (uv, scale) => uv.sub(parallaxDirection.mul(scale));
+```
+
+`parallaxDirection` 是「往鏡頭的方向」換到切線空間的結果：x 沿著 uv 的 x、y 沿著 uv 的 y、z 垂直於表面。
+
+- 鏡頭正上方往下看，方向幾乎只有 z，xy 接近 0，uv 不變。
+- 鏡頭斜著看，xy 變大，uv 被往遠離鏡頭的方向推，就像拿視線穿過水面後、更深處那一點的圖案。
+- 鏡頭一動，推的量跟著變，圖案就在水面底下滑動。
+
+`scale` 就是圖裡黃色的 `parallaxDepth`：0 等於貼在水面，愈大愈深，負的反過來像浮在水面上。
+
+拉 demo 的 slider 還會看到一件事：值愈大，caustics 的格子愈小。水池各處的視線方向不一樣，推的量也就不一樣，整片 uv 被拉開了，同一片水面裝進更多格子。遠的東西本來就比較小，所以這正好幫了深度的錯覺。
+
+```js
+const depthUv = parallaxUV(uv(), 0.5).xy;
+const causticsInput = vec3(depthUv.mul(6), time.mul(0.3));
+```
+
+只有 caustics 過 `parallaxUV()`。泡沫和睡蓮用原本的 `uv()`，黏在水面上。眼睛看到的深度，其實是這兩群東西滑動速度的差。
+
+那個 `.xy` 在這裡不能省。`parallaxDirection` 是 vec3，vec2 減 vec3 得到的是 vec3，雖然 JSDoc 寫的是 vec2。
+
+少了 `.xy`，`vec3(depthUv.mul(6), time.mul(0.3))` 就收到四個分量。`vec3()` 被第一個參數填滿，`time` 直接被丟掉。Console 會印出 `THREE.TSL: Length of parameters exceeds maximum length of function 'vec3()' type.`。第三格變成方向的 z，所以花紋不再隨時間變形，反而跟著鏡頭角度變。
+
+切線空間需要 tangent，但 `CircleGeometry` 沒有 tangent attribute，照樣能用。geometry 沒有 tangent 時，three.js 會用 `positionView` 和 `uv` 的螢幕導數（`dFdx` / `dFdy`）現場算一個出來。
+
+## 為什麼 mask 都要 oneMinus()
+
+`mix(a, b, t)` 在 `t = 0` 時是 `a`，`t = 1` 時是 `b`。所以 mask 的慣例是：**要畫上去的地方是 1**。
+
+`step()` 常常給出反的結果，`oneMinus()` 就是把它轉回來：
+
+```js
+// 泡沫：noise 接近 0 的地方要是線
+const foamMask = foamNoise.abs().step(0.05).oneMinus();
+
+// 睡蓮：離點近的地方要是圓盤
+const lilyPadMask = lilyPadNoise.step(0.2).oneMinus();
+```
+
+`abs()` 在泡沫這裡也有用處。Perlin noise 從負走到正時會穿過 0，`abs()` 把負的翻上來，穿過 0 的地方就變成一道細細的谷。`step(0.05)` 把谷底切出來，就是一條線。
+
+睡蓮的顏色用同一個 noise 再算一次漸層：
+
+```js
+const lilyPadColor = mix(color(0xd7e689), color(0x329a89), lilyPadNoise.div(0.2));
+```
+
+`div(0.2)` 等於 `mul(5)`，但寫成除法才看得出它跟 `step(0.2)` 是同一個數：noise 走到 0.2 時漸層剛好走完，也剛好是圓盤的邊。改了其中一個，另一個要跟著改。
+
+最後兩次 `mix()` 疊起來：
+
+```js
+let final = mix(depthColor, foamColor, foamMask);
+final = mix(final, lilyPadColor, lilyPadMask);
+material.colorNode = final;
+```
+
+這裡用 `let` 重新指派完全沒問題。上一課說 `=` 不能取代 `assign()`，那是在 `Fn()` 裡想改 shader 變數的時候。這裡只是讓 JavaScript 變數 `final` 指到一個更大的 graph，最後交給 `colorNode` 的是整個 graph。寫成 `mix(mix(…), …)` 也對，只是難讀。
+
+## 用例
+
+- **畫面要重複 N 次**：`uv().mul(N).fract()`。
+- **每一格一個值**（亂數、顏色、動畫延遲）：`uv().mul(N).floor()` 當輸入。
+- **一格一個亂數**：`rand(gridUv)`；堅持用 `hash()` 就先把兩軸編成一個號碼。
+- **兩軸對稱的運算**：獨立 node `add(a, b)`，上下對齊比鏈式好讀。
+- **棋盤**：`checker()`，要跟手拼的一樣再 `oneMinus()`。
+- **放射漸層**：`uv().distance(0.5)`。
+- **角度漸層**：`atan()` + `remap(PI.negate(), PI, 0, 1)`。
+- **流動的等高線**：`noise.mul(k).add(time).fract().step(0.8)`。
+- **花紋在原地變形**：noise 輸入給 `vec3(uv, time.mul(speed))`。
+- **花紋整片平移**：`uv().add(time)`。
+- **細胞、水波網、裂紋**：`mx_worley_noise_float()` + `pow()`。
+- **一顆顆圓點**：`mx_worley_noise_float()` + `step(r).oneMinus()`，第三維固定才不會動。
+- **細線**：noise `abs()` 後 `step()` 取谷底。
+- **一段數值轉成好看的顏色**：Inigo Quilez 的 palette。
+- **好幾層疊在一起**：每層做一個 0 或 1 的 mask，`mix()` 一層層蓋。
+- **平面上做出深度**（水底、地板下的東西、窗戶後面的房間）：`parallaxUV(uv(), parallaxDepth).xy`，只套在要看起來遠的那一層。
+
+## Gotchas
+
+- **`parallaxUV()` 回傳 vec3**，JSDoc 寫 vec2，但實作是 vec2 減 vec3（three 0.186 的 `AccessorsUtils.js`）。要當 vec2 用就接 `.xy`。少了它，塞進 `vec3()` 時 `JoinNode` 印一行 error 就 `break`，`time` 被丟掉。畫面不會壞得很明顯，只是花紋不再隨時間變形，改成跟著鏡頭角度變。這是在 demo 裡拿掉 `.xy` 實際跑過看到的。
+- **視差要鏡頭在動才看得出來**。靜止的畫面只看得到 caustics 偏了一點，看不出它在下面。demo 因此讓鏡頭自己晃。
+- **`hash()` 丟 vec2 只會用到 x**。它先把輸入轉成 `uint`，TSL 把 vec2 轉成純量時只留 `.x`（`NodeBuilder.format()`），而且不會有任何警告。兩個版本實際跑過比對，條紋和灰階順序一模一樣。
+- **`-PI` 不能寫**。`PI` 是 node，要 `PI.negate()`。
+- **`mx_noise_float()` 的範圍是 -1 到 1**。直接接 `colorNode`，大片畫面會是純黑。
+- **`vec3(gridUv, 0)` 整片黃色不是 bug**。格子編號 0 到 9，顏色超過 1 就被截掉。
+- **鏈式 `.step(edge)` 的參數順序跟獨立的 `step(edge, x)` 相反**。`x.step(0.5)` 是 `step(0.5, x)`，x 大於等於 0.5 才是 1。這一課的 mask 全靠它，搞反了就是整片反過來。
+- **`checker()` 內部會先乘 2**，而且黑白跟手拼的那個相反。
+- **`div(0.2)` 和 `step(0.2)` 要一起改**。只改一個，睡蓮的漸層就不會剛好停在邊上。
+- **變數名別撞 TSL 的 node**：`color`、`time`、`uv`、`depth`、`distance` 都是 node。demo 的 slider 叫 `parallaxDepth`，不叫 `depth`，就是這個原因。
+- **Transpiler 的輸出會隨 three.js 版本變**，以你那一版的輸出為準。別人的演算法記得註明作者。
+- **`parallaxDepth` 愈大，花紋愈小**。視線方向在水面上各處不同，推的量也不同，uv 被拉開。這不是 bug，是深度錯覺的一部分；但調 `mul(6)` 的時候要記得它也在影響格子大小。
+- **`@types/three` 把 `parallaxUV()` 的回傳型別寫成沒有型別參數的 `Node`**，直接接 `.xy` 會被 `tsc` 擋下來（`Property 'xy' does not exist on type 'Node'`）。demo 用 `as Node<'vec3'>` 寫出它實際回傳的型別。
+- **R3F 寫法**：水池整張 graph 在 module scope 建一次，`parallaxDepth` 是 `uniform()`，拉 slider 只換數字不重編。按鈕換的是 `colorNode`，等於換一支 shader，所以 material 用 `key` 重新掛載。
+- **R3F 的 `<Canvas>` 預設開 ACES tone mapping**，課程指定的 hex 色會被洗淡。這個 demo 加了 `flat`，關掉 tone mapping 才是課程裡的顏色。
+- **鏡頭晃動用 `useFrame`**，因為動的是 camera，不是 shader。水面的動畫全部是 TSL 的 `time`，JavaScript 不用管。

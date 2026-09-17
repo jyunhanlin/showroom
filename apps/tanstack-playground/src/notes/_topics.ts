@@ -25,6 +25,10 @@ export const topics: Record<string, TopicMeta> = {
     name: 'Fundamentals',
     description: 'NodeMaterial, TSL nodes, uniforms & attributes, math, textures, node functions',
   },
+  'advanced-projects': {
+    name: 'Advanced Projects',
+    description: 'patterns, uv node chains, noise masks, mix layering, parallaxUV',
+  },
 };
 
 export function topicName(id: string): string {
