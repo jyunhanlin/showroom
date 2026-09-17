@@ -1,0 +1,288 @@
+---
+title: "Conway's Game of Life (sparse cell Set + neighbour counts)"
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/10-conways-game-of-life
+lessonNumber: 'animation-challenges/10-conways-game-of-life'
+order: 10
+summary: 'Canvas 版 Game of Life：點擊或拖曳畫細胞，Start / Pause 以約 100ms 一代推進。關鍵是活細胞存成 `"column,row"` 字串的 sparse Set，只替活細胞周圍 8 格數鄰居，不掃整個 grid。'
+tags: [sparse-set, neighbour-counting, drag-paint, canvas, tick-interval, pointer-events]
+---
+
+import { ConwaysGameOfLife } from './conways-game-of-life';
+
+## TL;DR
+
+- 活細胞存成 `"column,row"` 字串的 **sparse `Set`**。字串比的是值，`aliveCells.has('3,4')` 才查得到；Set 沒有邊界、跟 canvas 尺寸無關，負座標 `"-1,5"` 也只是一個普通 key。2D array 這三點都做不到。
+- **反過來數鄰居**：不是每格問「我有幾個鄰居」，而是每個活細胞對周圍 8 格各 `+1`。沒被加到的格子一定是死的，所以計算量跟活細胞數成正比，不是 rows × columns。
+- 四條規則壓成一行：`neighbourCount === 3 || (wasAlive && neighbourCount === 2)`。新一代寫進**新的** `Set`，舊的 Set 留給 `wasAlive` 讀。
+- rAF 每幀都重畫，但要 `now - lastTickAt >= TICK_INTERVAL` 才算一代。Render rate 跟 simulation rate 分開，暫停時照樣能即時畫格子。
+- 拖曳在 `pointerdown` 那一刻就決定 `dragTargetState`（畫或擦），之後經過的每一格都套同一個狀態，不逐格 toggle。
+
+<DemoFrame title="點擊或拖曳來畫／擦細胞，再按 Start / Pause">
+  <ConwaysGameOfLife />
+</DemoFrame>
+
+畫面上預先放了三個經典 pattern：左上的 glider 會一路往右下飛走，右上的 blinker 跟左下的 toad 是週期 2 的 oscillator。從空格開始拖是畫，從黑格開始拖是擦。
+
+## Spec
+
+- 規則：活細胞有 2 或 3 個鄰居（周圍 8 格）就活到下一代；0 或 1 個鄰居孤單死掉；超過 3 個擠死。空格剛好 3 個鄰居，下一代長出新細胞。
+- 在 canvas 上點擊，pointer 下面那格變成黑色方塊。點已經活著的格子，把它擦掉。
+- 按 Start / Pause 開始模擬，大約每 100ms 算一代並畫出來（每秒約 10 tick）。再按一次暫停。
+- 暫停時可以繼續加減細胞。
+- 按住拖曳可以一次畫一大片。從活格開始拖則一路擦。每次拖曳只做一件事（畫或擦），不依每格自己的狀態翻轉。
+- Josh 也說：對演算法沒興趣的話，可以換成超簡單的規則（例如所有細胞 1 秒後死掉），一樣能練到 canvas 的部分。
+
+## Technique map
+
+| 需求 | 技巧 | Note |
+|---|---|---|
+| Canvas 清晰、跟著容器變大小 | `setupCanvas`：DPR scale + resize listener | [Pixel Ratio](/wham/canvas-animation/pixel-ratio)、[Responsive Canvas](/wham/canvas-animation/responsive-canvas) |
+| 每幀重畫所有活細胞 | rAF + `clearRect` + `fillRect` | [Canvas Animation](/wham/canvas-animation/canvas-animation)、[Drawing Commands](/wham/canvas-animation/drawing-commands) |
+| 大約每 100ms 算一代 | 用 `performance.now()` 時間戳差來 gate | [Delta Time](/wham/canvas-animation/delta-time) |
+| Pointer 位置換算成格子 | `getBoundingClientRect` 扣掉 offset，再 `Math.floor` | [Cursor Distance](/wham/advanced-interactions/cursor-distance) |
+| 在 React 裡跑 canvas | `useRef` + `useEffect`，cleanup 砍 rAF 和 listener | [Canvas in React](/wham/canvas-animation/canvas-in-react) |
+| 存活細胞、算下一代 | `"column,row"` 字串的 sparse `Set` + neighbour counting | 沒有對應 note（本篇講） |
+| 拖曳畫或擦 | `pointerdown` 決定 `dragTargetState`，`setCellState` 冪等 | 沒有對應 note（本篇講） |
+
+## Build order
+
+1. 先讓使用者能點出細胞：算出 pointer 下的格子，存進資料結構，draw loop 把它畫出來。
+2. 寫 solver：拿這一代的活細胞，算出下一代。
+3. 把 solver 接進 draw loop，每 100ms 跑一次，並接上 Start / Pause。
+4. 補上拖曳畫／擦（Josh 沒給這步的提示，做法見下面 `One drag, one target state`）。
+
+<details>
+<summary>Hint 1 — 找出 pointer 下面是哪一格</summary>
+
+每格是 `CELL_SIZE` = 20px 見方，所以 pointer 座標除以 20 再 `Math.floor`，就是 column 和 row。
+
+Event handler 裡**不要**直接畫方塊，只把這格標成 alive。Draw loop 每幀把所有 alive 的格子畫出來。所以需要一個容器存活細胞，array、object、`Set`、`Map` 都行，挑自己最順手的。
+
+</details>
+
+<details>
+<summary>Hint 2 — Solver 的簡單版做法</summary>
+
+Solver 有很多寫法，通常是在「code 好讀」跟「演算法快」之間取捨。Josh 建議先寫直覺版，能跑再重構：
+
+- 只算畫面內看得到的 rows 和 columns，畫面外不管。
+- 一格一格數它有幾個活鄰居。
+- 這格有活細胞、且有 2 或 3 個活鄰居，就留下，否則死掉。
+- 這格是空的、且剛好 3 個活鄰居，就長出新細胞。
+
+最重要的一點：**不要一邊算一邊改這一代的集合**。不然前面格子的結果會污染後面格子的鄰居數。每個 tick 開一個新的空容器，算完再整批換掉舊的。
+
+（Josh 的正解沒有用這個直覺版，用的是下面講的「只數活細胞周圍」版本。）
+
+</details>
+
+<details>
+<summary>Hint 3 — Draw loop 每幀跑，solver 不能每幀跑</summary>
+
+每幀跑 solver，遊戲會快到看不清楚。做法：第一次 rAF 先跑 solver，記下 `performance.now()`。之後每幀檢查離上次過了多久，超過 100ms 才再跑一次並更新記錄的時間。思路跟 Part 4 算 delta time 一樣。
+
+</details>
+
+## Why a sparse Set of "column,row" strings
+
+```ts
+// Eg: Set("1,2", "3,4", "5,5", "24,10")
+let aliveCells = new Set<string>(INITIAL_CELLS);
+
+function getCellKey(column: number, row: number) {
+  return `${column},${row}`;
+}
+
+function parseCellKey(cellKey: string) {
+  const [column, row] = cellKey.split(',').map(Number);
+  return { column, row };
+}
+```
+
+為什麼是字串，不是 `[column, row]` 或 `{ column, row }`：`Set` 對 object 和 array 比的是 reference。`new Set([[3, 4]]).has([3, 4])` 是 `false`，因為兩個 `[3, 4]` 是不同物件。字串是 primitive，比的是值，`has('3,4')` 一定查得到。這是最便宜的「用座標當 key」寫法。
+
+直覺寫法是開一個 `grid[row][column]` 的 2D array。放在 Game of Life 這個情境，sparse Set 幾乎每一項都贏：
+
+| | 2D array | Sparse `Set` |
+|---|---|---|
+| 存什麼 | 每一格，死活都存 | 只存活細胞 |
+| 大小 | 綁 canvas 尺寸，resize 要重新配置、搬資料 | 跟 canvas 尺寸無關 |
+| 邊界 | `grid[-1]` 是 `undefined`，要自己 guard，或決定邊緣要 wrap 還是當死格 | 沒有邊界，`"-1,5"` 就是一個普通 key |
+| 算下一代 | 掃 rows × columns 全部 | 只看活細胞 × 8 個鄰居 |
+| 畫 | 掃全部再挑出活的 | 直接 iterate 活細胞 |
+
+Game of Life 的盤面大部分時間是空的。這個 demo 大約 35 × 20 = 700 格，開場只有 14 個活細胞，一代只要做 112 次 `+1`。`CELL_SIZE` 越小、畫面越大，差距越誇張。
+
+代價是字串：每個 tick、每一幀都要 template string 拼 key、`split` + `Number` 拆 key。盤面很密（大部分格子都活著）時，flat `Uint8Array` 會快很多。一般的 demo 尺寸，這點成本看不出來。
+
+## Only count neighbours of live cells
+
+Hint 2 的直覺版是「每格問自己有幾個鄰居」。Josh 的正解反過來：**每個活細胞向周圍 8 格喊一聲 `+1`**。
+
+```ts
+const neighbourCounts: Record<string, number> = {};
+
+currentAliveCells.forEach((cellKey) => {
+  const { column, row } = parseCellKey(cellKey);
+
+  [-1, 0, 1].forEach((columnOffset) => {
+    [-1, 0, 1].forEach((rowOffset) => {
+      if (columnOffset === 0 && rowOffset === 0) {
+        return;
+      }
+
+      const neighbourKey = getCellKey(column + columnOffset, row + rowOffset);
+
+      if (!neighbourCounts[neighbourKey]) {
+        neighbourCounts[neighbourKey] = 0;
+      }
+      neighbourCounts[neighbourKey] += 1;
+    });
+  });
+});
+```
+
+跑完之後，`neighbourCounts` 裡剛好是「至少有 1 個活鄰居」的所有格子。不在裡面的格子鄰居數是 0，下一代一定是空的。連「活細胞 0 個鄰居會孤單死掉」這條規則也不用寫：那顆細胞根本不會出現在 `neighbourCounts` 裡，自然消失。
+
+接著四條規則壓成一行：
+
+```ts
+const wasAlive = currentAliveCells.has(cellKey);
+const becomesAlive = neighbourCount === 3 || (wasAlive && neighbourCount === 2);
+```
+
+- 剛好 3 個鄰居：不管原本死活，下一代都是活的（存活或誕生）。
+- 剛好 2 個鄰居：只有原本就活著才留下。
+- 其他數字：死。
+
+## Reassign the Set, never mutate it mid-tick
+
+```ts
+computeNextGeneration(aliveCells);
+
+// inside computeNextGeneration(currentAliveCells):
+aliveCells = new Set();
+Object.entries(neighbourCounts).forEach(([cellKey, neighbourCount]) => {
+  const wasAlive = currentAliveCells.has(cellKey);
+  // ...
+  if (becomesAlive) {
+    aliveCells.add(cellKey);
+  }
+});
+```
+
+`computeNextGeneration(aliveCells)` 把**舊 Set 的 reference** 傳進去，變成 `currentAliveCells`。`aliveCells = new Set()` 是讓變數指向一個新物件，舊物件沒被動到，所以 `wasAlive` 讀到的永遠是上一代。
+
+這裡很容易「順手優化」成 `aliveCells.clear()`。那樣 `currentAliveCells` 跟 `aliveCells` 是同一個物件，清空之後 `wasAlive` 永遠是 `false`，「2 個鄰居存活」這條規則就不會觸發了。實測 blinker 第一代剩 2 格，第二代全滅。
+
+另外，Josh 的寫法把「數鄰居」跟「寫入新一代」拆成兩個 phase，數完才開始寫，所以 Hint 2 警告的「算到一半改到集合」在結構上就不可能發生。
+
+## Draw every frame, tick every 100ms
+
+```ts
+function draw() {
+  ctx.clearRect(0, 0, canvasDimensions.width, canvasDimensions.height);
+
+  if (isRunning) {
+    const now = performance.now();
+    const shouldComputeNextGeneration = lastTickAt === null || now - lastTickAt >= TICK_INTERVAL;
+
+    if (shouldComputeNextGeneration) {
+      computeNextGeneration(aliveCells);
+
+      lastTickAt = now;
+    }
+  }
+
+  ctx.fillStyle = 'black';
+  for (const cellKey of aliveCells) {
+    const { column, row } = parseCellKey(cellKey);
+    ctx.fillRect(column * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+  }
+
+  rafId = requestAnimationFrame(draw);
+}
+```
+
+一個 loop 裡有兩個速率：畫面跟著螢幕 refresh rate 重畫，模擬只有每 100ms 前進一代。好處：
+
+- **暫停只是一個 boolean。** 不用 start / stop 一個 `setInterval`，按鈕只做 `isRunning = !isRunning`。
+- **暫停時畫格子也是即時的。** Pointer handler 只改 `aliveCells`，下一幀 draw loop 就把它畫出來。
+- **`lastTickAt === null` 讓第一次 Start 立刻跑一代。** 暫停很久再按 Start，`now - lastTickAt` 早就超過 100ms，一樣立刻前進，按鈕手感很直接。
+
+為什麼這裡沒有 deltaTime：沒有東西在連續移動，一代就是一個離散的步驟，不需要乘以時間。`lastTickAt = now`（不是 `lastTickAt += TICK_INTERVAL`）也順便扮演了 [Delta Time](/wham/canvas-animation/delta-time) 裡 250ms clamp 的角色：切到別的 tab 再回來，只會補算**一**代，不會一口氣補跑幾百代。
+
+## One drag, one target state
+
+```ts
+function handlePointerDown(ev: PointerEvent) {
+  const { column, row, cellKey } = getCellAtPointer(ev);
+
+  isDragging = true;
+
+  const isAlive = aliveCells.has(cellKey);
+
+  dragTargetState = isAlive ? 'dead' : 'alive';
+  setCellState(column, row, dragTargetState);
+}
+
+function setCellState(column: number, row: number, targetState: CellState) {
+  const cellKey = getCellKey(column, row);
+
+  if (targetState === 'alive') {
+    aliveCells.add(cellKey);
+  } else {
+    aliveCells.delete(cellKey);
+  }
+}
+```
+
+如果 `pointermove` 是「每格 toggle」，會出兩個問題：
+
+1. `pointermove` 在同一個 20px 格子裡會觸發很多次，每次都 toggle，這格就一直閃，放開時是死是活看運氣。
+2. 拖過一排死活交錯的格子，結果變成反相的棋盤格，不是「一路畫」或「一路擦」。
+
+Josh 的解法是 `pointerdown` 看第一格的狀態決定這次拖曳要做什麼，存進 `dragTargetState`。`setCellState` 用 `Set.add` / `Set.delete`，這兩個本來就是冪等的：已經在裡面再 `add` 一次、不在裡面再 `delete` 一次，都沒有副作用。所以同一格收到 20 次 `pointermove` 也沒事。
+
+## Pointer position to cell
+
+```ts
+function getCellAtPointer(ev: PointerEvent) {
+  const bb = canvas!.getBoundingClientRect();
+
+  const column = Math.floor((ev.clientX - bb.left) / CELL_SIZE);
+  const row = Math.floor((ev.clientY - bb.top) / CELL_SIZE);
+
+  return { column, row, cellKey: getCellKey(column, row) };
+}
+```
+
+- Josh 的 canvas 鋪滿整個視窗，`bb.left` / `bb.top` 都是 0，所以他直接用 `ev.clientX / CELL_SIZE`（`bb` 有算但沒用到）。Note 裡的 canvas 在頁面中間，**一定要扣掉 offset**，不然點下去的格子會往右下偏一整個 canvas 位置。
+- 用 `Math.floor` 不是 `Math.round`：格子 `n` 涵蓋 `n * 20` 到 `n * 20 + 19.99`。`round` 會讓每個格子的判定範圍往左上偏半格。
+- 算出來的 column / row 直接乘 `CELL_SIZE` 畫回去就對得上，因為 `setupCanvas` 已經 `ctx.scale(dpr, dpr)`，canvas 座標就是 CSS px。
+- `getBoundingClientRect` 每次事件都重算，沒有像 [Cursor Perf](/wham/advanced-interactions/cursor-perf) 那樣 throttle。`pointermove` 只有在拖曳中才會呼叫它，量很小；每次重算也順便處理了拖曳時頁面捲動的情況。
+
+## Gotchas
+
+- **Deviation：扣掉 canvas offset。** 上一節講的 `ev.clientX - bb.left`。Josh 的全螢幕 canvas 不需要，放進 note 就一定要。
+- **Deviation：開場預先放了 glider、blinker、toad。** Josh 的盤面一開始是空的。在 note 裡一個空白框看起來像壞掉，所以 seed 了三個 pattern（`INITIAL_CELLS`）。它們跑 80 代以上都不會互撞（有用 node 跑過驗證）。點一下就能擦掉。
+- **Deviation：多掛一個 `pointerleave` → `endDrag`。** Josh 只有 `pointerup` 和 `pointercancel`。在 note 裡拖出 canvas 再放開，`pointerup` 不會打到 canvas，`isDragging` 會卡在 `true`，之後滑鼠沒按也會一路畫。代價是拖出去再拖回來要重新按一次。
+- **Deviation：canvas 加 `touch-none`（`touch-action: none`）。** 不加的話手機上拖曳會捲動頁面並觸發 `pointercancel`，畫不了一整排。副作用是手指在 canvas 上滑不能捲動頁面。
+- **Deviation：`handlePointerMove` 多檢查 `dragTargetState === null`。** 只是給 TypeScript narrowing 用，執行結果跟 Josh 一樣。
+- **Start / Pause 的 click listener 一定要在 cleanup 移除。** 按鈕用 ref 在 effect 裡掛 listener（跟 Josh 一樣用 `addEventListener`）。沒移除的話 Strict Mode 會掛兩個 handler，一次點擊 toggle 兩次，模擬永遠不會開始。`isRunning` 是 effect 裡的 `let`，不是 React state，點按鈕不會 re-render。
+- **沒有 `prefers-reduced-motion` 判斷，跟 Josh 一樣。** 模擬預設是暫停的，只有使用者自己按 Start 才會動，motion 是 opt-in 的。
+- **畫面外的細胞還活著。** Set 沒有邊界，glider 飛出 canvas 之後還是每代都在算（5 顆細胞，成本可以忽略）。但像 glider gun 這類會無限生長的 pattern，畫面外的細胞數會一直漲。需要的話，每代把離畫面太遠的 key 濾掉，也就是 Hint 2 說的「只管畫面內」。
+- **Resize 不會丟資料。** Canvas 縮小，右下的細胞只是看不到；放大後它們還在（而且可能已經演化了好幾代）。
+- **不要把 `aliveCells = new Set()` 改成 `.clear()`。** 見 `Reassign the Set`，存活規則會整個失效。
+- **實際 tick 間隔會比 100ms 長一點。** Gate 只能在 frame 邊界觸發，60Hz 時一代是 100 或約 117ms，每秒略少於 10 tick。要精準可以改 `lastTickAt += TICK_INTERVAL`，但就得另外處理切 tab 回來的補跑。
+- **按鈕底下那幾格點不到。** 按鈕蓋在 canvas 上，pointer 事件打到按鈕。Josh 的版本也一樣。
+
+## Extensions
+
+- 換外觀：細胞改成圓形，或把整張 canvas 轉 45° 變成菱形格。
+- 「會老化」的細胞：剛出生是一個顏色（例如黃色），每活過一代就更深、更紅。好看之外也多透露了盤面狀態。存法要從 `Set` 換成 `Map<cellKey, age>`。
+- 死過的格子畫成淺灰，跟從來沒有細胞的空格區分開。多開一個 Set 記「曾經活過」的 key 就行。
+- 換一套規則，看看能不能跑出別的有趣模擬（例如只改「幾個鄰居誕生、幾個鄰居存活」這兩組數字）。
+- 死掉的細胞不要瞬間消失，改成淡出；新生細胞加一個進場動畫。
+- 每幀都算一代、`CELL_SIZE` 調小，看動畫還順不順。這是少見的「JS 計算本身是瓶頸」的情境，改用更有效率的演算法或資料結構（例如 typed array）效果會很明顯。
+- 目前的編輯器很陽春，只能點和拖。Josh 推薦去看一個功能完整的 Game of Life 編輯器，挑幾個功能抄過來（例如清空、單步執行、隨機填滿、蓋上現成 pattern）。

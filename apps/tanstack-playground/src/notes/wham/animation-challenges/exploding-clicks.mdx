@@ -1,0 +1,222 @@
+---
+title: Exploding Clicks (per-word velocity + air resistance)
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/09-exploding-clicks
+lessonNumber: 'animation-challenges/09-exploding-clicks'
+order: 9
+summary: '每個字是一個 `inline-block` span，各自存 `velocity` / `position`，rAF 迴圈每幀寫 `translate()`。點擊當下才 `getBoundingClientRect()` 量字「現在」的位置，`atan2` 給推開方向、`clampedNormalize` 讓距離決定速度，`Math.exp(-AIR_RESISTANCE * deltaTime)` 讓字滑一段後停下。'
+tags: [velocity, air-resistance, getBoundingClientRect, atan2, deltaTime, rAF, interrupts]
+---
+
+import { ExplodingClicks } from './exploding-clicks';
+
+## TL;DR
+
+- 點擊當下才對每個字呼叫 `getBoundingClientRect()`。量到的 box **已經包含目前的 `translate`**，所以拿到的是字「現在」在哪，不是原本的 layout 位置 — 不用自己追蹤座標，也不怕 scroll、resize、字已經飛走。
+- 不用 canvas，也不用 Part 1 的 keyframe particle：每個字各自存一組 `velocity` + `position`，一條 rAF 迴圈每幀把 `position` 寫成 `transform: translate()`。狀態在 JS，DOM 只負責顯示。
+- 推力 = 方向 × 速度。`Math.atan2(deltaY, deltaX)` 給方向（Magnetic Shavings 同一招），`clampedNormalize(distance, 0, 200, 500, 0)` 讓越近的字越快、200px 外完全不動。
+- 用 `velocity.x +=` 而不是 `=`：連點會疊加速度，字還在飛時再點也不用等。Interrupt 是免費的。
+- 摩擦用 `Math.exp(-AIR_RESISTANCE * deltaTime)`，跟 frame rate 無關。`AIR_RESISTANCE = 6` 代表初速 500px/s 的字最多滑約 80px 就停。
+
+<DemoFrame title="Exploding Clicks — 點黑框任何位置，附近的字被炸開">
+  <ExplodingClicks />
+</DemoFrame>
+
+在黑框裡點一下，點擊位置 200px 內的字會往外飛、滑一段後停住。同一個位置連點幾下，字會飛得更遠。`Reset` 把所有字瞬間放回原位（Josh 的版本沒有這個按鈕）。
+
+## Spec
+
+- 點畫面任何位置，附近的字從點擊點往外飛開。
+- 離點擊越近的字被推得越用力；夠遠的字完全不動。
+- 字飛出去後逐漸減速，停在新位置，不會彈回來。
+- 每個字獨立移動（各自的 `transform: translate()`），不是整段一起滑。
+- 動畫進行中可以再點：新推力疊在目前速度上，不用等上一次結束。
+- 60Hz 跟 120Hz 螢幕上速度一樣（用 delta time）。
+
+## Technique map
+
+| Requirement | Technique | Note |
+|---|---|---|
+| 每幀更新、跟 frame rate 無關 | rAF 迴圈 + `deltaTime` | [Delta Time](/wham/canvas-animation/delta-time) |
+| 字往「遠離點擊」的方向飛 | `Math.atan2(deltaY, deltaX)` 算角度 | [Magnetic Shavings](/wham/canvas-animation/magnetic-shavings) |
+| 角度 + 速度 → x / y velocity | `Math.cos(angle) * speed`、`Math.sin(angle) * speed` | [Trigonometry 101](/wham/particles/trigonometry-101)、[Polar Coordinates](/wham/particles/polar-coordinates) |
+| 量字的中心點跟點擊的距離 | `getBoundingClientRect()` + 畢氏定理 | [Cursor Distance](/wham/advanced-interactions/cursor-distance) |
+| 近的推多、遠的推少 | `clampedNormalize(distance, 0, 200, 500, 0)` | [Utility Functions](/wham/particles/lerp-utils) |
+| 滑行後停下 | `velocity *= Math.exp(-AIR_RESISTANCE * deltaTime)` | [Rocketship, Revisited](/wham/canvas-animation/rocketship) |
+| 移動字但不觸發 layout | `transform: translate()` | [Transform Benefits](/wham/particles/transform-benefits) |
+| React 裡掛 rAF + listener | `useEffect` cleanup 取消 rAF、移除 listener | [Canvas in React](/wham/canvas-animation/canvas-in-react) |
+| 把文字拆成一字一個 span | `split(' ')` + `display: inline-block` | 目前沒有 note 專門講 |
+
+## Build order
+
+<details>
+<summary>Hint 1 — 先讓每個字自己往右滑</summary>
+
+Josh 選 rAF 迴圈 + velocity，而不是 Part 1 的 particle 做法，理由是之後比較好處理 interrupt。他建議先別管點擊，把目標縮小成「每個字以 60px/s 往右移」：
+
+1. 建一個 `wordGeometries` 陣列，每筆存字的 DOM node、`position: { x, y }`、`velocity: { x, y }`，先把 `velocity.x` 設成 60。
+2. 開一條 rAF 迴圈，算 delta time。
+3. 迴圈裡對每個字用 velocity 乘上 delta time 更新 position。
+4. 把 position 寫成那個字的 `transform: translate()`。
+
+畫面看起來像整段一起滑，其實是每個字各自 translate。這步能跑，代表「velocity 變位移」的管線沒問題，再把 `velocity.x` 改回 0。
+
+</details>
+
+<details>
+<summary>Hint 2 — 點一下，所有字都被炸開</summary>
+
+下一個里程碑：點一下，**畫面上每個字**都往遠離游標的方向飛。距離跟摩擦先不管。
+
+- 掛 `click` listener，游標位置是 `ev.clientX` / `ev.clientY`。
+- 對每個字呼叫 `getBoundingClientRect()` 取中心點。
+- 兩點的差丟給 `Math.atan2` 拿角度，跟 Magnetic Shavings 一樣。
+- 速度先寫死成 500，用 `Math.cos(angle) * speed` / `Math.sin(angle) * speed` 設定 velocity。
+
+</details>
+
+<details>
+<summary>Hint 3 — 加上空氣阻力跟距離</summary>
+
+- **空氣阻力**：沿用 Rocketship, Revisited 的做法，每幀讓 velocity 衰減一點。衰減量要跟 delta time 掛鉤，不同螢幕才會一致。
+- **距離**：`speed` 改成由距離推導 — 靠近爆炸點的字推很多，遠的只推一點或完全不推。
+
+怎麼對應沒有標準答案，要自己試手感。Josh 喜歡用 `normalize` 系列函式，改 min / max 就能快速比較。
+
+</details>
+
+## Why rAF + velocity instead of keyframe particles
+
+Part 1 的 particle 是「起點、終點、duration 先算好，交給 CSS 跑」。問題在 interrupt：動畫跑到一半再點，得先取消舊動畫、讀出目前位置、再開一個新的。
+
+Velocity model 沒有「一段動畫」的概念，只有「目前狀態」加上「每幀怎麼演進」。點擊只是改狀態：
+
+```ts
+type WordGeometry = {
+  element: HTMLElement;
+  velocity: { x: number; y: number };
+  position: { x: number; y: number };
+};
+```
+
+```ts
+function update() {
+  const now = performance.now();
+  const deltaTime = Math.min(now - lastTimestamp, 250) / 1000;
+  lastTimestamp = now;
+
+  wordGeometries.forEach(({ element, velocity, position }) => {
+    const drag = Math.exp(-AIR_RESISTANCE * deltaTime);
+    velocity.x *= drag;
+    velocity.y *= drag;
+
+    position.x += velocity.x * deltaTime;
+    position.y += velocity.y * deltaTime;
+
+    element.style.transform = `translate(${position.x}px, ${position.y}px)`;
+  });
+
+  rafId = requestAnimationFrame(update);
+}
+```
+
+`position` 是「相對原本 layout 位置的位移」，不是絕對座標。字排在哪裡由瀏覽器排版決定，JS 完全不用知道。
+
+## Why measure at click time
+
+Josh 的原始碼在初始化時也呼叫了 `getBoundingClientRect()`，但沒用到；真正的測量在 click handler 裡。這個位置很關鍵：
+
+- `getBoundingClientRect()` 回傳 render 後的 box，**包含 `transform`**。字已經被炸飛 80px，量到的就是飛走後的位置，下一次點擊的角度跟距離自然正確。
+- 如果 mount 時量一次存起來，會同時壞三件事：字飛走後座標過期；使用者 scroll 之後，存下的 viewport 座標跟新的 `clientX` 對不上；視窗 resize 讓文字重新換行，每個字的 layout 位置都變了。
+
+每次點擊才量，三個問題一起消失，也不需要 resize listener。代價是每次點擊對每個字各讀一次 layout。rAF 剛寫過 transform，第一次讀會 flush 一次 style / layout，之後的讀取就吃 cache。一次點擊一次，很便宜；跟 pointermove 每秒上百次讀不是同一個量級。
+
+### Relative to the stage
+
+Port 把所有座標換成相對 demo 容器：
+
+```ts
+const stageBox = stage!.getBoundingClientRect();
+const clickX = ev.clientX - stageBox.left;
+const clickY = ev.clientY - stageBox.top;
+
+wordGeometries.forEach(({ element, velocity }) => {
+  const bb = element.getBoundingClientRect();
+  const centerX = bb.left - stageBox.left + bb.width / 2;
+  const centerY = bb.top - stageBox.top + bb.height / 2;
+  // ...
+});
+```
+
+老實說，算 `deltaX` / `deltaY` 時 `stageBox.left` 會互相抵銷。只要兩個 rect 在同一刻讀，viewport 座標跟容器座標算出來的角度、距離完全一樣。真正要緊的是另外兩件事：listener 掛在 stage 而不是 `window`，還有 `querySelectorAll` 只在 stage 裡找。換成容器座標是讓 debug 時印出的數字有意義，例如 `clickX = 0` 就是容器左緣。
+
+## Distance becomes speed
+
+```ts
+const angle = Math.atan2(deltaY, deltaX);
+const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2);
+
+const speed = clampedNormalize(distance, 0, 200, 500, 0);
+
+velocity.x += Math.cos(angle) * speed;
+velocity.y += Math.sin(angle) * speed;
+```
+
+- `clampedNormalize` 的 output range 反著寫（500 到 0）：距離 0 給 500px/s、100 給 250px/s、200 以上給 0。Clamp 保證遠處的字不會拿到負速度被吸過來。
+- `deltaX = centerX - clickX` 是「點擊指向字」的向量，所以算出的方向是遠離點擊。寫反成 `clickX - centerX`，字會被吸向游標。
+- 這裡直接拿 radian 餵 `Math.cos` / `Math.sin`，沒經過 `convertPolarToCartesian`（那支吃 degree）。`atan2` 本來就回 radian，轉兩次沒意義。
+- `+=` 讓推力疊加：字還在飛時再點，新推力加在剩餘速度上，會飛得更遠。
+
+## How far a word travels
+
+速度每秒乘上 `e^(-6)`。連續時間下，指數衰減的總位移等於 `v0 / AIR_RESISTANCE`：初速 500px/s 最多走 500 / 6，約 83px。60Hz 的離散積分實際約 79px。
+
+| 離點擊 | speed | 大約滑行 |
+|---|---|---|
+| 0px | 500px/s | 79px |
+| 100px | 250px/s | 40px |
+| 200px 以上 | 0 | 不動 |
+
+想讓字飛更遠，調高 500 或調低 `AIR_RESISTANCE`。後者也會拉長滑行時間：速度降到 1% 要 `ln(100) / AIR_RESISTANCE` 秒，`AIR_RESISTANCE = 6` 時約 0.77 秒。
+
+## Reset without restarting the loop
+
+Josh 的版本沒有 reset。這個 port 加了一個按鈕：
+
+```ts
+function handleReset() {
+  wordGeometriesRef.current.forEach(({ velocity, position }) => {
+    velocity.x = 0;
+    velocity.y = 0;
+    position.x = 0;
+    position.y = 0;
+  });
+}
+```
+
+rAF 一直在跑，所以 reset 只要把狀態歸零，下一幀自然寫出 `translate(0px, 0px)`。`wordGeometries` 在 effect 裡建立，再存一份到 ref，button handler 才拿得到。
+
+按鈕放在 stage **外面**。放在裡面的話，按 Reset 那次 click 會冒泡到 stage 的 listener，字剛歸位就又被炸開。
+
+## Gotchas
+
+- **不要在 mount 時快取 bounding box。** 字會移動、頁面會 scroll、文字會 reflow。每次點擊當下再量。
+- **Listener 掛在 stage，不是 `window`。** Josh 的 playground 整頁就是 demo，掛 `window` 沒問題。筆記頁還有別的內容，掛 `window` 會讓頁面上任何點擊都炸字。
+- **Reset 按鈕是 port 加的。** Josh 的解答沒有；他在 extension 裡提到「平滑地回到原位」，這裡只做瞬間歸位。按鈕放 stage 外，避免 click 冒泡觸發爆炸。
+- **`deltaTime` clamp 到 250ms。** Josh 的 `update()` 沒 clamp。其實不 clamp 也壞不了：切 tab 回來 delta 很大，但 drag 先乘，velocity 幾乎歸零，字不會瞬移。這裡照專案其他 canvas note 的慣例加上。
+- **rAF 永遠在跑，每幀對每個字寫 `style.transform`，即使全部靜止。** Josh 就是這樣寫，約 30 個字沒感覺，port 保持原樣。字數上百時可以在速度夠小時跳過寫入，或停掉迴圈等下一次點擊再啟動。指數衰減也永遠不會真的歸零，只是小到看不出來。
+- **加了 `select-none`。** 連點會觸發雙擊、三擊選字，整段反白。Josh 鼓勵連點疊加速度，所以 stage 關掉文字選取。
+- **沒有處理 `prefers-reduced-motion`。** Josh 的解答沒做，port 照原樣。這是使用者主動觸發的動畫，但位移不小；要尊重設定的話，可以在 reduced motion 時直接略過 click handler，或把 500 降到很小。
+- **初始化時沒用到的 `bb` 拿掉了。** Josh 建 `wordGeometries` 時量了 bounding box 卻沒用，留著會被 lint 抓 unused variable。
+- **文字在 React 裡拆 span。** Josh 在 HTML 手寫每個 `.word` span；這裡用 `split(' ')` 產生，class 改成 `wham-exploding-word` 避免撞名。標題用 `div` 而不是 `h1`，因為筆記頁已經有自己的 `h1`。
+- **Resize 不需要額外處理。** 視窗變窄時文字重新換行，但 `position` 是相對 layout 位置的位移，會跟著字走；下次點擊重新量就對了。
+
+## Extensions
+
+- 調參：初速、距離對速度的對應、`AIR_RESISTANCE`，調到手感對為止。
+- 把游標換成炸彈：找一個炸彈 SVG，轉成 data URI 放進 CSS `cursor`，一載入就能用。
+- 爆炸本身加視覺效果：Josh 首頁用爆炸 GIF，課程前面教過的 pop circle 也很適合。
+- 加音效：找爆炸音效，或自己用嘴巴配音，用課程「Using Sounds」教的 Howler 播放。
+- 加一個按鈕，讓字**平滑地**回到原位（這個 demo 的 Reset 是瞬間歸位）。
+- 加旋轉：新增 `angularVelocity`，一樣受 `AIR_RESISTANCE` 影響，字飛出去時會轉。
+- 加一點隨機性，讓爆炸不那麼機械。
+- 考慮質量：依字母數或字級決定每個字的質量（Josh 首頁用 `data-mass`），重的字比較推不動。
