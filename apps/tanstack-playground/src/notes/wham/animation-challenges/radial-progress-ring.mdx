@@ -1,0 +1,175 @@
+---
+title: Radial Progress Ring (polar line segments + exponential stagger)
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/03-radial-progress-ring
+lessonNumber: 'animation-challenges/03-radial-progress-ring'
+order: 3
+summary: '半圓儀表由 100 條 SVG `<line>` 組成，每條線的兩端用 polar 座標算、再平移到底邊中點。填色靠 0ms 的 CSS animation 加上每條線自己的 `--delay`；delay 用 `exponentialNormalize` 排成曲線，所以翻黃的 wave 先快後慢。'
+tags: [svg, polar-coordinates, stagger, normalize, keyframes, prefers-reduced-motion]
+---
+
+import { RadialProgressRing } from './radial-progress-ring';
+
+## TL;DR
+
+- 動畫其實不是「漸變」：每條線用 **0ms 的 CSS animation + `forwards`** 瞬間翻黃，差別只在每條線的 `animation-delay`。整個 wave 效果全靠 delay 排程。
+- Delay 不是線性遞增，是 `exponentialNormalize(percentage, 0, score, 100, score * 30, 2)`。前面幾條線幾乎同時翻、後面每條間隔越拉越長，看起來像 ease-out。
+- 輸出區間的上限是 `score * 30`，所以總時長跟分數成正比：分數 25 約 0.8 秒跑完、分數 100 約 3 秒。這樣低分不會慢吞吞、高分不會一閃而過。
+- 線段座標：角度 `normalize(percentage, 0, 99, 180, 360)`，距離 80 到 100，`convertPolarToCartesian` 轉出來後加上 `(VIEWBOX_WIDTH / 2, VIEWBOX_HEIGHT)`，讓所有線都指向底邊中點。
+- Reduced motion 用「motion-free by default」：animation 永遠存在，只有 `no-preference` 時才加 delay。偏好減少動態的人直接看到終態。
+
+<DemoFrame title="100 lines, exponential stagger (Josh's vanilla logic in React)">
+  <RadialProgressRing />
+</DemoFrame>
+
+點 score 按鈕換分數並重播，比較 25 跟 100 的總時長。Josh 的解答有 vanilla JS 跟 React 兩個版本，邏輯完全一樣；這裡把 vanilla 版的邏輯搬進 JSX。
+
+## Spec
+
+- SVG 裡用 JavaScript 產生 100 條獨立的 `<line>`，一條代表 1 個百分點。
+- 傳入一個 score，前 score 條線是黃色，其餘是灰色（score 60 就是 60 黃 40 灰）。
+- 分數內的線依序翻黃，每條的等待時間越來越長，形成 wave。
+- 有 motion sensitivity 的使用者跳過動畫。
+
+## Technique map
+
+| 需求 | 技巧 | 筆記 |
+|---|---|---|
+| 100 條線段 | SVG `<line>` 的 `x1/y1/x2/y2` | [SVG Basic Shapes](/wham/svg/basic-shapes) |
+| 用程式產生線 | JSX 裡 `range(100).map(...)` | [SVGs in React](/wham/svg/svg-in-react) |
+| 200×100 的座標系 | `viewBox` | [viewBox](/wham/svg/viewbox) |
+| 圓頭線段 | `stroke-linecap: round` | [Strokes & Fills](/wham/svg/strokes-and-fills) |
+| 每條線的角度 | `normalize` 把 0 到 99 對映到 180° 到 360° | [Linear Interpolation](/wham/particles/linear-interpolation) |
+| 線段兩端座標 | polar → cartesian，再平移原點 | [Polar Coordinates](/wham/particles/polar-coordinates)、[Trigonometry 101](/wham/particles/trigonometry-101) |
+| 越來越長的 delay | `exponentialNormalize` | [Utility Functions](/wham/particles/lerp-utils) |
+| 每條線自己的 delay | inline CSS variable `--delay` | [Dynamic Keyframes](/wham/particles/dynamic-keyframes) |
+| 瞬間翻色 | 0ms animation + `forwards` + `animation-delay` | 沒有筆記專門講這招，見下方 mechanism |
+| 跳過動畫 | `prefers-reduced-motion`，motion-free by default | [Motion Accessibility](/wham/particles/motion-accessibility) |
+
+## Build order
+
+<details>
+<summary>Hint 1 — 先畫出檸檬切片</summary>
+
+每個百分點 render 一條 `<line>`。難點是 `x1/y1/x2/y2` 從哪來：Part 1 的 polar 座標不只能算粒子的落點，也能算線段的起點跟終點。
+
+如果把每條線往內延長，它們全部交會在 SVG 底邊的正中間。所以先畫一個「半圓檸檬切片」：角度落在 180° 到 360°，距離從 0 畫到 `VIEWBOX_WIDTH / 2`。畫對之後，再把起點距離往外推，直到只剩外圈一小段。
+
+</details>
+
+<details>
+<summary>Hint 2 — delay 先線性，再改曲線</summary>
+
+先別管曲線。在 `range(100).forEach` 裡算 `percentage * 25 + 'ms'`，每條線比上一條多等 25ms，確認 wave 有跑出來。
+
+跑通之後再想：怎麼讓「每條線多等的時間」本身也越來越長？`utils.js` 裡的 `exponentialNormalize` 就是答案之一。
+
+</details>
+
+## Why lines instead of one arc
+
+Part 2 做過的圓形進度條是一條連續的線。這個 challenge 的造型是一格一格的刻度，每格要能獨立變色、獨立排程，所以改成 100 個獨立元素。
+
+每條線的算法：
+
+```ts
+const angle = normalize(percentage, 0, 99, 180, 360);
+const startDistance = VIEWBOX_WIDTH / 2 - SEGMENT_LENGTH; // 80
+const endDistance = VIEWBOX_WIDTH / 2; // 100
+const startPoint = convertPolarToCartesian(angle, startDistance);
+const endPoint = convertPolarToCartesian(angle, endDistance);
+```
+
+SVG 的 y 軸朝下，所以 180° 在左、270° 在正上方（`sin` 是 −1）、360° 在右。角度剛好掃過上半圓。
+
+Polar 座標以 `(0, 0)` 為圓心，也就是 SVG 的左上角。要把圓心搬到底邊中點，每個座標加上偏移：
+
+```tsx
+<line
+  x1={VIEWBOX_WIDTH / 2 + startPoint.x}
+  y1={VIEWBOX_HEIGHT + startPoint.y}
+  x2={VIEWBOX_WIDTH / 2 + endPoint.x}
+  y2={VIEWBOX_HEIGHT + endPoint.y}
+/>
+```
+
+注意 `normalize` 的輸入上限是 **99** 不是 100。100 條線之間只有 99 個間隔；用 100 的話最後一條停在 358.2°，右端不會貼齊水平線。
+
+## The 0ms animation trick
+
+要讓線在某個時間點「翻」成黃色，直覺是 `transition`。但 transition 需要狀態改變，元素 mount 的第一幀沒有「之前的值」可以過渡。
+
+Josh 用 animation 當計時器：
+
+```css
+@keyframes wham-rpr-fadeToYellow {
+  to { stroke: hsl(45deg 100% 50%); }
+}
+.wham-rpr-ring line[data-is-filled='true'] {
+  animation: wham-rpr-fadeToYellow 0ms forwards;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wham-rpr-ring line[data-is-filled='true'] {
+    animation-delay: var(--delay);
+  }
+}
+```
+
+三個部分各有分工：
+
+- **`0ms` duration**：沒有中間值，時間到就直接跳到 `to`。
+- **`forwards`**：animation 結束後保留 `to` 的值。少了它，線會閃一下黃又變回灰。
+- **`animation-delay: var(--delay)`**：每條線從 inline style 讀自己的 delay，同一條 CSS rule 服務 100 條線。
+
+React 裡 boolean 寫進 `data-*` attribute 會變成字串 `"true"` 或 `"false"`，所以 selector 要比對字串 `'true'`。
+
+只有 `score > percentage` 的線會 match 這個 selector。分數外的線也算出了 `--delay`（值超過輸出上限），但沒有 animation 讀它，所以永遠是灰色。JS 裡不用分兩條路徑。
+
+## Why the delay curve is exponential
+
+```ts
+const animationDelay = exponentialNormalize(percentage, 0, score, 100, score * 30, 2) + 100;
+```
+
+`exponent = 2` 把 0 到 1 的進度平方後再對映。以 score 75 為例：
+
+| percentage | delay | 跟前一條差 |
+|---|---|---|
+| 0 | 200ms | — |
+| 1 | 200.4ms | 0.4ms |
+| 25 | 439ms | 約 19ms |
+| 50 | 1156ms | 約 38ms |
+| 74 | 2293ms | 約 56ms |
+
+Delay 對 index 的曲線是 ease-in（越往後越陡），但人眼看的是 wave 的**速度**：每毫秒翻幾條線。間隔越來越長，速度就越來越慢，所以看起來是 ease-out，像指針衝出去後慢慢停在分數上。
+
+線性版本（每條固定多等 25ms）的 wave 速度恆定，停下來的瞬間很突兀。
+
+### Why normalize to score, not 100
+
+輸入區間是 `[0, score]`，輸出上限是 `score * 30`：
+
+- score 25：最後一條約 800ms。
+- score 75：最後一條約 2300ms。
+- score 100：最後一條約 3040ms。
+
+如果不管分數、總時長都固定（例如 2 秒），分數 25 只有 25 條線卻要跑 2 秒，顯得拖；分數 100 的 100 條線擠在 2 秒內，顯得趕。讓總時長跟分數成正比，每個分數的 wave 節奏都差不多。
+
+前後兩個 `100`（輸出下限 100、再加 100）讓第一條線至少等 200ms。Josh 沒解釋這段；我的理解是先讓使用者看到一圈灰色的空刻度，wave 才有起點。
+
+## Gotchas
+
+- **Replay 必須 remount。** 已經播完的 CSS animation 不會因為 re-render 自己重播。Demo 用 `key={playCount}` 讓 React 丟掉整個 ring 重建，每次換分數都從灰色開始。
+- **Deviation：加了 score 按鈕和 replay。** Josh 的解答固定 `drawRing(75)`，載入一次就結束。筆記頁捲到 demo 時動畫早就跑完，所以加上控制項。
+- **Deviation：`convertPolarToCartesian` 回傳物件。** 專案的版本回傳 `{ x, y }`，所以寫 `startPoint.x`，不是 Josh 的 `startPoint[0]`。
+- **Deviation：`exponentialNormalize` 定義在 demo 檔內。** Josh 的 `utils.js` 有這個函式，專案的 `~/utils/canvas` 沒有。實作照抄 Josh。
+- **Deviation：CSS 攤平並加前綴。** Josh 用 nested CSS 和 `.ring` 這種通用 class；這裡攤平成一般 selector、加上 `wham-rpr-` 前綴避免跟頁面其他 demo 衝突。`EMPTY_COLOR` 和 `SCORE_COLOR` 直接插進 style 字串，Josh 的版本宣告了這兩個常數但 CSS 裡是寫死的值。
+- **Deviation：背景色。** DemoFrame 是白底，所以把 Josh `styles.css` 裡 `body` 的深色背景搬到 `.wham-rpr-stage` 容器上。
+- **Label 會溢出容器。** `.wham-rpr-label` 用 `translateY(150%)` 推到 wrapper 底邊之下，外層要留 padding，不然會被裁掉。
+- **score 0 會除以零。** `exponentialNormalize(percentage, 0, 0, ...)` 得到 `NaN` 或 `-Infinity`，但沒有線被填色，`--delay` 不會被用到，畫面正常。
+
+## Extensions
+
+- 讓填色的線比灰線粗，或用其他外觀調整讓分數內的刻度更突出。
+- 做出假漸層：第一條是深黃，最後一條是白色。
+- 所有線同色，但顏色隨進度變化，例如動畫進行中從紅色漸漸轉成藍色。
+- 加音效：刻度一條條亮起時，配一個逐漸升高的冒泡聲。

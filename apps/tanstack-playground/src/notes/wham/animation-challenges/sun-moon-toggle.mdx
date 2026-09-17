@@ -1,0 +1,247 @@
+---
+title: Sun/Moon Toggle (SVG mask + CSS-only polar transitions)
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/06-sun-moon-toggle
+lessonNumber: 'animation-challenges/06-sun-moon-toggle'
+order: 6
+summary: '純 CSS 的 dark/light toggle：`:has(input:checked)` 讀 checkbox，SVG mask 裡的 cutout 圓滑開讓月牙長成太陽，8 顆 sun dot 用 CSS `cos()` / `sin()` 散成一圈。關鍵細節是整顆 SVG 同時轉 90°，cutout 從直線滑動變成弧線甩出去。'
+tags: [mask, css-transition, polar-coordinates, svg, linear-function, stagger, prefers-reduced-motion]
+---
+
+import { SunMoonToggle, SunMoonToggleXRay } from './sun-moon-toggle';
+
+## TL;DR
+
+- **整顆 SVG 在切換時轉 90°。** 沒轉的話，cutout 就是一顆圓往一個方向直直滑開，很陽春；轉起來後 cutout 在畫面上沿弧線甩出去，光芒也被帶著甩一下。代價是 CSS 裡 cutout 改的是 `cy`（local 的垂直方向），畫面上才會往右走。
+- 月牙 = 白色圓 + `<mask>`：白 rect 全保留、黑 circle 咬一口。Light mode 把 cutout 的 `cy` 從 `8px` 推到 `-8px`、推出主圓外，同時主圓 `r` 從 `10px` 縮到 `8px`，替光芒留位置。
+- 8 顆 sun dot 各帶一個 inline `--index`。CSS 自己算 `--angle: calc(var(--index) * 45deg)`，再用 `translate(calc(cos(var(--angle)) * 12px), ...)` 做 polar → cartesian。動畫全程沒有 JS。
+- **Transition 寫在「目的地」狀態上。** 進 light mode 用 checked rule 裡的 1200ms spring + `var(--index) * 80ms` stagger；回 dark mode 用 base rule 的 250ms、無 delay。同一顆 dot，出去慢、回來快。
+- 所有 `transition` 都包在 `@media (prefers-reduced-motion: no-preference)` 裡，reduced motion 就瞬切。Interrupt 交給 CSS transition 原生的「從當下值折返」。
+
+<DemoFrame title="Sun/Moon toggle — click the box">
+  <SunMoonToggle />
+</DemoFrame>
+
+## Spec
+
+- 一個有框線的區域，裡面疊一個看不見的 checkbox。點框就切換 checkbox，SVG 依狀態顯示月亮或太陽。
+- 月牙要平順長成完整的圓。8 顆小圓當光芒，在 360° 一圈上等距往外散，而且一顆接一顆 stagger。
+- 動畫不准用 JavaScript，只能用 CSS transition 和 SVG 元素。
+- 對 motion 敏感的使用者：太陽和月亮直接瞬間切換。
+- 動畫中途反覆點（interrupt）也要順。
+
+## Technique map
+
+| Requirement | Technique | Note |
+|---|---|---|
+| 月牙形狀 | `<mask>`：白 rect + 黑 circle 挖洞 | [SVG Masks](/wham/svg/masks) |
+| 月牙長成太陽 | CSS transition 動 `cy` / `r` 這類 geometry property | [SVG Animations](/wham/svg/svg-animations) |
+| 同頁多個 toggle 不撞 mask id | `useId()` | [Unique IDs](/wham/svg/unique-ids) |
+| 光芒排成一圈 | polar → cartesian，搬進 CSS `cos()` / `sin()` | [Polar Coordinates](/wham/particles/polar-coordinates)、[Trigonometry 101](/wham/particles/trigonometry-101) |
+| 360° 等分 | `index * 45deg`（360 / 8） | [Particle Distribution](/wham/particles/particle-distribution) |
+| 光芒 stagger | transition delay = `var(--index) * 80ms` | 沒有專門的 note |
+| 光芒回彈 | `linear()` spring，當 custom property token 共用 | [linear() Function](/wham/svg/linear)、[My Favourite Pattern](/wham/svg/favourite-pattern) |
+| 誇張的 ease-out | `cubic-bezier(0.2, 0.8, 0, 1)` | [Custom Curves](/wham/particles/custom-curves) |
+| 弧線甩出去的感覺 | 外層 `<svg>` 轉 90° | [Transforms in SVG](/wham/svg/transforms-in-svg) |
+| 不靠 JS 讀 checkbox 狀態 | `.toggle:has(input:checked) &` + CSS nesting | 沒有專門的 note |
+| Reduced motion 瞬切 | transition 只寫在 `no-preference` 裡 | [Motion Accessibility](/wham/particles/motion-accessibility) |
+| Interrupt | CSS transition 原生折返；`linear()` spring 被打斷的限制 | [linear() Limitations](/wham/svg/linear-limitations) |
+
+## Build order
+
+<details>
+<summary>Hint 1 — Crescent via a mask</summary>
+
+先畫一個白色圓，再用 `<mask>`（或 `clip-path`）挖掉一顆圓，就是月牙。
+
+切到 light mode 不用換 shape：把 mask 裡那顆 cutout `<circle>` 移開，月牙自己補滿成圓。
+
+太陽要比月亮小一點。不然光芒一加上去，整個 icon 會明顯變大。
+
+</details>
+
+<details>
+<summary>Hint 2 — Eight sun rays</summary>
+
+放 8 個 `<circle>`，每顆有自己的角度（0° 到 315°）和自己的 delay。用 polar coordinates 算位置，讓每顆從 SVG 正中心滑到離中心 12px 的地方。
+
+位移改 `cx` / `cy` 或用 CSS `transform` 都可以。
+
+Dark mode 時光芒要隱形，不然它們會在月牙凹進去的地方露出一小塊凸起。
+
+</details>
+
+<details>
+<summary>Hint 3 — Rotation and easing</summary>
+
+mask 和光芒都做完了，還是覺得少一味？很可能是少了旋轉：Josh 的版本在兩個狀態之間讓整顆 SVG 轉 90°。
+
+不轉的話，cutout 一看就是一顆圓在做直線位移。轉起來後 cutout 的路徑變成弧線、有機很多，光芒也跟著多了一點甩動。
+
+另一個常漏的是 timing function：大部分元素用很誇張的 ease-out，光芒用會彈的 spring。
+
+</details>
+
+## Why the whole SVG rotates 90°
+
+<DemoFrame title="X-ray — cutout outline, rotation on/off, slow motion">
+  <SunMoonToggleXRay />
+</DemoFrame>
+
+紅色虛線是 mask 裡那顆 cutout 的分身：同一個 class、吃同一組 CSS rule，只是放在 `<mask>` 外面、改用 stroke 畫出來。這個 demo 把 SVG 設成 `overflow: visible`，cutout 跑出 viewBox 也看得到。
+
+- 關掉 rotate 再點：cutout 直直往上滑出去。Josh 嫌這個版本太平淡。
+- 打開 rotate：cutout 在 local 座標往上走的同時，整個座標系順時針轉 90°。兩個運動疊在一起，畫面上 cutout 從右上沿弧線掃到右側。
+
+```css
+.smt-sun-moon-svg {
+  transform: rotate(0deg);
+
+  .smt-toggle:has(input:checked) & {
+    transform: rotate(90deg);
+
+    .smt-moon-cutout-circle {
+      cy: -8px;
+    }
+  }
+}
+```
+
+這也是 cutout 動 `cy` 而不是 `cx` 的原因。順時針轉 90° 之後，local 的「往上」在畫面上變成「往右」。在會旋轉的座標系裡寫位移，要先想「轉完之後這個方向在畫面上是哪」。
+
+`rotate` 套在外層 `<svg>` 上。外層 `<svg>` 是 HTML layout 裡的一個 box，`transform-origin` 預設的 `50% 50%` 就是 viewBox 中心，不會踩到 [Transforms in SVG](/wham/svg/transforms-in-svg) 講的 origin 陷阱。光芒 45° 一顆，轉 90° 後終點跟沒轉時重合，只有路徑被甩彎。
+
+## Crescent: a mask with a sliding cutout
+
+```tsx
+<mask id={maskId}>
+  <rect x="0" y="0" width="32" height="32" />
+  <circle className="smt-moon-cutout-circle" fill="black" />
+</mask>
+
+<circle className="smt-sun-moon-shapeshifter" mask={`url(#${maskId})`} />
+```
+
+幾何全放在 CSS，JSX 的 `<circle>` 沒有 `cx` / `cy` / `r` attribute：
+
+```css
+.smt-sun-moon-shapeshifter {
+  cx: 16px;
+  cy: 16px;
+  r: 10px;
+}
+.smt-moon-cutout-circle {
+  cy: 8px;
+  cx: 22px;
+  r: 10px;
+}
+```
+
+- **Dark mode**：cutout 圓心 (22, 8) 到主圓圓心 (16, 16) 距離剛好 10，等於半徑，所以右上被咬掉一大口，剩下月牙。
+- **Light mode**：cutout 移到 (22, -8)，距離約 24.7，大於兩個半徑相加的 18，完全離開主圓，整顆圓露出來。
+- 主圓同時從 `r: 10px` 縮到 `8px`，用 900ms，比 cutout 的 1200ms 快。為什麼要縮：光芒終點離中心 12px、自己半徑 2px，內緣在 10px。主圓維持 10px 的話，光芒會黏在太陽邊上。縮到 8px 留出 2px 縫，光芒外緣 14px 也還在 viewBox 的 16px 以內。
+
+`<rect>` 沒寫 `fill`。它是白的，只因為 `.smt-sun-moon-svg` 設了 `fill: white`，CSS 繼承一路傳進 `<mask>`。cutout 的 `fill="black"` 是 presentation attribute，會蓋過繼承來的值。
+
+## Sun dots: polar coordinates in pure CSS
+
+```tsx
+{range(NUM_OF_SUN_DOTS).map((index) => (
+  <circle key={index} className="smt-sun-dot" style={{ '--index': index } as React.CSSProperties} />
+))}
+```
+
+```css
+.smt-sun-dot {
+  --angle: calc(var(--index) * 45deg);
+  cx: 16px;
+  cy: 16px;
+  r: 2px;
+  fill: transparent;
+  transform: translate(0px, 0px);
+}
+
+/* inside .smt-toggle:has(input:checked) & */
+.smt-sun-dot {
+  --distance: 12px;
+  fill: white;
+  transform-origin: 16px 16px;
+  transform: translate(
+    calc(cos(var(--angle)) * var(--distance)),
+    calc(sin(var(--angle)) * var(--distance))
+  );
+}
+```
+
+- 8 顆 dot 的圓心都疊在 (16, 16)，靠 `transform` 位移，不改 `cx` / `cy`。公式跟 [Polar Coordinates](/wham/particles/polar-coordinates) 的 `convertPolarToCartesian` 一樣，只是搬進 CSS。
+- `--angle` 帶 `deg` 單位，`cos()` 才會把它當角度。
+- `--index` 一個數字兩個用途：算角度，也算 delay。Josh 手動給 index，是因為 Firefox 還不支援 `sibling-index()`。React 版用 `range(8).map` 生成，index 本來就有。
+- Dark mode 的 `fill: transparent`：縮在中心的 dot 正好壓在 cutout 的邊上。不藏起來的話，月牙凹處會冒出一個小凸點。
+- `transform-origin: 16px 16px` 對 `translate` 沒有影響，位移跟 origin 無關。Josh 的 solution 有寫，我照留。
+
+## Transitions live on the destination state
+
+CSS transition 用的是「變化後」那組 style 的 `transition` 值。Josh 靠這點讓同一顆 dot 進出用不同節奏：
+
+```css
+@media (prefers-reduced-motion: no-preference) {
+  .smt-sun-moon-svg {
+    transition: transform 1200ms var(--smooth);
+
+    .smt-sun-moon-shapeshifter {
+      transition: r 900ms var(--smooth);
+    }
+    .smt-moon-cutout-circle {
+      transition: cy 1200ms var(--smooth);
+    }
+
+    /* Used when leaving the sun state: 250ms, no delay. */
+    .smt-sun-dot {
+      transition: transform 250ms, fill 250ms;
+    }
+
+    /* Used when entering the sun state: spring + 80ms per index. */
+    .smt-toggle:has(input:checked) & .smt-sun-dot {
+      --delay: calc(var(--index) * 80ms);
+      transition:
+        transform 1200ms var(--spring) var(--delay),
+        fill 250ms var(--delay);
+    }
+  }
+}
+```
+
+- **Moon → sun**：勾起 checkbox，dot 拿到 checked rule 的 transition：1200ms `--spring`，delay 從 0 到 560ms 依 index 遞增。光芒一顆接一顆彈出去，衝過頭再回來。
+- **Sun → moon**：取消勾選，checked rule 不再 match，dot 拿到 base rule 的 250ms、無 delay、預設 `ease`。8 顆同時被吸回中心。
+- `fill` 跟 `transform` 共用同一個 `--delay`：每顆 dot 在自己出發那一刻才變白。
+
+我在 Chrome 用 `getAnimations({ subtree: true })` 確認過：勾選後產生 19 個 transition（svg、主圓、cutout 各 1 個，加 8 顆 dot 各 2 個），dot 的 delay 依序 0、80、160 到 560ms。取消勾選後，dot 的 transition 全部變成 250ms、delay 0。
+
+`--smooth` 是誇張版 ease-out：開頭衝很快、尾巴拖很長。`--spring` 是 `linear()` 烤出來的 spring，最高衝到約 1.146，所以光芒會先衝過 12px 再彈回。兩個都定義一次、到處用 `var()` 引用，就是 [My Favourite Pattern](/wham/svg/favourite-pattern) 的 token 做法。
+
+## Reduced motion and interrupts
+
+- 預設樣式完全沒有 `transition`，只有 `prefers-reduced-motion: no-preference` 時才加上。Reduced motion 的使用者點下去就是瞬間換圖。看不懂這個 media query 的老瀏覽器也會退化成瞬切：motion-free by default。
+- Interrupt 不用多寫：CSS transition 被打斷時，會從當下的值出發走向新目標。月亮變太陽到一半再點，cutout 從半路折返，光芒馬上用 250ms 被吸回。
+- 限制在反方向：太陽縮回月亮的途中再切回太陽，新的 transition 會套 reversing shortening，duration 跟著縮短，但 `linear()` 曲線不變，彈跳就變急。收回只有 250ms，這個窗口很小，不太容易看到。細節見 [linear() Limitations](/wham/svg/linear-limitations)。
+
+## Gotchas
+
+- **`<rect>` 靠繼承變白。** Mask 裡的 rect 沒寫 `fill`，吃的是 `.smt-sun-moon-svg` 的 `fill: white`。如果把 `fill: white` 改寫到個別 circle 上，rect 會退回預設的黑色，mask 全黑，整個 icon 消失。
+- **cutout 動的是 `cy`，不是 `cx`。** 外層 SVG 同時轉了 90°，local 的「往上」在畫面上是「往右」。先決定要不要轉，再決定 cutout 往哪推。
+- **`--angle` 一定要帶 `deg`。** 寫成 `calc(var(--index) * 45)` 沒有單位，`cos()` 會當 radians 算，8 顆 dot 亂排。
+- **Dark mode 的 dot 要透明。** 縮回中心的 dot 壓在 cutout 邊緣，不藏起來會在月牙凹處露出小凸點。
+- **Transition 寫在目的地狀態。** 想要「出去慢、回來快」，慢的寫在 checked rule，快的寫在 base rule。寫反了，就變成收回時才 stagger。
+- **這份 CSS 沒有 fallback。** `:has()`、CSS nesting（`&` 放在 selector 尾巴、直接用 `input` 開頭的 nested rule）、`cos()` / `sin()`、`linear()` 都要 2023 年之後的瀏覽器。`linear()` 不支援時整條 `transition` 宣告失效，光芒會直接跳。要保險可以參考 [My Favourite Pattern](/wham/svg/favourite-pattern) 的 `@supports` 寫法。
+- **Deviation：class 加 `smt-` prefix**，避免跟同頁其他 demo 撞名。
+- **Deviation：`--smooth` / `--spring` 定義在 `.smt-toggle`，不在 `html`**，token 不會漏到整個網站。
+- **Deviation：mask id 用 `useId()`**，Josh 寫死 `moon-cutout`。這頁有兩個 toggle，寫死的話第二個 toggle 會引用第一個的 mask，跟著別人的 checkbox 變形。
+- **Deviation：markup 和樣式的小調整。** 8 個手寫 `<circle>` 改成 `range(NUM_OF_SUN_DOTS).map`。`.visually-hidden` 改用 Tailwind 等效的 `sr-only`。`styles.css` 和 `index.html` 裡的 `<style>` 合成一個 scoped `<style>`，`body` 的深色背景搬到 demo 容器。checkbox 維持 uncontrolled，沒有 React state。CSS 註解是我自己重寫的。
+- **X-ray demo 是我加的，不是 Josh 的。** 紅色虛線是另一顆掛同樣 class 的 circle。Slow motion 在 checkbox 的 `onChange` 裡呼叫 `svg.getAnimations({ subtree: true })`，把剛產生的 transition 的 `playbackRate` 設成 0.25。這段 JS 只是除錯工具，動畫本身仍是 CSS transition。
+
+## Extensions
+
+Josh 提醒：其中有些可能需要 JavaScript。
+
+- 改成描邊版。Josh 部落格和課程平台上的 sun/moon 是 outline，不是實心。Mask 碰上 stroke 有點麻煩，課程「Masks Gotchas」那課的解法可以直接套用（這個站目前沒有對應的 note）。
+- 加一個 hover 時的「Boop」動畫，太陽和月亮各有自己的反應。
+- 換一種在兩個形狀之間轉換的方式。網路上有很多有創意的 dark/light toggle，想想還能怎麼 morph。

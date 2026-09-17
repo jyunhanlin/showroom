@@ -1,0 +1,201 @@
+---
+title: Goopy Tip (spring path morph, CSS vs Motion)
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/05-goopy-tip
+lessonNumber: 'animation-challenges/05-goopy-tip'
+order: 5
+summary: '導覽選單上方那顆 32×12 的小尖角：按一下縮成圓丘，150ms 後彈回並微微衝過頭。形狀是兩條 cubic Bézier；CSS 版用 `d: path()` + `linear()`，Motion 版用 `animate()` 的 spring，後者 Safari 也能動。'
+tags: [path-morph, spring, boop, svg, linear-function, motion, prefers-reduced-motion]
+---
+
+import { GoopyTipCss, GoopyTipMotion, GoopyTipSquashSlider } from './goopy-tip';
+
+## TL;DR
+
+- 關鍵是只寫「壓扁」這一半：click 時切到 squashed path，150ms 後切回原本的 path（Boop 技巧）。**過衝不是另一個狀態**，是彈回去那段 spring 自己衝過頭。
+- 形狀是 `M` + 兩條 `C` + `Z`。兩個 path 的 command 序列一樣、14 個數字一一對應，所以能 tween；壓扁版只改了其中 5 個數字。
+- CSS 版：`transition: d var(--spring-easing) var(--spring-duration)`。`linear()` 最高到 1.148，tip 頂端衝到 y ≈ −0.9，超出 viewBox，所以 SVG 要 `overflow: visible`。
+- Motion 版：`animate(tipPath, { d }, { type: 'spring', stiffness: 300, damping: 18 })`。驗算後這顆 spring 跟 CSS 版的 `linear()` 是**同一顆**（過衝 14.8%、峰值在 0.21s）。
+- Josh 說 Motion 版「more universal」：CSS 版同時依賴 `d` property 的 transition（Safari 不支援）和 `linear()`；Motion 只要能寫 SVG attribute 就行。
+
+<DemoFrame title="CSS — d: path() transition + linear() spring（Safari 不會動）">
+  <GoopyTipCss />
+</DemoFrame>
+
+<DemoFrame title="Motion — animate() + type: 'spring'（跨瀏覽器）">
+  <GoopyTipMotion />
+</DemoFrame>
+
+## Spec
+
+- 按 Trigger：tip 短暫縮回，再彈出來。
+- 彈出時要稍微超過原本的長度，一下子再回到定位。
+- 使用者開了 reduced motion：效果完全關掉，tip 形狀不變。
+- Trigger button 只是開發時方便測試的觸發器。實際產品會接在「打開導覽選單」這類互動上。
+
+## Technique map
+
+| 需求 | 技巧 | 筆記 |
+| --- | --- | --- |
+| 畫出尖角 | `M` + 兩條 cubic Bézier `C` + `Z` | [Path Commands](/wham/svg/path-commands) |
+| 32×12 的小 SVG | `viewBox="0 0 32 12"` + CSS width / height | [viewBox](/wham/svg/viewbox) |
+| 用 CSS morph path | `d: path()` + `transition: d` | [SVG Animations](/wham/svg/svg-animations) |
+| 用 JS morph path（含 Safari） | Motion `animate(el, { d })` | [Motion Library](/wham/svg/motion-library) |
+| 彈回時過衝 | spring 參數 → `linear()` 字串 | [Intro to Springs](/wham/svg/intro-to-spring-physics)、[linear() Function](/wham/svg/linear) |
+| spring 放進 CSS variable | `--spring-easing` + `--spring-duration` 成對 | [My Favourite Pattern](/wham/svg/favourite-pattern) |
+| 150ms 就被打斷的 transition | reversing shortening factor | [linear() Limitations](/wham/svg/linear-limitations) |
+| 縮一下自動復原 | Boop：切狀態，`setTimeout` 再切回 | 沒有對應筆記 |
+| 尊重 reduced motion | `no-preference` media query / `matchMedia` | [Motion Accessibility](/wham/particles/motion-accessibility) |
+
+## Build order
+
+<details>
+<summary>Hint 1 — 先畫出伸長的 tip</summary>
+
+先用 CSS 把 SVG 縮成 32×12、置中放在 `.popup` 上面，再用一個 `<path>` 畫 tip。
+
+tip 可以拆成兩條 cubic Bézier：左邊一條從底部爬到頂點，右邊一條從頂點下到底部。Josh 建議直接在程式碼裡調數字，不要在 Figma 之類的工具畫 — 這個形狀之後要做動畫，markup 越單純越好，設計工具輸出的 path 通常很難讀。
+
+控制點位置：左邊曲線的兩個控制點（下方 slider demo 的黃色點），右邊曲線的兩個控制點（藍綠色點）。
+
+</details>
+
+<details>
+<summary>Hint 2 — 做出壓扁版本，再接上 spring</summary>
+
+伸長版 OK 之後，逐一移動控制點，調出一個比較扁、比較圓的形狀，當作第二個 path。
+
+兩個 path 之間的動畫可以用 CSS transition，也可以用 Motion。最後補兩個細節才會有感覺：
+
+1. 用 Linear Easing Generator 或 Easing Wizard 生一條會過衝的 spring `linear()`。
+2. 用 Boop 技巧：click 後短暫延遲，自動把壓扁還原。
+
+spring 過衝時 path 會超出 `<svg>` 的頂端被裁掉，在 SVG 上加 `overflow: visible` 解決。
+
+</details>
+
+## How the tip is built from two Béziers
+
+<DemoFrame title="Squash Amount — 兩個 path 之間每個控制點怎麼移動">
+  <GoopyTipSquashSlider />
+</DemoFrame>
+
+```ts
+const EXTENDED_PATH = 'M 0 12 C 8 12 9.6 0 16 0 C 22.4 0 24 12 32 12 Z';
+const SQUASHED_PATH = 'M 0 12 C 0 12 9.6 6 16 6 C 22.4 6 32 12 32 12 Z';
+```
+
+伸長版的骨架是 (0, 12) → 頂點 (16, 0) → (32, 12)，左右對稱（32 − 8 = 24、32 − 9.6 = 22.4）：
+
+- **第一個控制點 (8, 12) 貼著底線**：曲線離開 popup 邊緣時是水平的，tip 跟 popup 接起來沒有折角，像從 popup 長出來的一滴黏液。
+- **第二個控制點 (9.6, 0) 跟頂點同高**：頂端的切線是水平的，所以頂點是圓的、不是尖的。
+
+壓扁版只改 5 個數字：
+
+| 點 | 伸長 | 壓扁 |
+| --- | --- | --- |
+| 左曲線控制點 1 | (8, 12) | (0, 12) — 疊在起點上 |
+| 左曲線控制點 2 | (9.6, 0) | (9.6, 6) |
+| 頂點 | (16, 0) | (16, 6) |
+| 右曲線控制點 1 | (22.4, 0) | (22.4, 6) |
+| 右曲線控制點 2 | (24, 12) | (32, 12) — 疊在終點上 |
+
+外側控制點疊到端點上、handle 長度變 0，起點的切線就改由下一個控制點決定 → 曲線一開始就往上爬，變成圓丘。頂點降到 y = 6，高度剩一半。
+
+command 序列（`M C C Z`）跟數字個數完全一樣，CSS 跟 Motion 才能逐個數字 interpolate。
+
+## Why the squash only lasts 150ms
+
+整個互動只有「壓扁」一個狀態，還原靠 timer：
+
+```ts
+function handleTrigger() {
+  const tip = tipRef.current;
+  if (!tip) return;
+
+  tip.classList.add('goopy-css-squashed');
+
+  scheduleTimeout(() => {
+    tip.classList.remove('goopy-css-squashed');
+  }, 150);
+}
+```
+
+這就是 Boop：觸發 → 短暫停在某個狀態 → 自動回去。class 移掉時 CSS 開一個新的 transition 回到伸長版，easing 一樣是那條 spring `linear()`，**過衝就發生在回程**。
+
+### The interrupted transition keeps its full duration
+
+150ms 時，壓扁的 transition 還沒跑完（總長 0.833s）。CSS Transitions spec 規定：新的目標值剛好等於舊 transition 的起點時，新 transition 的 duration 要乘上 reversing shortening factor — 大致是舊 transition 當下的 output progress，clamp 到 0 到 1。
+
+150ms ≈ 18% 的時間點，`linear()` 在 17.25%（1.003）和 19%（1.064）之間，output ≈ 1.03 → clamp 成 1 → 回程拿到完整的 0.833s，spring 能完整彈一次。
+
+這個 spring 很快（11.9% 時已經 0.71），所以 150ms 夠用。如果 delay 改成 50ms（≈ 6%），output 只有約 0.28，回程會被砍到 0.23s 左右，同一條 `linear()` 被壓縮成原本四分之一多的長度 — 就是 [linear() Limitations](/wham/svg/linear-limitations) 講的「震盪頻率變快、看起來假」。以上數字依 spec 算出，沒有實測。
+
+Motion 版沒有這個規則：`animate()` 直接從目前的 `d` 開一顆新 spring，spring 沒有 duration，不需要縮短。
+
+## Where the overshoot comes from
+
+CSS 版的 `linear()` 在大約 25% 的位置到達 1.148。回程是從壓扁（y = 6）到伸長（y = 0），progress 1.148 代入頂點：
+
+```
+6 + (0 − 6) × 1.148 ≈ −0.89
+```
+
+頂點跑到 viewBox 上緣外面將近 1 個單位（這個 SVG 1 單位 = 1px）。SVG 預設 `overflow: hidden`，不加 `overflow: visible` 的話，過衝那一下頂端會被切平 — 最有彈性的那一幀剛好看不到。
+
+### Same spring, two encodings
+
+Motion 版的設定 `stiffness: 300, damping: 18`（mass 預設 1）：
+
+- critical damping = 2√300 ≈ 34.6，damping ratio ζ = 18 / 34.6 ≈ 0.52 → underdamped，一定會過衝。
+- 從靜止出發的最大過衝 = e^(−πζ / √(1 − ζ²)) ≈ **0.148**。
+- 峰值時間 = π / (√300 × √(1 − ζ²)) ≈ **0.21s**。
+
+CSS 版 `linear()` 的峰值 1.148 落在 25.35% × 0.833s ≈ 0.21s，兩個數字都對得上。我再把 spring 的解析解 x(t) 代進 `linear()` 每個帶百分比的點（時間 = 百分比 × 0.833s），13 個點裡 12 個到小數第三位完全一樣，4.1% 那點差 0.003。所以 `--spring-easing` 就是這顆 stiffness 300 / damping 18 的 spring sample 出來的，0.833s 是它靜止下來的時間。兩個 demo 手感幾乎一樣，原因在這。
+
+## CSS vs Motion: why Josh calls Motion more universal
+
+```ts
+// Motion 版：沒有 class、沒有 CSS transition，JS 每 frame 寫 d attribute
+animate(tipPath, { d: SQUASHED_PATH }, EASING_SETTINGS);
+
+scheduleTimeout(() => {
+  animate(tipPath, { d: EXTENDED_PATH }, EASING_SETTINGS);
+}, 150);
+```
+
+| | CSS：`d: path()` + `linear()` | Motion：`animate()` |
+| --- | --- | --- |
+| 誰算中間值 | CSS engine interpolate `d` property | JS 每 frame 算數字、寫回 `d` attribute |
+| Safari | 不支援 `d` 的 transition，tip 不會動 | 能動 |
+| Easing | 預先 sample 好的 `linear()` + 固定 0.833s | 真正的 spring 物理，沒有 duration |
+| 不支援 `linear()` 的瀏覽器 | 含 `var()` 的 `transition` 在 computed-value time 失效 → 沒有動畫 | 不受影響 |
+| 被打斷 | reversing shortening factor 縮短回程 | 從目前的值開新 spring |
+| Reduced motion | media query 包住 transition 和壓扁狀態 | 要自己在 handler 裡 check |
+| JS | 只切一個 class | 要載 Motion |
+
+「Universal」指的是瀏覽器支援面。CSS 版要跨過兩道門檻：`d` property 可以 transition（Josh 在 2026 年 6 月寫到 Safari 仍不支援），以及 `linear()` timing function。任何一道過不了，tip 就只會瞬間切換或完全不動。Motion 版只依賴「能改 SVG attribute」，所有瀏覽器都做得到。
+
+CSS 版的好處是零 JS 動畫邏輯、宣告式、reduced motion 用一個 media query 搞定。只 target Chromium / Firefox 的場景它比較乾淨。
+
+## Gotchas
+
+- **CSS 字串不能有換行。** Josh 的 `d: path('...')` 寫成多行，每行尾巴都要加 `\`。我的 port 把兩個 path 寫成單行常數，再用 template literal 塞進 `<style>`，CSS、Motion、slider 共用同一份數字。
+- **`overflow: visible` 必加。** 過衝時頂點到 y ≈ −0.89，沒加就被裁掉。
+- **兩個 path 的 command 要完全對齊。** 壓扁版就算控制點疊在端點上，也要照寫 `C 0 12 ...`，不能省成別的 command，否則無法 interpolate。
+- **delay 跟 spring 是一組的。** delay 太短，CSS 回程會被 reversing shortening factor 砍短（見上面 50ms 的例子）；換更慢的 spring 時要一起調。
+- **Deviation — Motion 版加了 reduced motion check。** Josh 的 Motion playground 沒擋，但 acceptance criteria 要求 reduced motion 時 tip 完全不變。我在 handler 開頭 `if (checkPrefersReducedMotion()) return;`，每次 click 才讀，系統設定改了會即時生效。
+- **Deviation — CSS 版的 `<path>` 多了 `d` attribute。** Josh 的 `<path>` 沒有 `d`，形狀完全靠 CSS `d` property。如果瀏覽器連靜態的 `d` property 都不認，tip 會直接消失。我加上 `d={EXTENDED_PATH}` 當 fallback；支援 `d` property 的瀏覽器裡，stylesheet 會蓋過 attribute。Safari 上的行為我沒有實測。
+- **Deviation — `--spring-easing` / `--spring-duration` 從 `:root` 移到 `.goopy-css-stage`。** 避免 note 頁面的全域 CSS variable 被這個 demo 污染。Class name 都加 `goopy-css-` prefix。Josh HTML 裡沒用到的 `.pointy` class，以及 Motion 版 HTML 裡沒用到的兩個 CSS variable，我都拿掉了。
+- **Deviation — timer 在 unmount 時清掉。** Josh 的 vanilla 頁面不會 unmount，直接 `window.setTimeout`。React demo 可能在 150ms 內被卸載，所以包成 `useTimeouts()`，unmount 時 `clearTimeout` 全部。連點行為不變：每次 click 各自排一個還原。
+- **CSS 版用 ref + `classList`，不用 React state。** 跟 Josh 的 control flow 一對一，click 也不會 re-render。`className` prop 本身沒變，React 不會把手動加的 class 洗掉。
+- **Deviation — 版面。** popup 限寬 `max-w-sm`、Trigger button 加了 Tailwind 樣式（Josh 靠 reset.css 加瀏覽器預設 button）。Squash Amount slider 不是 Josh 的 code：課程頁有這個互動但沒給原始碼，我用兩個 path 的數字重建，另外畫出 viewBox 邊界（虛線框）方便看過衝會超出哪裡。
+
+## Extensions
+
+- 練習做不同風格的 tip：有稜角的尖刺、帶一點扭轉的形狀等。
+- 重建 Josh 部落格上完整的導覽選單：
+  - menu 用 `position: absolute` 脫離 flow，位置用 `getBoundingClientRect()` 算，或改用較新的 anchor positioning。
+  - menu 的寬高隨內容變：為每個選單項目設定固定尺寸，單位用 `rem`，使用者調大預設字級時 UI 會跟著放大。
+  - 切換選單時用 View Transitions API 做 cross-fade（見 [View Transitions](/wham/advanced-interactions/view-transitions)）。
+  - 最難的是鍵盤無障礙：Tab 不能跳進看不見的項目，Tab 離開 menu 範圍時 menu 要自動關閉。
+- Josh 的部落格有發佈完整 sourcemap，可以在 DevTools 的 Sources 面板找 `DesktopNavigation.tsx` 看實際寫法。

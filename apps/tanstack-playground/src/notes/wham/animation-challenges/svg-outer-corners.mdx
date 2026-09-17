@@ -1,0 +1,220 @@
+---
+title: Outer Corners (SVG arc drawn outside a quarter circle)
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/04-svg-outer-corners
+lessonNumber: 'animation-challenges/04-svg-outer-corners'
+order: 4
+summary: '`border-radius` 只會圓「內角」，凸出去的關閉按鈕跟 dialog 頂邊交會的「外角」要自己補。用 8×8 viewBox 畫 `M 8,0 A 8,8 0 0 1 0,8 L 8,8 Z` —— 填的是圓「外面」那一塊，不是扇形；再放進按鈕裡用 absolute + `translateX(-100%)` 推到按鈕外側。'
+tags: [svg, arc, outer-corner, path, viewbox, css-positioning, react]
+---
+
+import {
+  OuterCornerAnatomy,
+  OuterCornerExtensions,
+  OuterCornerOrientations,
+  OuterCornersSolution,
+} from './svg-outer-corners';
+
+## TL;DR
+
+- 關鍵是**填圓外、不填扇形**。`A 8,8 0 0 1 0,8` 的 `sweep-flag` 是 `1`，弧以左上角 (0, 0) 為圓心往右下凸；再 `L 8,8` + `Z` 把右下角封起來，得到一塊凹邊的三角形。`sweep-flag` 改成 `0`，同樣的指令就變回實心扇形。
+- 用 8×8 的 `viewBox` 畫，CSS 再把 `<svg>` 設成 `var(--radius)`（16px）。path 資料不用跟著半徑改，`viewBox` 自動放大。
+- 外角是按鈕的 **child**：`position: absolute; left: 0; bottom: 0` 先貼到按鈕左下角，`translateX(-100%)` 再往左推一個自己的寬度，剛好坐在按鈕外側、dialog 頂邊上。`fill: white` 跟 dialog 同色，接縫就不見了。
+- `pointer-events: none` 不能省。外角是 button 的 descendant，不關掉的話，滑過那塊也算 hover 按鈕、點下去也算 click。
+- Bonus 的 `OuterCorner` component 只有一條 path，四個方向靠 CSS `rotate()` 0 / 90 / 180 / 270。`transformOrigin: 'center center'` 在 SVG 裡對的是 viewBox 中心 (4, 4)，剛好就是這塊 path 的中心。
+
+<DemoFrame title="Solution — outer corner piece inside the close button">
+  <OuterCornersSolution />
+</DemoFrame>
+
+關掉「Outer corner」看原本的直角接縫；打開「Highlight」把那塊 16×16 的 SVG 染紅，就看得出它是獨立的一小片。
+
+## Spec
+
+- Dialog 右上角有一顆往上凸出的 close button，按鈕左下方跟 dialog 頂邊交會處是一個尖尖的直角。
+- 把這個外角修成圓角，半徑跟這個元素其他圓角一樣。
+- 用 SVG 做。
+
+## Technique map
+
+| 需求 | 技巧 | 筆記 |
+|---|---|---|
+| 畫出外角的形狀 | 一條 `<path>`：`M` → `A` → `L` → `Z` | [Paths](/wham/svg/paths)、[Path Commands](/wham/svg/path-commands) |
+| 弧往哪邊凸 | `A` 的 `sweep-flag`（`0` 是扇形，`1` 是外角） | [Arcs](/wham/svg/arcs) |
+| 8 單位的圖放大成 16px | `viewBox="0 0 8 8"` + CSS `width` / `height` | [viewBox](/wham/svg/viewbox) |
+| 跟 dialog 同色 | CSS `fill: white`；component 裡用 `currentColor` | [Strokes & Fills](/wham/svg/strokes-and-fills) |
+| 貼到按鈕外側 | `position: absolute` + `translateX(-100%)` | 沒有筆記專門講，是一般 CSS 定位，見下方 mechanism |
+| 不擋按鈕的滑鼠事件 | `pointer-events: none` | 沒有筆記專門講 |
+| 四個方向共用一條 path | CSS `rotate()` + `transform-origin` 在 SVG 裡的行為 | [Transforms in SVG](/wham/svg/transforms-in-svg) |
+| 寬高不同也能撐滿 | `preserveAspectRatio="none"` | [Aspect Ratio](/wham/svg/aspect-ratio) |
+| 包成 React component | JSX 裡的 SVG + props | [SVGs in React](/wham/svg/svg-in-react) |
+| Extension：按鈕滑進來 | CSS `transition`，只在 `no-preference` 時開 | [Motion Accessibility](/wham/particles/motion-accessibility) |
+
+## Build order
+
+<details>
+<summary>Hint 1 — 從 Arc 指令開始</summary>
+
+外角的弧線就是四分之一個圓。SVG path 的 `A` 指令剛好能畫一段圓弧，先用它把這四分之一圓畫出來。
+
+</details>
+
+<details>
+<summary>Hint 2 — 填圓外那一塊，不是扇形</summary>
+
+直覺會把四分之一圓整塊填滿，但外角要的是「圓外面」的部分。Josh 的指令順序：
+
+1. `M` 移到右上角。
+2. `A` 沿弧線畫到左下角。
+3. `L` 直線拉到右下角。
+4. `Z` 把 path 封起來。
+
+</details>
+
+<details>
+<summary>Hint 3 — 最後才用 CSS 定位</summary>
+
+形狀對了再處理位置：用 CSS 把這塊 SVG 擺到 close button 外面，貼著按鈕的左下角。
+
+</details>
+
+## Why the arc bulges the other way
+
+<DemoFrame title="Same four commands, only sweep-flag differs">
+  <OuterCornerAnatomy />
+</DemoFrame>
+
+虛線圓是弧所屬的那個圓，實線方框是 8×8 的 viewBox。紅點依序是 `M` 的起點、`A` 的終點、`L` 的終點。
+
+從 (8, 0) 到 (0, 8)、半徑 8 的圓弧有兩個可能的圓心：(0, 0) 跟 (8, 8)。`sweep-flag` 決定走哪一個：
+
+```svg
+<!-- sweep-flag 0：圓心 (8, 8)，弧往左上凸 → L 回圓心 → 扇形 -->
+<path d="M 8,0 A 8,8 0 0 0 0,8 L 8,8 Z" />
+
+<!-- sweep-flag 1：圓心 (0, 0)，弧往右下凸 → L 到角落 → 外角 -->
+<path d="M 8,0 A 8,8 0 0 1 0,8 L 8,8 Z" />
+```
+
+兩個版本的 `L 8,8` 都走到同一個點，但意義不同。扇形版本的 (8, 8) 是圓心，所以封起來是 pie slice。外角版本的 (8, 8) 是圓外的角落，封起來的是「方塊減掉四分之一圓」剩下的那塊。
+
+放到按鈕旁邊時，凹進去的弧面朝左上，也就是朝向 dialog 外面的空白；填滿的那側貼著右邊的按鈕跟下面的 dialog 頂邊。這正是外角該長的樣子。
+
+## Sizing: 8 units in, 16px out
+
+path 在 8×8 的座標系裡畫，但 CSS 把 `<svg>` 設成 dialog 的圓角半徑：
+
+```css
+.wham-oc-outer-corner {
+  width: var(--radius);   /* 16px */
+  height: var(--radius);
+  fill: white;
+}
+```
+
+`viewBox="0 0 8 8"` 會把 8 單位對映到 16px，弧的半徑也跟著變成 16px，跟 dialog 的 `border-radius: var(--radius)` 對齊。之後想換半徑只改 `--radius`，path 完全不用動。
+
+`fill` 寫在 `<svg>` 上，靠繼承傳到 `<path>`。
+
+## Positioning the corner inside the button
+
+外角 SVG 放在 `<button>` 裡面，不是 dialog 裡：
+
+```css
+.wham-oc-outer-corner {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  transform: translateX(-100%);
+  pointer-events: none;
+}
+```
+
+- **為什麼當 button 的 child**：button 本身是 `position: absolute`，所以它就是外角的 containing block。`left: 0; bottom: 0` 讓外角的左下角對齊按鈕的左下角；按鈕不管怎麼移，外角都跟著走。
+- **為什麼用 `translateX(-100%)`**：百分比算的是外角自己的寬度，所以不管 `--radius` 是多少，都剛好推出按鈕一個身位。寫 `left: calc(var(--radius) * -1)` 也行，但要多記一個變數。
+- **按鈕的 `bottom` 就是 dialog 的頂邊**：按鈕 `top: 0` 再 `translateY(-100%)`，底邊剛好落在 dialog 頂邊上，外角的底邊也就貼在那條線上。
+- **`pointer-events: none`**：外角是 button 的 descendant，事件會冒泡到 button。不關的話，按鈕旁邊那 16×16 的空白也會變成可點區域。
+
+## Bonus: one path, four orientations
+
+<DemoFrame title="Josh's OuterCorner component — four orientations">
+  <OuterCornerOrientations />
+</DemoFrame>
+
+Josh 的 component 把同一條 path 包起來，`orientation` 只換旋轉角度：
+
+```tsx
+let rotation;
+if (orientation === 'bottom-right') {
+  rotation = 0;
+} else if (orientation === 'bottom-left') {
+  rotation = 90;
+} else if (orientation === 'top-left') {
+  rotation = 180;
+} else if (orientation === 'top-right') {
+  rotation = 270;
+} else {
+  throw new Error('Unrecognized orientation: ' + orientation);
+}
+```
+
+名稱指的是「填滿的角落在哪」。原始 path 填的是右下角，所以 `bottom-right` 是 0°；順時針轉 90° 填滿的角落跑到左下，就是 `bottom-left`。上面主解答用的就是 `bottom-right`。
+
+幾個細節：
+
+- **`transformOrigin: 'center center'` 能用是巧合嗎？** 不是巧合，是 viewBox 剛好只放這塊 path。[Transforms in SVG](/wham/svg/transforms-in-svg) 提過，SVG 元素的 `transform-origin` 參考的是 viewBox，不是元素自己的 bounding box。這裡 viewBox 是 0 到 8，中心 (4, 4) 也是 path 的中心，所以直接轉就對。
+- **`fill="currentColor"`**：顏色交給外層 CSS 的 `color` 決定，放在白 dialog 上就設 `color: white`。`<svg>` 上的 `fill="none"` 只是預設值，path 自己覆蓋掉。
+- **`preserveAspectRatio="none"`**：傳進來的寬高不同時直接拉伸，不會 letterbox。適合水平、垂直圓角半徑不同的設計。
+- **`...delegated`**：`className`、`style`、`aria-hidden` 都能直接往下傳，定位的 CSS 由使用端負責。
+
+## Both extensions with the component
+
+<DemoFrame title="Extensions — inset button with two corners, slide in/out (my composition)">
+  <OuterCornerExtensions />
+</DemoFrame>
+
+Josh 只丟了 extension 題目，沒給解答。這個 demo 是我用他的 `OuterCorner` 拼出來的版本。
+
+按鈕離開 dialog 右邊緣之後，兩側都變成外角，所以要兩個 component：
+
+```tsx
+<OuterCorner
+  orientation="bottom-right"
+  size={16}
+  className="wham-oc-ext-corner"
+  style={{ left: 0, transform: 'translateX(-100%)' }}
+/>
+<OuterCorner
+  orientation="bottom-left"
+  size={16}
+  className="wham-oc-ext-corner"
+  style={{ right: 0, transform: 'translateX(100%)' }}
+/>
+```
+
+按鈕左邊那塊填右下角，填滿的一側貼著按鈕左緣；按鈕右邊那塊填左下角，貼著按鈕右緣。兩塊互為鏡像。Dialog 自己的四個角也都改回 `border-radius: var(--radius)`。
+
+滑進來的效果：
+
+- 按鈕 `z-index: -1` 藏到 dialog 後面，`translateY(0%)` 時整顆被 dialog 蓋住；打開時 `translateY(-100%)` 升上來。
+- Stage 設 `isolation: isolate`，讓 `-1` 只沉到 stage 的背景之上、dialog 之下，不會沉到整個頁面後面。
+- 外角是按鈕的 child，跟著一起滑，也跟著一起被 dialog 蓋住。它貼在按鈕底邊，只有最後 16px 的行程會露出來，看起來像從 dialog 頂邊長出來，不會變成兩塊白色碎片先飄上去。
+- `transition` 只寫在 `@media (prefers-reduced-motion: no-preference)` 裡，偏好減少動態的人直接切換，不滑動。
+
+## Gotchas
+
+- **題目文字說 8px，playground 的 CSS 是 16px。** 驗收條件寫「半徑 8px」，但 starter 跟解答都是 `--radius: 16px`，外角也設成 `var(--radius)`。我跟著程式碼走，用 16px。path 裡的 8 是 viewBox 單位，不是 px。
+- **填的是方塊減掉四分之一圓，不是扇形。** 形狀看起來「胖」了一圈、像實心 pie，多半是 `sweep-flag` 寫成 `0`。
+- **外角要放在 button 裡。** 放到 dialog 底下的話，要自己算按鈕的位置，按鈕一移動就對不齊。
+- **`pointer-events: none` 別漏。** 否則按鈕的 hover / click 區域偷偷多出一塊。
+- **Extension 的內縮距離至少要 2 × `--radius`。** Dialog 自己右上角的圓角吃掉最後 16px，右側外角又佔 16px。內縮不夠的話，右側外角會懸在 dialog 圓角的弧線上，底下露出一小條縫。我用 `--inset: calc(var(--radius) * 2)`。
+- **偏差：`position: fixed` 改成 `absolute`。** Josh 的 dialog 是 `fixed` + `inset: 0` 置中在整個視窗；note 裡要關在 demo 框內，所以改成 `absolute`，外層 stage 設 `position: relative`。
+- **偏差：CSS nesting 攤平、class 加前綴。** Josh 用原生 CSS nesting 寫在 `dialog` 底下；這裡攤平成一般 selector，class 全部加 `wham-oc-` 前綴，避免跟同頁其他 demo 撞名。`<dialog open>`、wrapper div、visually-hidden 的 `Close` 文字都保留。
+- **偏差：Solution demo 多了兩個 checkbox。** 「Outer corner」跟「Highlight」是 note 為了對照加的，Josh 的解答沒有。
+- **偏差：Anatomy demo 取代 hint 的圖。** 課程頁的 hint 用圖片說明「不要填扇形」；這裡改成即時 SVG 並排比較，兩者只差 `sweep-flag`。
+- **Extensions demo 是我自己的版本。** 題目沒有解答；內縮距離、`z-index: -1` + `isolation: isolate` 的藏法、easing `cubic-bezier(0.2, 0.8, 0.3, 1)` 跟 450ms 都是我挑的。
+- **Reduced motion：** Josh 的主解答沒有動畫，不用處理。只有我加的 slide-in 有 transition，用「motion-free by default」寫法包在 `no-preference` 裡。
+
+## Extensions
+
+- 把 close button 往左移一點，不要緊貼 dialog 右邊緣。這時按鈕兩側都需要外角。
+- 讓 close button 用滑的方式出現。
