@@ -7,7 +7,31 @@ import { DemoFrame } from '~/components/demo-frame';
 import { TagPill } from '~/components/tag-pill';
 import '~/styles/app.css';
 
-const mdxComponents = { DemoFrame, TagPill };
+const NOTE_PATH = /^\/([^/#?]+)\/([^/#?]+)\/([^/#?]+)$/;
+
+// Markdown links like [x](/wham/svg/paths) render as a plain <a>. The router uses hash
+// history, so a plain href leaves the app (and the deploy base path) instead of opening
+// the note. Route note paths through <Link>, which builds the `#/...` href; any other
+// root-relative path gets the hash prefix by hand.
+function MdxLink({ href, title, children }: { href?: string; title?: string; children?: ReactNode }) {
+  const match = href?.match(NOTE_PATH);
+  if (match) {
+    const [, course = '', topic = '', slug = ''] = match;
+    return (
+      <Link to="/$course/$topic/$slug" params={{ course, topic, slug }} title={title}>
+        {children}
+      </Link>
+    );
+  }
+  const resolved = href?.startsWith('/') ? `#${href}` : href;
+  return (
+    <a href={resolved} title={title}>
+      {children}
+    </a>
+  );
+}
+
+const mdxComponents = { DemoFrame, TagPill, a: MdxLink };
 
 export const Route = createRootRoute({
   head: () => ({
