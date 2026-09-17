@@ -1,0 +1,216 @@
+---
+title: Connected Paths (stretched viewBox vs JS-built path)
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/08-connected-paths
+lessonNumber: 'animation-challenges/08-connected-paths'
+order: 8
+summary: '用一條虛線 cubic Bézier 連起兩張水平位置隨機的圖片中心。關鍵是兩個 control point 各自跟端點共用 x，兩圖對齊時曲線自己變直線。課程解法拉伸一個 100×100 viewBox 的 SVG（`preserveAspectRatio="none"` + `vector-effect: non-scaling-stroke`），替代解法不寫 viewBox，直接用 pixel 座標在 JS 裡組 `d`。'
+tags: [getBoundingClientRect, cubic-bezier, vector-effect, svg, preserveAspectRatio, viewBox]
+---
+
+import { ConnectedPathsAlternative, ConnectedPathsCourse } from './connected-paths';
+
+## TL;DR
+
+- 讓曲線「自己變直」的是 control point 的擺法：`M 0,0 C 0,50 100,50 100,100`。第一個 control point 跟起點同 x，第二個跟終點同 x。兩張圖越靠近，四個點的 x 越擠，S 形越扁；完全對齊時四點同 x，就是直線。沒有任何 `if`。
+- 課程解法：path 寫死不動，動的是 SVG 這個盒子。JS 只寫兩個 style：`translateX` 移到上圖中心，`width` 設成兩圖 `left` 的差。拉伸需要三個配套：`preserveAspectRatio="none"`、`vector-effect: non-scaling-stroke`、`overflow: visible`，外加 `Math.max(1, ...)` 防 0px。
+- 替代解法（Josh 說他可能更喜歡）：SVG 滿寬、沒有 viewBox，1 個 SVG 單位就是 1px。JS 從 bounding box 算出起點、終點、兩個 control point，拼成 `d` 寫回 path。不用 `vector-effect`，上圖在右邊也連得對。
+- 兩種都靠 `getBoundingClientRect()` 量位置，尺寸一變就重算。Note 版多減掉容器的 `left`，因為 demo 不在 viewport 左緣。
+
+兩個 demo 用同一組控制。**Spread** 是 Josh 的預設（上圖偏左、下圖偏右），**Aligned** 讓兩張圖同一個 `left`，**Flipped** 把上圖放到右邊。**Shuffle** 重抽位置，**Show SVG box** 畫出 SVG 的外框，看它實際被擺在哪。
+
+<DemoFrame title="Course solution — stretch a fixed 100×100 swoop">
+  <ConnectedPathsCourse />
+</DemoFrame>
+
+切到 **Flipped**：寬度算出負數，被 `Math.max(1, ...)` 夾成 1px，線變成上圖正下方一條垂直虛線，接不到下圖。這是 Josh 自己點出的限制。
+
+<DemoFrame title="Alternative — no viewBox, build d in JS">
+  <ConnectedPathsAlternative />
+</DemoFrame>
+
+同樣切 **Flipped**：起點 x 比終點 x 大，S 曲線自然左右鏡像，程式一行都不用改。打開 **Show SVG box** 會看到這個 SVG 永遠是整條滿寬。
+
+## Spec
+
+- 兩張貓圖上下排，中間一條彎彎的 SVG 虛線。起點在上圖（punk 無毛貓）底邊正下方，終點在下圖（紳士貓）頂邊正上方。
+- 視窗尺寸改變時 path 跟著更新，兩端一直對準兩張圖的水平中心。
+- 兩圖水平距離大時是 S 形，越近越直，水平對齊時是直線。
+- 虛線的 dash 長度和間距固定，不能跟著 SVG 被拉長或壓扁。
+
+## Technique map
+
+| 需求 | 技術 | Note |
+|---|---|---|
+| 量兩張圖在哪 | `getBoundingClientRect()` 拿 `left`、`width`、`height` | [Cursor Distance](/wham/advanced-interactions/cursor-distance) |
+| S 形曲線 | cubic Bézier `C`，兩個 control point | [Path Commands](/wham/svg/path-commands) |
+| 固定的內部座標系 | `viewBox="0 0 100 100"` | [viewBox](/wham/svg/viewbox) |
+| SVG 寬高比由 JS 決定 | `preserveAspectRatio="none"` | [Aspect Ratio](/wham/svg/aspect-ratio) |
+| 拉伸後 stroke 不變形 | `vector-effect: non-scaling-stroke` | [Non-Scaling Stroke](/wham/svg/non-scaling-stroke) |
+| 虛線、圓頭、stroke 不被裁 | `stroke-dasharray`、`stroke-linecap: round`、`overflow: visible` | [Strokes & Fills](/wham/svg/strokes-and-fills) |
+| viewport pixel 對到 SVG 座標 | 課程解法拉伸盒子；替代解法不寫 viewBox，單位就是 px | [Mapping Cursor to SVG](/wham/advanced-interactions/svg-cursor-mapping) |
+| 尺寸改變就重算 | Josh 用 `window` 的 `resize`，note 用 `ResizeObserver` | [Responsive Canvas](/wham/canvas-animation/responsive-canvas) |
+
+## Build order
+
+<details>
+<summary>Hint 1 — 先連一條斜直線</summary>
+
+先別追 S 曲線。做一個正方形 SVG，給它固定的 `viewBox`（例如 100×100），用 `L` 從左上角畫到右下角，把 stroke 樣式調到滿意。接下來的工作只剩一件：把這個 SVG 拉伸到剛好跨在兩張圖之間。
+
+</details>
+
+<details>
+<summary>Hint 2 — 用 bounding box 擺 SVG</summary>
+
+兩張圖各呼叫一次 `getBoundingClientRect()`：
+
+- SVG 往右移，讓左緣落在上圖的水平中心。
+- SVG 的寬度設成兩張圖水平位置的差。
+
+位置對了，再把 `L` 換成 `C`，斜線就變 S 形。最後，視窗 resize 時要重跑整套計算。開發時給 SVG 加個 outline，一眼看出它被擺在哪（demo 的 Show SVG box 就是這個）。
+
+</details>
+
+<details>
+<summary>Hint 3 — 兩個 SVG 小技巧</summary>
+
+- `preserveAspectRatio` 設成 `none`，SVG 才能脫離 viewBox 的正方形比例。
+- 加上 `vector-effect: non-scaling-stroke`，線條才不會被拉歪、dash 才不會被抹長。
+
+</details>
+
+## Why the control points share x with the end points
+
+```html
+<path d="M 0,0 C 0,50 100,50 100,100" />
+```
+
+四個點：起點 `(0, 0)`、control point 1 `(0, 50)`、control point 2 `(100, 50)`、終點 `(100, 100)`。
+
+- control point 1 在起點**正下方**，曲線離開上圖時垂直往下。
+- control point 2 在終點**正上方**，曲線進入下圖時也是垂直的。
+- 中段從左邊的 x 滑到右邊的 x，形成 S。
+
+Bézier 曲線上每一點的 x 都是四個點 x 的加權平均。所以四個 x 越接近，曲線橫向擺動越小；四個 x 相等時，曲線上每一點都是同一個 x，就是垂直線。「越近越直、對齊變直線」這條 spec 是幾何自己給的，不是額外寫的分支。
+
+- 課程解法：盒子被壓到 1px 寬，viewBox 裡的 0 到 100 全擠進 1px。
+- 替代解法：`startPoint.x === endPoint.x`，兩個 control point 也跟著同 x。
+
+兩個 control point 的 y 是調「個性」的旋鈕。Josh 都放在 50（垂直正中）。y 越貼近自己的端點，曲線越接近一條斜直線；越往對面推，兩端的垂直段越長、中段越平。
+
+## Course solution: stretch the box, keep the path
+
+```ts
+const connectImages = () => {
+  const imagesBB = images.getBoundingClientRect();
+  const topBB = topImage.getBoundingClientRect();
+  const bottomBB = bottomImage.getBoundingClientRect();
+
+  bridgeSvg.style.transform = `translateX(${topBB.left - imagesBB.left + topBB.width / 2}px)`;
+  bridgeSvg.style.width = Math.max(1, bottomBB.left - topBB.left) + 'px';
+};
+```
+
+- `translateX`：上圖左緣加半個寬度，就是上圖中心。減 `imagesBB.left` 是 note 版加的，見 Gotchas。
+- `width`：兩張圖一樣寬，所以「左緣的差」等於「中心的差」，不必各加半寬。
+- 高度在 CSS 寫死 `128px`。flex column 的 `gap: 8px` 讓線頭跟圖片之間留一點空隙，也就是 spec 說的「正下方」和「正上方」。
+
+path 本身從頭到尾沒變過。100×100 的 viewBox 被放進 W×128 的盒子，x 方向縮放 W/100 倍，y 方向縮放 1.28 倍。
+
+## Four things the stretch breaks
+
+拉伸 SVG 很省事，但 SVG 的預設行為處處跟它作對。每一條都要補：
+
+1. **比例。** SVG 預設 `preserveAspectRatio="xMidYMid meet"`，100×100 的 viewBox 放進 W×128 的盒子會維持正方形、置中留白，path 根本跨不到兩張圖。設 `none`，x 和 y 才各自縮放。
+2. **Stroke。** 拉伸是對整個內容做 transform，stroke 也一起被縮放：x 放大幾倍，dash 就被拉長幾倍，接近垂直的段落線寬也變粗。`vector-effect: non-scaling-stroke` 讓 stroke 在 transform 之後才算，`stroke-width: 2px` 和 `stroke-dasharray: 5px 8px` 都以螢幕 pixel 計。
+3. **裁切。** SVG 預設 `overflow: hidden`。起點在盒子左緣 x=0，stroke 有一半在盒子外，round 線帽也伸出上下緣。寬度只剩 1px 時整條線幾乎都在盒子外。`overflow: visible` 放它出去。
+4. **0px 不畫。** 兩圖對齊時寬度差是 0，瀏覽器不 paint 0 寬的 SVG，所以 `Math.max(1, ...)` 保底 1px。
+
+## Alternative: drop the viewBox, compute `d`
+
+```ts
+const startPoint = { x: topBB.left - bridgeBB.left + topBB.width / 2, y: 0 };
+const endPoint = { x: bottomBB.left - bridgeBB.left + bottomBB.width / 2, y: bridgeBB.height };
+const controlPoint1 = { x: startPoint.x, y: bridgeBB.height * 0.5 };
+const controlPoint2 = { x: endPoint.x, y: bridgeBB.height * 0.5 };
+
+const d = `
+  M ${startPoint.x},${startPoint.y}
+  C ${controlPoint1.x},${controlPoint1.y}
+    ${controlPoint2.x},${controlPoint2.y}
+    ${endPoint.x},${endPoint.y}
+`;
+path.setAttribute('d', d);
+```
+
+沒有 viewBox 的 SVG，內部座標就是 CSS pixel，原點在 SVG 左上角。SVG 設 `width: 100%`，容器內任何 x 都落得進去。曲線的形狀跟課程解法一模一樣，只是從「100×100 再拉伸」換成「直接用 pixel 算」。沒有東西被拉伸，所以 stroke 本來就正常，`vector-effect` 可以拿掉。
+
+幾個細節：
+
+- template string 裡的換行和縮排是合法的 path 空白，Josh 這樣寫是為了好讀。
+- `bridgeBB.height` 取代寫死的 128，改 CSS 高度時 JS 不用跟著改。
+- 我用 `setAttribute` 直接寫 DOM，沒有走 React state。量位置一定要在 layout 完成之後，走 state 等於每次 resize 多 render 一輪。只有一條 path 時差別不大，兩種都行。
+
+## Comparing the two approaches
+
+| | Course solution | Alternative |
+|---|---|---|
+| 會變的東西 | SVG 盒子的 `transform` 和 `width` | path 的 `d` |
+| 座標系 | 100×100 viewBox，被拉成 W×128 | 沒有 viewBox，1 單位 = 1px |
+| 要的 SVG 配套 | `preserveAspectRatio="none"`、`vector-effect`、`overflow: visible`、`Math.max(1, ...)` | 只要 `overflow: visible` |
+| JS 的工作 | 算 2 個數字 | 算 4 個點、拼字串 |
+| 兩圖對齊 | 靠 1px 保底 | 四點同 x，自然是直線 |
+| 上圖在右（Flipped） | 壞掉：寬度變負，被夾成 1px | 直接可用，曲線鏡像 |
+| path 可以多複雜 | 任何形狀，包括設計工具匯出的 path | 要能用幾個點算出來 |
+
+課程解法不是不能支援 Flipped：寬度取絕對值，`translateX` 改從比較左的那個中心開始，再加 `scaleX(-1)` 把 path 左右翻。但每補一個情況，CSS 和 JS 都要多一處配合。Josh 的結論是這題他偏好 JS 算 path 的版本：少一個冷門的 `vector-effect`，順序顛倒也免費支援。
+
+我自己的判斷方式：
+
+- **path 是「畫」出來的**（手繪波浪、從 Figma 匯出），只需要被拉寬拉窄 → 課程解法。你沒辦法用四個點重算一條手繪曲線。[Aspect Ratio](/wham/svg/aspect-ratio) 那篇的 swoop divider 就是這一類。
+- **path 是 layout「算」出來的**（連接線、流程圖箭頭），幾個點就描述得完 → 替代解法。它還有個延伸優勢（我的推論，課程沒提）：一張滿版 SVG 可以放很多條 path。多張卡片互相連線時，一個 SVG 就夠，不用每條線各一個被拉伸的 SVG。
+
+## Porting to React: layout effect + ResizeObserver
+
+```tsx
+useLayoutEffect(() => {
+  const images = imagesRef.current;
+  // ...其他 refs，null 就 return
+
+  const connectImages = () => { /* 量位置、寫 style */ };
+  const init = () => { /* 隨機 left，然後 connectImages() */ };
+
+  const resizeObserver = new ResizeObserver(connectImages);
+  resizeObserver.observe(images);
+
+  init();
+
+  return () => resizeObserver.disconnect();
+}, [layoutRequest]);
+```
+
+- **`useLayoutEffect`**：量 layout、寫 style 都在 paint 之前完成，第一幀線就在對的位置，不會閃一下。
+- **`ResizeObserver` 取代 `window` resize**：頁面裡的容器可以不經過 window resize 就改變寬度（捲軸出現、側欄開合）。兩張圖的 `left` 是容器寬度的百分比，容器一變線就歪。盯容器本身比較準，window resize 時它照樣會觸發。
+- **Shuffle 靠新物件觸發 effect**：`setLayoutRequest({ arrangement })` 每次都給新的 reference，dependency 比對不相等，effect 就重跑，同一個 arrangement 也會重抽位置。
+
+## Gotchas
+
+- **Viewport 座標和容器座標不同。** Josh 的 playground `body` 沒有 padding，`getBoundingClientRect().left` 剛好等於容器裡的 x。Note 的 demo 在 DemoFrame 裡，要減掉容器左緣：課程解法減 `imagesBB.left`，替代解法減 `bridgeBB.left`。漏減的話，整條線往右偏移「demo 左緣到視窗左緣」的距離。
+- **`vector-effect` 不會繼承。** 要寫在 `path` 上，寫在 `<svg>` 上沒作用。Josh 的 CSS 也是寫在 `.bridge path`。
+- **拿掉 `non-scaling-stroke`，壞的不只是 dash。** 寬度 1px 時 x 方向縮成 1%，垂直線的線寬跟著剩 0.02px，對齊的情況線會直接消失。
+- **`overflow: visible` 兩個版本都要。** 替代解法沒有拉伸，但起點 `y: 0` 和終點 `y: height` 剛好在盒子上下緣，round 線帽會被切掉一半。
+- **dash 固定靠的是 `non-scaling-stroke`。** SVG 2 規格把 non-scaling-stroke 定義成在螢幕座標系算整個 stroke 外形，dash 也在內，這題 Josh 的做法就建立在這點上。[Non-Scaling Stroke](/wham/svg/non-scaling-stroke) 那篇的 Gotchas 說 dash 不受影響，兩邊說法相衝。以瀏覽器實際渲染為準：兩個 demo 的 dash 長度看起來一樣，就代表 dash 有被管到。
+- **貓照片換成 inline SVG 塗鴉。** 課程的兩張加工貓照片放在課程網站上，note 不 hotlink。改畫兩隻 SVG 貓：punk 貓有 mohawk 和耳環，紳士貓有高帽、單片眼鏡、八字鬍。盒子一樣是 200×200，layout 數字完全不變。
+- **Demo 控制是 note 加的。** Josh 的 playground 靠重新整理 Result pane 重抽位置，這裡換成 Shuffle。Aligned 和 Flipped 重現頁面提到的兩個邊界情況，Show SVG box 對應 hint 裡加 outline 的做法。
+- **`window` resize 改成 `ResizeObserver`**，理由見上一節。
+- **`function` 宣告改成 arrow function。** Josh 寫 `function connectImages()`。在 effect 裡這樣寫，TypeScript 不會把 ref 的 null 檢查帶進 hoisted 的 function 宣告（tsc 報 TS18047），`const connectImages = () => {}` 就沒問題。
+- **窄螢幕會切到貓。** 貓固定 200px，`left` 最高 60%，容器窄於約 500px 時下圖會超出右緣。Josh 的 playground `body` 設了 `overflow: hidden`，note 版外層也是 `overflow-hidden`。
+- **沒有動畫，所以沒有 `prefers-reduced-motion` 要處理。** Josh 的解法是純 layout 計算，resize 時線直接跳到新位置，沒有 transition。
+
+## Extensions
+
+課程頁沒有列 extension 清單。以下取自頁面內文提到、但沒有實作的方向：
+
+- 讓課程解法也支援 Flipped：寬度取絕對值、起點改成比較左的中心、`scaleX(-1)` 翻轉 path。
+- 調兩個 control point 的 y，改變 swoop 的個性。Josh 放在垂直正中，並鼓勵試別的值。
+- 回到這題的原型：CSS for JavaScript Developers 首頁的 Curriculum 區塊，多張卡片隨視窗重排，卡片間的虛線跟著調整。

@@ -1,0 +1,278 @@
+---
+title: Pinterest Micro-interaction (CSS trig fan-out + keyboard a11y)
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/07-pinterest
+lessonNumber: 'animation-challenges/07-pinterest'
+order: 7
+summary: '點照片後照片轉 10deg、浮在全頁 backdrop 之上，三顆按鈕從點擊位置沿 180° 到 270° 扇出。扇出完全交給 CSS：`translate()` 裡直接寫 `cos(var(--angle))`，動畫只是切換 `--current-distance`。另一半功夫在 a11y：用 `ev.detail === 0` 分辨 Enter、隱藏時 `tabIndex={-1}`、Escape 和 Tab 離開都要取消高亮。'
+tags: [polar-coordinates, a11y, z-index, css-trig, focus-management, prefers-reduced-motion, react]
+---
+
+import { PinterestTappablePhotos } from './pinterest';
+
+## TL;DR
+
+- 扇出不用 JS 算座標。每顆按鈕只帶一個 inline `--angle`，CSS 在 `transform: translate()` 裡用 `cos(var(--angle)) * var(--current-distance)` 做 polar → cartesian。高亮時把 `--current-distance` 從 `0px` 換成 `80px`，`transform` 的 transition 自己補間；收回也是同一條 transition。
+- 整個效果靠 z-index 分層：一般照片 `1`、backdrop `2`、高亮照片 `3`、menu `4`。每張照片自帶一個 `position: fixed; inset: 0` 的 backdrop，平常 `opacity: 0` 加 `pointer-events: none`。「點旁邊取消」其實就是點到 backdrop。
+- Menu 用 `position: absolute`，錨點存 **document 座標**：`x: ev.clientX`、`y: window.scrollY + ev.clientY`。少了 `scrollY`，頁面捲下去後 menu 會出現在點擊位置上方。
+- 鍵盤觸發的 click，`ev.detail` 是 `0`，這時改用照片 bounding box 中心當錨點。隱藏時 icon button 設 `tabIndex={-1}`；Escape、在照片上 Shift+Tab、在最後一顆按鈕上 Tab，三條路都會取消高亮，focus 不會跑到 backdrop 後面。
+- Reduced motion 用 motion-free by default：`--current-distance` 預設就是終點距離，只有 `no-preference` 才改成從 `0px` 出發並加 transition。Fade 保留。
+
+<DemoFrame title="Tappable photos — click, Tab + Enter, Escape">
+  <PinterestTappablePhotos />
+</DemoFrame>
+
+點任一張照片：照片轉 10deg、整頁變暗，三顆按鈕從游標位置往左、左上、上扇出。點暗處或按 Escape 收回。也可以 Tab 到照片再按 Enter，按鈕會改從照片中心扇出。這個 demo 在頁面中段，「捲動後位置還對」這條需求直接在這裡就能驗證。
+
+## Spec
+
+- 點照片 → 照片高亮：旋轉 10deg，一層 backdrop 蓋住頁面上其他所有 UI。
+- 高亮時三顆按鈕從點擊位置扇出，角度 180° 到 270°（左、左上、上），讓按鈕永遠在手指附近。
+- 點三顆按鈕以外的任何地方 → 取消高亮，按鈕滑回點擊位置並淡出。按鈕本身不用做事。
+- 頁面捲動後一樣要正確。
+- Accessibility：
+  - 有 motion sensitivity 的使用者看不到位移動畫。
+  - 沒高亮時按鈕不能被 focus，Tab 直接跳到下一張照片。
+  - Escape 取消高亮。
+  - 用 Enter 觸發時，按鈕從照片中心扇出，不是從游標位置。
+  - 高亮時 Tab 離開照片和它的按鈕，就取消高亮，免得 focus 停在 backdrop 後面看不見的元素上。
+
+## Technique map
+
+| 需求 | 技巧 | 筆記 |
+|---|---|---|
+| 高亮照片在 backdrop 上、其他 UI 在下 | z-index 分層 + `data-is-highlighted` attribute selector | 沒有筆記專門講，見下方 mechanism |
+| 按鈕沿 180° 到 270° 排開 | polar → cartesian，這題改在 CSS 裡用 `cos()` / `sin()` 算 | [Polar Coordinates](/wham/particles/polar-coordinates)、[Trigonometry 101](/wham/particles/trigonometry-101) |
+| 以點擊點為中心 | `translate(-50%, -50%)` 中心錨點 | [Containment Strategies](/wham/particles/containment-strategies) |
+| 從中心滑出、滑回 | 用 `transform` 位移，不動 `top/left` | [Transform Benefits](/wham/particles/transform-benefits)、[Dispersion](/wham/particles/dispersion) |
+| 滑出的手感 | 自訂 `cubic-bezier(0.154, 0.792, 0, 0.998)` | [Custom Curves](/wham/particles/custom-curves) |
+| 捲動後錨點正確 | `clientY + window.scrollY` 存成 document 座標 | 沒有筆記 |
+| Enter 時從照片中心出發 | `getBoundingClientRect()` 算中心點 | [Cursor Distance](/wham/advanced-interactions/cursor-distance) |
+| 關掉位移動畫 | `prefers-reduced-motion`，motion-free by default | [Motion Accessibility](/wham/particles/motion-accessibility) |
+| Escape、Tab 離開、隱藏按鈕不可 focus | window `keydown` listener、`tabIndex={-1}`、`ev.detail` | 沒有筆記，課程外的 a11y 知識 |
+
+## Build order
+
+<details>
+<summary>Hint 1 — 先把高亮做出來</summary>
+
+先不管 menu。在 `TappablePhoto` 裡開一個 `isHighlighted` state，點 `<button>` 就 toggle。
+
+高亮時對照片套 `rotate(10deg)`，同時讓一個新的 backdrop 元素的 opacity 從 0 變 1。疊層順序用 z-index 排：一般照片最低、backdrop 中間、高亮照片最高。這樣被選中的照片浮在 backdrop 前面，其他東西全被蓋住。
+
+</details>
+
+<details>
+<summary>Hint 2 — Floating menu 拆兩步</summary>
+
+1. 點擊時記下游標位置，把 menu 放在那裡。
+2. 把三顆按鈕從那個點往外推開。
+
+Josh 的做法：外層一個 `position: absolute` 的 wrapper 貼在游標底下，裡面三顆按鈕用 polar 座標各自推開 80px。角度是 180°（正左）、225°（左上斜角）、270°（正上）。Icon 來自 Lucide。
+
+</details>
+
+<details>
+<summary>Hint 3 — 捲動後 menu 跑到上面去</summary>
+
+頁面捲下去再點，menu 可能出現在點擊位置的上方。兩個解法：
+
+- menu 改用 `position: fixed`。
+- 存點擊位置時，把 `window.scrollY` 加到 `ev.clientY` 上。
+
+Josh 選第二個。用 fixed 的話，頁面捲動時 menu 會黏在螢幕上不動，感覺很怪。不過兩種都算對。
+
+</details>
+
+<details>
+<summary>Hint 4 — Accessibility 清單</summary>
+
+Josh 說這題大半時間都花在 a11y 上。需要的東西：
+
+- window 層級的 `keydown` listener，偵測 `"Escape"`。
+- `onClick` 裡另開一條路徑處理 Enter。button 被 focus 時按 Enter 會發出 click event，但這時 `ev.detail` 是 `0`，用它分辨是點的還是按的。
+- 照片沒高亮時，按鈕要嘛不 render，要嘛設 `tabIndex="-1"`，Tab 才不會停在看不見的按鈕上。
+- 常規的 `prefers-reduced-motion` 處理：不是 `no-preference` 就跳過 transition 和 keyframe animation。Fade 可以留著。
+
+</details>
+
+## Why each photo owns a backdrop
+
+Josh 沒有在 App 層做一個共用的 backdrop，而是每個 `TappablePhoto` 自己 render 一個：
+
+```tsx
+<div className="wham-pin-wrapper" data-is-highlighted={isHighlighted}>
+  <div className="wham-pin-backdrop" onClick={() => setIsHighlighted(false)} />
+  <button ref={btnRef} className="wham-pin-btn" onClick={handleClick}>
+    <img src={src} alt={alt} draggable={false} />
+  </button>
+  <div className="wham-pin-menu-wrapper" style={{ top: anchorPosition.y ?? undefined, left: anchorPosition.x ?? undefined, opacity: isHighlighted ? 1 : 0 }}>
+    {/* three IconButtons */}
+  </div>
+</div>
+```
+
+好處是狀態完全 local：backdrop、照片、menu 都讀同一個 `data-is-highlighted`，不用把 state 提到 App，也不用 context。四張照片就有四個 backdrop，但只有高亮那張的 backdrop 是 `opacity: 1` 加 `pointer-events: auto`，其他三個透明、點不到。
+
+疊層順序：
+
+```css
+.wham-pin-btn { position: relative; z-index: 1; }
+.wham-pin-backdrop { position: fixed; inset: 0; z-index: 2; }
+.wham-pin-wrapper[data-is-highlighted='true'] .wham-pin-btn { z-index: 3; }
+.wham-pin-menu-wrapper { position: absolute; z-index: 4; }
+```
+
+關鍵是 `.wham-pin-wrapper` **沒有**建立 stacking context（沒有 `position` + `z-index`、沒有 `transform`、沒有 `isolation`）。所以四張照片、四個 backdrop、四個 menu 的 z-index 全在同一個 root stacking context 裡比大小：高亮照片的 `3` 贏過自己的 backdrop `2`，其他照片的 `1` 輸給它。如果 wrapper 多一行 `isolation: isolate`，每張照片自成一層，DOM 順序排在後面的照片就會浮到 backdrop 上面。
+
+點高亮中的照片本身也會取消高亮：照片在 backdrop 之上，點到的是 `<button>`，`handleClick` 把 `isHighlighted` toggle 回 `false`。
+
+## Polar coordinates in pure CSS
+
+Part 1 的 polar 座標是在 JS 裡用 `convertPolarToCartesian(angle, distance)` 算。這題 Josh 把同一條公式搬進 CSS，JS 只傳角度：
+
+```tsx
+<button
+  className="wham-pin-icon-button"
+  tabIndex={isVisible ? undefined : -1}
+  style={{ '--angle': angle + 'deg' } as CSSProperties}
+>
+  <Icon size={24} />
+</button>
+```
+
+```css
+.wham-pin-icon-button {
+  --start-distance: 0px;
+  --end-distance: 80px;
+  --current-distance: var(--end-distance);
+  transform: translate(
+    calc(cos(var(--angle)) * var(--current-distance)),
+    calc(sin(var(--angle)) * var(--current-distance))
+  );
+}
+```
+
+CSS 的 `cos()` / `sin()` 吃帶單位的角度（`180deg`），回傳沒有單位的數字，乘上 `80px` 就是 px 位移。角度沿用 Part 1 的慣例：0° 朝右，因為 y 軸朝下，角度順時針增加。所以 180° 是正左、270° 是正上，225° 在中間的左上。
+
+動畫只換一個變數：
+
+```css
+@media (prefers-reduced-motion: no-preference) {
+  .wham-pin-icon-button {
+    transition: transform 800ms cubic-bezier(0.154, 0.792, 0, 0.998);
+    --current-distance: var(--start-distance);
+  }
+  .wham-pin-wrapper[data-is-highlighted='true'] .wham-pin-icon-button {
+    --current-distance: var(--end-distance);
+  }
+}
+```
+
+`--current-distance` 是沒註冊的 custom property，本身不能 transition。但它一變，`transform` 的 computed value 就跟著變；`transform` 有 transition，瀏覽器就在兩個 translate 之間補間。三顆按鈕共用同一條規則，差別只在 `--angle`。
+
+這條 `cubic-bezier` 是很陡的 ease-out：一開始幾乎瞬間衝出去，後段拖很長慢慢貼近終點。收回時套同一條曲線，按鈕很快縮回中心，同時 menu wrapper 的 `opacity` 用 500ms 淡掉。
+
+## Anchoring the menu in document coordinates
+
+```ts
+setAnchorPosition({
+  x: ev.clientX,
+  y: window.scrollY + ev.clientY,
+});
+```
+
+`clientX/Y` 是 viewport 座標。Menu wrapper 是 `position: absolute`，往上沒有任何 positioned ancestor，所以 `top/left` 是從整份 document 的原點量起。兩個座標系只差捲動量，補上 `window.scrollY` 就對齊了。
+
+為什麼不直接用 `position: fixed` 配 `clientY`？也可以，但 fixed 的 menu 在頁面捲動時會停在螢幕上，照片卻跟著頁面跑走。Absolute 讓 menu 跟照片一起捲。
+
+Menu wrapper 還有兩個細節：
+
+- `transform: translate(-50%, -50%)` 讓 48×48 的 wrapper 中心對準點擊點。三顆按鈕預設疊在正中間，再各自往外推。
+- Wrapper 本身 `pointer-events: none`。它是一塊 48×48 的透明方塊，剛好蓋在點擊點上；如果它接收 pointer，那一小塊就點不到 backdrop，收不回去。只有高亮時的 icon button 才打開 `pointer-events: auto`。
+
+## Telling a click from an Enter press
+
+```ts
+function handleClick(ev: MouseEvent<HTMLButtonElement>) {
+  const nextIsHighlighted = !isHighlighted;
+  setIsHighlighted(nextIsHighlighted);
+
+  if (!nextIsHighlighted) {
+    return;
+  }
+
+  const wasTriggeredByKeyboard = ev.detail === 0;
+
+  if (wasTriggeredByKeyboard) {
+    const bb = btnRef.current!.getBoundingClientRect();
+    setAnchorPosition({
+      x: bb.x + bb.width / 2,
+      y: window.scrollY + bb.y + bb.height / 2,
+    });
+    return;
+  }
+
+  setAnchorPosition({ x: ev.clientX, y: window.scrollY + ev.clientY });
+}
+```
+
+`<button>` 被 focus 時按 Enter（或 Space），瀏覽器會合成一個 `click` event，所以不必另外用 `onKeyDown` 處理 Enter。問題是這個 click 的 `clientX/Y` 沒有意義。對 click 來說，`ev.detail` 是連點次數：真的滑鼠點擊至少是 `1`，鍵盤合成的是 `0`。
+
+鍵盤路徑改用 button 的 bounding box 中心，一樣加上 `window.scrollY` 轉成 document 座標。量的是 `<button>` 而不是會旋轉的 `<img>`，所以中心點穩定。
+
+取消高亮時直接 `return`，不更新 `anchorPosition`。Menu 留在原地，按鈕才會滑回「原本的」點擊位置再淡出。
+
+## Focus management: never tab into the dark
+
+Backdrop 蓋住整頁以後，如果 focus 移到 backdrop 後面的元素，使用者就看不到自己在哪。Josh 補了四個洞：
+
+| 情境 | 處理 |
+|---|---|
+| 沒高亮時 Tab 經過 | icon button 設 `tabIndex={isVisible ? undefined : -1}`，直接跳過 |
+| 高亮時在照片上 Shift+Tab | 照片的 `onKeyDown` 偵測 `Tab` + `shiftKey`，取消高亮 |
+| 高亮時在最後一顆按鈕（Search）上 Tab | 那顆按鈕自己的 `onKeyDown` 偵測 `Tab` 且沒按 Shift，取消高亮 |
+| 任何時候按 Escape | `useEffect` 掛 window `keydown`，cleanup 時移除 |
+
+Tab 順序就是 DOM 順序：wrapper 裡依序是 backdrop（不能 focus）、照片 button、三顆 icon button。高亮時 Tab 從照片走到 Pin、Upload、Search，再按一次就離開這組元素，所以只要在 Search 上攔截。`onKeyDown` 沒有 `preventDefault`，focus 照常移到下一個元素，backdrop 同時淡出。
+
+## Reduced motion defaults to the end state
+
+```css
+.wham-pin-icon-button {
+  --current-distance: var(--end-distance);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wham-pin-icon-button {
+    transition: transform 800ms cubic-bezier(0.154, 0.792, 0, 0.998);
+    --current-distance: var(--start-distance);
+  }
+}
+```
+
+偏好減少動態的使用者：按鈕一直待在 80px 的位置，沒有位移，只剩 menu wrapper 的 `opacity` 500ms 淡入淡出。照片的 `rotate(10deg)` 還在（這是高亮的視覺提示），但 `transition: transform 300ms` 只寫在 `no-preference` 裡，所以照片直接轉到位。Backdrop 的 opacity transition 不在 media query 裡，因為 fade 不算位移。
+
+這就是 [Motion Accessibility](/wham/particles/motion-accessibility) 說的 motion-free by default：看不懂 media query 的瀏覽器也拿到靜態版。
+
+## Gotchas
+
+- **圖片是替代品。** Josh 的 playground 用課程網站上的室內照片。這裡不 hotlink，改成四張 inline SVG 插畫（椅子、沙發、紅燈、窗景），用 `data:image/svg+xml` URI 餵給 `<img>`。保留 `<img>` 才能保留 `alt` 和 `draggable={false}`。`alt` 也改成描述插畫的文字。
+- **Icon 是內嵌 SVG。** 這個 repo 沒裝 `lucide-react`，所以 `Pin`、`Upload`、`Search` 是用 Lucide 的 path 寫成的小 component，一樣收 `size`，call site 還是 `<Icon size={24} />`。
+- **CSS module 攤平成 scoped `<style>`。** Josh 用 CSS nesting 寫 `.wrapper[data-is-highlighted='true'] &`，這裡攤成一般的 descendant selector，class 加上 `wham-pin-` prefix。數值全部照搬。
+- **Layout 改成橫排。** Josh 的 App 是寬 200px 的直欄，加上 `min-height: 100vh`，四張照片疊起來超過一個螢幕高。Note 裡改成 `flex-wrap` 橫排、每張 140px，`body` 的背景色 `hsl(210deg 15% 80%)` 搬到 demo 容器上。
+- **`class` 改成 `className`。** Josh 的 wrapper 寫的是 `class={styles.wrapper}`，React 會噴警告。
+- **加了 `aria-label`。** Josh 的三顆 icon button 沒有文字，screen reader 只會念「button」。這裡補上 `Pin`、`Share`、`Find similar`（後兩個是我對 Upload、Search icon 的解讀），icon SVG 加 `aria-hidden`。
+- **Backdrop 真的蓋住整個網站**，包括最上面的 header，這是 spec 要的。能蓋住的前提是 DemoFrame 往上沒有任何 ancestor 建立 stacking context。如果之後 layout 加了 `transform`、`filter` 或 `position` + `z-index`，backdrop 會被關在那一層裡。Menu 的 absolute 定位也一樣，前提是往上沒有 positioned ancestor。
+- **隱藏的按鈕還在 accessibility tree 裡。** `tabIndex={-1}` 只擋 Tab，screen reader 的瀏覽模式還是可能讀到三顆透明按鈕。要更嚴謹，可以在沒高亮時加 `inert`；直接不 render 也行，但這樣就沒有收回動畫。
+- **X 軸沒加 `window.scrollX`。** 頁面有橫向捲動時 menu 會水平偏移。一般頁面不會橫向捲動，Josh 也沒處理。
+- **每張照片各掛一個 window `keydown` listener。** 四張就四個，按 Escape 時四個都會 `setIsHighlighted(false)`，沒高亮的三個是 no-op。照片很多時，可以改成只在 `isHighlighted` 為 true 時才掛。
+- **`ev.detail === 0` 不只代表 Enter。** Space 鍵和程式呼叫 `.click()` 也是 `0`。這題這些情況都該從中心出發，所以沒差。
+- **CSS `cos()` / `sin()` 要 2023 年以後的瀏覽器。** 舊瀏覽器整條 `transform` 失效，三顆按鈕會疊在點擊點上。
+- **`draggable={false}` 別省。** 點擊時手稍微一動，瀏覽器就開始拖曳圖片的 ghost image，click 不會發生。
+- **靠近視窗上緣或左緣點擊，按鈕會跑出畫面。** 扇出方向固定朝左上，Josh 把修正列在 extension。
+
+## Extensions
+
+- Pinterest 原版的扇出帶彈簧感。用 Easing Wizard 這類工具調一條 `linear()` timing function 取代 `cubic-bezier`，做法見 [linear() Function](/wham/svg/linear)。
+- 照片沒有完整出現在 viewport 時，先捲到看得見再扇出按鈕。
+- 點在視窗上緣附近時，把按鈕位置往下移，別讓它們滑出螢幕頂端。
+- 點 action 按鈕的收回方式應該跟「點旁邊取消」不一樣，類似 [View Transitions in Practice](/wham/advanced-interactions/view-transition-actions) 裡 action-driven dialog 的做法。
