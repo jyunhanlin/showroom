@@ -1,0 +1,43 @@
+---
+title: Animation Challenges overview
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/00-intro
+lessonNumber: 'animation-challenges/00-intro'
+order: 0
+summary: '11 個 capstone 挑戰的總覽：每題對應課程哪個 Part、用到哪些技巧。挑戰把好幾課的招式混在一起用，這頁幫你找到「這招在哪題用過」。'
+tags: [overview, capstone, challenges]
+---
+
+## TL;DR
+
+- Animation Challenges 是 WHAM 的 bonus 單元：11 個比課內練習大的動畫，每題都要把前面好幾課的技巧組合起來。
+- 挑戰照課程順序排。做完 Part 1 可以挑 1–2 題，Part 2 對應 3–6 題，Part 3 對應 7–8 題，Part 4 對應 9–11 題。
+- 每則筆記的結構都一樣：Spec → Technique map（連回單招筆記）→ Build order（Hint 收在可展開的區塊裡）→ 機制說明 → Gotchas → Extensions。
+- 想先自己解：只看 Spec，Hint 一個一個打開，卡住再往下讀。
+
+## The eleven challenges
+
+| # | Challenge | After | Key techniques |
+| --- | --- | --- | --- |
+| 1 | [Inhale and Explode](/wham/animation-challenges/kirby) | Part 1 | partial keyframes 共用 `--angle`/`--distance`、CSS `cos()`/`sin()` 極座標、pop circle |
+| 2 | [Typewriter Effect](/wham/animation-challenges/typewriter-effect) | Part 1 | 遞迴 `setTimeout` + 隨機延遲、游標淡出、Web Audio 合成音效 |
+| 3 | [Radial Progress Ring](/wham/animation-challenges/radial-progress-ring) | Part 2 | 100 條 SVG `<line>`、0ms animation 當定時變色、exponential stagger |
+| 4 | [Outer Corners](/wham/animation-challenges/svg-outer-corners) | Part 2 | SVG arc sweep-flag、viewBox 縮放、`translateX(-100%)` 定位 |
+| 5 | [Goopy Tip](/wham/animation-challenges/goopy-tip) | Part 2 | 兩段 Bézier path morph、`linear()` spring、Motion `animate()` |
+| 6 | [Sun/Moon Toggle](/wham/animation-challenges/sun-moon-toggle) | Part 2 | SVG mask 月牙、CSS 極座標、`:has(input:checked)`、transition 寫在目的地狀態 |
+| 7 | [Pinterest Micro-interaction](/wham/animation-challenges/pinterest) | Part 3 | CSS 三角函數扇形展開、backdrop 疊層、鍵盤 focus 管理 |
+| 8 | [Connected Paths](/wham/animation-challenges/connected-paths) | Part 3 | Bézier 控制點對齊、`preserveAspectRatio="none"` + `non-scaling-stroke`、JS 組 `d` |
+| 9 | [Exploding Clicks](/wham/animation-challenges/exploding-clicks) | Part 4 | 每個字各自的 velocity、air resistance、點擊當下量 `getBoundingClientRect` |
+| 10 | [Conway's Game of Life](/wham/animation-challenges/conways-game-of-life) | Part 4 | 稀疏 Set + 字串 key、只數活細胞的鄰居、100ms tick gate |
+| 11 | [Advanced Canvas Ripple](/wham/animation-challenges/advanced-canvas-ripple) | Part 4 | simplex noise grid、到圓環的距離決定亮度、兩段 `clampedNormalize` |
+
+## Techniques that show up more than once
+
+- **Polar coordinates**：1、3、6、7 都用到。1、6、7 把運算交給 CSS `cos()`/`sin()`，JS 只設一個角度變數；3 在 JS 裡算好座標再畫成 SVG。
+- **Springs without a spring library**：5、6 都把 spring 取樣成 CSS `linear()`。5 另外給一個 Motion 版本，因為 CSS 的 `d` property 在 Safari 不會 transition。
+- **Read layout with `getBoundingClientRect`**：8、9 都靠它拿元素位置。9 在點擊當下才量，8 在每次容器尺寸改變時重量（`ResizeObserver`），所以捲動或 resize 之後位置都不會錯。
+- **Direct DOM inside React**：1、2 保留 Josh 的命令式 DOM 操作，放進 `useEffect` 跑；元件本身不 re-render，所以 React 不會跟這些手動加的 node 打架。
+
+## Porting notes
+
+- 課程的圖片、音效都沒有直接引用。照片換成 inline SVG 插圖（7、8），打字機音效改成 Web Audio 合成（2），noise 改用已經裝好的 `simplex-noise`（11）。
+- 每則筆記的 Gotchas 都列出和 Josh 解答不同的地方。大多是為了塞進 DemoFrame：座標改成相對容器、`position: fixed` 改 `absolute`、class 名稱加前綴避免同頁 demo 互相干擾。
