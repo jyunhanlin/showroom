@@ -1,0 +1,253 @@
+---
+title: Typewriter Effect (recursive setTimeout + random delay)
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/02-typewriter-effect
+lessonNumber: 'animation-challenges/02-typewriter-effect'
+order: 2
+summary: '按下 Trigger，標題逐字打出 "Hello world!"，每個字配一聲打字機 click。關鍵是遞迴 `setTimeout`：每一拍重抽 50 到 350ms 的延遲，重按時 `clearTimeout` 再從頭來。音效用 Web Audio 合成，取代 mp3 sprite。'
+tags: [setTimeout, randomness, web-audio, partial-keyframes, interrupts, typewriter]
+---
+
+import { TypewriterEffect } from './typewriter-effect';
+
+## TL;DR
+
+- 核心是**遞迴 `setTimeout`，不是 `setInterval`**：`typeChar` 每打一個字，就用 `random(MIN_DELAY, MAX_DELAY)` 重抽延遲、排下一拍。`setInterval` 的間隔在建立時就定死，做不出人手打字的忽快忽慢。
+- 游標 `_` 是「先砍再補」：`innerText.slice(0, -1)` 砍掉舊游標，再 `append(nextChar + '_')`。打完最後一個字時，把 `_` 換成 `<span>`，因為只有元素能掛 keyframe 淡出。
+- 中斷只要兩步：清空 heading、`clearTimeout(timeoutId)`。任何時刻最多只有**一個** timeout 在排隊，所以記住最新的 id 就夠了。
+- `remainingChars` 當參數傳，不放 module scope：loop 的狀態跟著呼叫鏈走。
+- 音效：Josh 用 howler 隨機播 mp3 sprite 裡的一段。這裡沒有 mp3，改用 Web Audio 合成 9 種 key click，但 `sound.play(random(0, 8).toString())` 的形狀不變。
+
+<DemoFrame title="Typewriter — random delay + synthesized key clicks">
+  <TypewriterEffect />
+</DemoFrame>
+
+打到一半再按 Trigger，會立刻從頭開始。按下去會有聲音，音量不大。
+
+## Spec
+
+- 按 Trigger，"Hello world!" 逐字出現。每出現一個字，播一聲打字機音效。
+- 游標是 `_`，整句打完後淡出。
+- 字與字之間的延遲要隨機浮動，才不像機器。上下限自己試。
+- 動畫結束後再按：重新打一次。
+- 動畫進行中按：立刻中斷，從頭開始。
+
+## Technique map
+
+| Requirement | Technique | Note |
+|---|---|---|
+| 逐字出現 | 遞迴 `setTimeout` + `Array.shift()` | 沒有專門的 note；timer 的基本用法見 [Particle Cleanup](/wham/particles/cleanup) |
+| 節奏不像機器 | lodash `random(MIN_DELAY, MAX_DELAY)`，每拍重抽 | [Tweaking Dynamics](/wham/particles/tweaks) |
+| 游標淡出 | 只寫 `to` 的 keyframe + `forwards` + `animation-delay` | [Partial Keyframes](/wham/particles/partial-keyframes)、[Particle Generation](/wham/particles/initial-structure) |
+| 重播與中斷 | `clearTimeout` + 清空 heading | 沒有 note 專講 interrupt；unmount 時清 timer 見 [Particle Cleanup](/wham/particles/cleanup) |
+| 打字機音效 | Web Audio 合成（原版是 howler + mp3 sprite） | 課程在 Animation Design bonus module 講音效，目前沒有 note |
+| vanilla 搬到 React | ref 抓 DOM、imperative 更新 | [Particles in React](/wham/particles/particles-in-react) |
+| Reduced motion | Josh 沒有處理（見 Gotchas） | [Motion Accessibility](/wham/particles/motion-accessibility) |
+
+## Build order
+
+<details>
+<summary>Hint 1 — setTimeout, not setInterval</summary>
+
+延遲每一拍都要變，所以選 `setTimeout`。`typeChar` 打完一個字，自己排下一次呼叫，延遲用 `random(MIN_DELAY, MAX_DELAY)` 抽。Trigger 的 click handler 只負責呼叫第一次。
+
+字打完就不要再排 timeout，不然 loop 永遠停不下來。
+
+</details>
+
+<details>
+<summary>Hint 2 — Keep the remaining characters in an array</summary>
+
+最直接的狀態管理：把句子 `split('')` 成陣列，每拍 `shift()` 出第一個字，`append` 到 heading。
+
+另一種寫法是把剩下的字當參數傳給 `typeChar`。Josh 的解答最後選了這個。
+
+</details>
+
+<details>
+<summary>Hint 3 — Erase the old cursor, fade the last one</summary>
+
+游標 `_` 也是 append 上去的。每拍先 `slice(0, -1)` 砍掉上一拍的 `_`，再接上「新字 + `_`」，畫面上永遠只有一個游標。
+
+整句打完時，最後的 `_` 要包進 `<span>`、加上 fade class，才能掛 `fadeToTransparent` keyframe（500ms，延遲 500ms，`forwards`）。
+
+</details>
+
+<details>
+<summary>Hint 4 — Handle interrupts</summary>
+
+中途重按也要正常。按下 Trigger 時做兩件事：
+
+1. 把狀態全部重設，剩下的字重新填滿。
+2. 取消正在排隊的 timeout，讓舊 loop 斷掉，再開一條新的。
+
+</details>
+
+## Why setTimeout, not setInterval
+
+```ts
+function typeChar(element: HTMLElement, remainingChars: string[]) {
+  const nextChar = remainingChars.shift();
+
+  if (!nextChar) {
+    // ...換上會淡出的最後一個游標，然後停
+    return;
+  }
+
+  element.innerText = element.innerText.slice(0, -1);
+  element.append(nextChar + '_');
+
+  const spriteId = random(0, 8).toString();
+  sound.play(spriteId);
+
+  timeoutIdRef.current = window.setTimeout(
+    () => {
+      typeChar(element, remainingChars);
+    },
+    random(MIN_DELAY, MAX_DELAY),
+  );
+}
+```
+
+`setInterval(fn, delay)` 的 `delay` 在建立時就定死。想每拍不同，只能每拍 clear 再重建 interval，那其實就是繞遠路的 `setTimeout`。
+
+遞迴 `setTimeout` 讓「下一拍何時來」由這一拍決定，也順便解決停止條件：`shift()` 回傳 `undefined` 就不排下一拍，loop 自然結束，不需要另一個 flag。
+
+`MIN_DELAY = 50`、`MAX_DELAY = 350` 是 Josh 的值。平均 200ms 一個字，大約 60 WPM（一個 word 算 5 個字元）。`random` 收到兩個整數時回傳整數，毫秒剛好不需要小數。
+
+## The cursor: erase, then append
+
+每一拍 heading 的內容：
+
+| 拍 | `slice(0, -1)` 之後 | `append` 之後 |
+|---|---|---|
+| 1 | 空字串 | `H_` |
+| 2 | `H` | `He_` |
+| 3 | `He` | `Hel_` |
+
+第一拍 heading 是空的，`''.slice(0, -1)` 還是空字串，所以不用特判。
+
+整句打完時換個做法：
+
+```ts
+const blinkingUnderline = document.createElement('span');
+blinkingUnderline.innerText = '_';
+blinkingUnderline.classList.add('wham-typewriter-fade');
+
+element.innerText = element.innerText.slice(0, -1);
+element.append(blinkingUnderline);
+```
+
+`append('_')` 只會產生 text node，而 text node 不能套 CSS animation。所以最後一個游標要包成 `<span>`：
+
+```css
+@keyframes wham-typewriter-fadeToTransparent {
+  to {
+    opacity: 0;
+  }
+}
+.wham-typewriter-fade {
+  animation: wham-typewriter-fadeToTransparent 500ms forwards;
+  animation-delay: 500ms;
+}
+```
+
+- **只寫 `to`**：partial keyframe，起點自動用元素當下的 opacity。
+- **`animation-delay: 500ms`**：游標先停半秒，讓人看到「打完了」，再開始淡出。
+- **`forwards`**：動畫結束後停在 `opacity: 0`，不會跳回可見。
+
+## Interrupts: one timeout id is enough
+
+```ts
+function handleTrigger() {
+  const heading = headingRef.current;
+  if (!heading) return;
+  const { text = '' } = heading.dataset;
+
+  sound.unlock();
+
+  heading.innerText = '';
+  window.clearTimeout(timeoutIdRef.current);
+
+  typeChar(heading, text.split(''));
+}
+```
+
+任何時刻最多只有一個 timeout 在排隊，因為下一拍是在這一拍執行時才排的。所以「取消整段動畫」就等於取消最新的那個 id。舊 loop 的下一拍不會發生，舊的 `remainingChars` 陣列沒人引用，交給 GC。
+
+`heading.innerText = ''` 會把文字和上一輪的 fade `<span>` 一起清掉。結束後重按、中途重按，走的是同一條路。第一次按的時候 `timeoutIdRef.current` 是 `undefined`，`clearTimeout(undefined)` 什麼都不做，也不用特判。
+
+## Why remainingChars is a parameter
+
+Josh 的提示先用 module scope 的陣列，解答改成參數傳遞。差別在於狀態綁在這條呼叫鏈上：兩個元素可以各跑各的 loop，不會搶同一個陣列。句子也從 JS 常數搬進 `data-text` attribute，port 保留了這個做法。
+
+不過 Josh 的 vanilla 版 `timeoutId` 還是 module 層級的一個變數。真的讓兩個元素同時打字，中斷時會互相干擾。React port 的 `timeoutIdRef` 是每個 component instance 各一份，沒有這個問題。
+
+## Direct DOM inside React
+
+Port 沒有把文字放進 `useState`。`<h1>` 在 JSX 裡沒有 children，React 不會 reconcile 它的內容，所以 `typeChar` 可以跟 vanilla 版一樣直接改 DOM：
+
+```tsx
+<h1 ref={headingRef} data-text={TEXT} aria-label={TEXT} className="m-0 text-[3rem] leading-tight font-bold" />
+```
+
+好處是程式碼跟 Josh 的逐行對得上，每拍也不用 re-render。代價是：以後若有人在 `<h1>` 裡加 JSX children，React 和 `typeChar` 會搶同一塊 DOM。
+
+Unmount 時清掉 timer 和 AudioContext：
+
+```ts
+useEffect(() => {
+  return () => {
+    window.clearTimeout(timeoutIdRef.current);
+    sound.close();
+  };
+}, [sound]);
+```
+
+## Sound: synthesized sprites instead of an mp3
+
+Josh 的 `data.js` 描述 mp3 sprite 怎麼切：9 段，每段是 `[offset, duration]`、長 200ms，howler 依 id 播其中一段。這裡沒有 howler 也沒有 mp3，所以每個 id 改存一組合成參數，key 一樣是 `'0'` 到 `'8'`：
+
+```ts
+const SPRITE_MAP: Record<string, KeyClick> = {
+  '0': { clickFrequency: 2200, thunkFrequency: 150, decay: 0.05 },
+  '1': { clickFrequency: 3000, thunkFrequency: 130, decay: 0.045 },
+  // ...共 9 組
+};
+```
+
+每一聲 click 疊兩層：
+
+1. **Clack**：一段白噪音經過 band-pass filter（中心 2000 到 4000Hz），gain 從 1 指數衰減到 0.001，模擬金屬敲擊。
+2. **Thunk**：一個 triangle 波，音高在 `decay` 秒內掉到一半，模擬字桿打到滾筒的悶響。
+
+兩層都在 `decay`（40 到 70ms）內結束，比 `MIN_DELAY` 短，相鄰兩聲幾乎不會疊在一起。
+
+呼叫端跟 Josh 的一樣：
+
+```ts
+const spriteId = random(0, 8).toString();
+sound.play(spriteId);
+```
+
+`sound` 是一個只有 `unlock`、`play`、`close` 三個方法的小物件，外觀模仿 `Howl`。`AudioContext` 在 `unlock()` 裡才建立，而 `unlock()` 在 Trigger 的 click handler 裡呼叫：瀏覽器的 autoplay policy 只允許在使用者手勢中啟動音訊。
+
+## Gotchas
+
+- **音效是替代品。** Josh 用 howler 播 `sounds/typewriter-sprite.mp3`。這個 repo 不加 dependency、不放 binary asset，所以改用 Web Audio 合成。`SPRITE_MAP` 的 key 和 `sound.play(spriteId)` 的呼叫方式都保留，但 value 從 `[offset, duration]` 變成合成參數。音色是合成的 click，不是真的打字機錄音。
+- **`AudioContext` 要在 click 裡建立。** 在 module 載入或 mount 時建立的話，context 會停在 `suspended`，Chrome 會在 console 警告；之後沒有在手勢裡 `resume()`，聲音就出不來。Port 的 `unlock()` 在 click 裡建立 context，每次按 Trigger 也會檢查 `state`，被暫停就 `resume()`。
+- **Josh 的 `typeChar` 內部用 `heading`，沒有用參數 `element`。** 只有一個元素時沒差，但參數化就白做了。Port 一律改用 `element`。
+- **`random(0, 8)` 包含 8。** lodash 的 `random` 兩端都包含，剛好 9 個 sprite。改寫成 `Math.floor(Math.random() * 8)` 會少掉 `'8'`。
+- **`if (!nextChar)` 靠的是 `shift()` 回傳 `undefined`。** 空白 `' '` 是 truthy，不會被誤判成結尾。
+- **`innerText = ''` 會連 fade `<span>` 一起清掉**，所以重播不用另外處理游標。`innerText` 的 getter 會觸發 layout，但每 50ms 以上才讀一次，成本可以忽略。
+- **`<h1>` 不能有 JSX children**，內容由 `typeChar` 直接寫入。oxlint 的 `heading-has-content` 會抱怨空 heading，所以加了 disable comment，並用 `aria-label` 給 screen reader 完整句子，不會念出打到一半的 "Hello wor_"。`aria-label` 是 port 加的，Josh 的版本沒有。
+- **Reduced motion：Josh 的解答沒有處理。** 逐字出現和 opacity 淡出都沒有位移，port 也沒有加 gate，跟原版一致。
+- **Class 名加了前綴。** `.fade` 改成 `.wham-typewriter-fade`，keyframe 改成 `wham-typewriter-fadeToTransparent`，按鈕樣式從全域 `button` selector 改成 `.wham-typewriter-trigger`，避免跟同頁其他 demo 撞名。
+- **「一個 timeout id 就夠」的前提是只有一條 loop。** 如果 extension 加了第二種 timer（例如換行時的鈴聲），要分開記 id，中斷時兩個都清。
+
+## Extensions
+
+- 游標改成會閃爍的直線 `|`，取代底線。
+- 每個字進場時加一點動畫，例如從上方滑下幾 px。
+- 在迴圈裡輪流打出、再刪掉同一句話的幾種版本。
+- 多句話各佔一行，換行時響一聲鈴，像打字機的 carriage return。Josh 附了 `typewriter-bell.mp3`；這個 port 可以用 Web Audio 合成 bell（幾個 sine 波疊加，慢慢衰減）。
+- 讓節奏更像真人。真人打字不是純隨機：QWERTY 上相鄰的鍵延遲短一點，要按 Shift 的字元（像 `!`）延遲長一點。

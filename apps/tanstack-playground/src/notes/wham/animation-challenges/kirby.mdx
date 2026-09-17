@@ -1,0 +1,266 @@
+---
+title: Inhale and Explode (two-stage DOM particles)
+sourceUrl: https://courses.joshwcomeau.com/wham/animation-challenges/01-kirby
+lessonNumber: 'animation-challenges/01-kirby'
+order: 1
+summary: '按住按鈕時粉紅粒子被吸進去，放開時同一批粒子變白、飛回原位、邊閃邊淡出。關鍵是一對 partial keyframe：`suckIn` 只寫 `from`、`explode` 只寫 `to`，兩條都讀同一組 `--angle` / `--distance`，所以加一個 class 就能反轉方向。'
+tags: [particles, partial-keyframes, css-variables, two-stage, polar-coordinates, pop-circle, prefers-reduced-motion]
+---
+
+import { InhaleAndExplode } from './kirby';
+
+## TL;DR
+
+- 兩個階段靠一對 **partial keyframe**：`suckIn` 只寫 `from`（從落點飛回元素原本的中心），`explode` 只寫 `to`（從中心飛到落點）。兩條都讀同一組 `--angle` / `--distance`。放開時替粒子加上 `.kirby-exploded`，同一顆 DOM node 就換成反方向的動畫，每顆都回到自己出生的位置。
+- 極座標直接在 CSS 裡算：`translate(calc(cos(var(--angle)) * var(--distance)), ...)`。JS 只寫兩個 CSS 變數，完全不用 `convertPolarToCartesian`。
+- 生成用一個一直在跑的 `setInterval(fn, 50)` 配 `isRunning` flag。放開時用 `querySelectorAll('.kirby-particle:not(.kirby-exploded)')` 撿回這一輪吸進來的粒子，排除上一輪還在閃的。
+- 按鈕裡的粉紅液體完全不用 JS：`.kirby-trigger:active` 換一組 transition，按住時 `3000ms` 加 `500ms` delay 慢慢 `scaleY(1)`，放開時 `500ms` 快速退掉。
+- 三個門檻用常數命名：`SPAWN_INTERVAL = 50`、`MIN_PARTICLES = 10`、`MAX_PARTICLES = 200`。Pop circle 直徑是 `clampedNormalize(count, 0, MAX_PARTICLES, 0, 400)`，吸越多炸越大。
+
+<DemoFrame title="Hold to inhale, release to explode">
+  <InhaleAndExplode />
+</DemoFrame>
+
+## Spec
+
+- 按住按鈕時，每 50ms 生一顆粉紅粒子。起點是以按鈕中心為準的隨機 angle / distance，然後往中心飛。
+- 放開時，所有吸進來的粒子往外炸，很快回到各自的起點。炸開後粒子變白，一邊閃爍一邊淡出。
+- 兩個階段用同一批粒子。按得短，吸得少，炸得也少。
+- 按鈕裡有一塊粉紅色從底部長高，像被粒子液體填滿。開始前稍微延遲，因為第一批粒子要時間飛到。放開時很快退掉。
+- 放開時有一個 pop circle，跟 Accessories 那課一樣。它的大小取決於吸進來的粒子數。
+- 粒子太少就不爆炸。超過 200 顆時只炸 200 顆，其餘直接從 DOM 移除，避免同時動太多元素。
+- 對 motion-sensitive 的使用者關掉這個動畫。
+
+## Technique map
+
+| 需求 | 技巧 | 筆記 |
+|---|---|---|
+| 隨機起點，分佈成甜甜圈而不是正方形 | angle + distance 極座標 | [Polar Coordinates](/wham/particles/polar-coordinates) |
+| 由 angle 算出 x / y | `cos` / `sin`，這裡改用 CSS 的 `cos()` / `sin()` | [Trigonometry 101](/wham/particles/trigonometry-101) |
+| 同一條 keyframe、每顆粒子不同位移 | keyframe 裡讀 `var(--angle)` / `var(--distance)` | [Dynamic Keyframes](/wham/particles/dynamic-keyframes) |
+| 吸入只寫 `from`、爆炸只寫 `to` | partial keyframes | [Partial Keyframes](/wham/particles/partial-keyframes) |
+| 從中心往外飛，以及把方向反過來 | dispersion | [Dispersion](/wham/particles/dispersion) |
+| 粒子疊在按鈕正中央 | `position: absolute; inset: 0; margin: auto` + `transform` | [Alternative Approach](/wham/particles/alternative-approach) |
+| 吸入加速、爆炸急停 | 自訂 `cubic-bezier` | [Custom Curves](/wham/particles/custom-curves) |
+| size / duration / delay 每顆都不同 | 每個屬性各自亂數 | [Tweaking Dynamics](/wham/particles/tweaks) |
+| 白色粒子邊閃邊淡出 | `sparkle` infinite alternate 疊 `fadeToTransparent` | [Partial Keyframes](/wham/particles/partial-keyframes) |
+| Pop circle | `fromShrunken` + 延遲的 `fadeToTransparent` | [Accessories](/wham/particles/accessories) |
+| Pop circle 大小跟粒子數掛鉤 | `clampedNormalize` | [Utility Functions](/wham/particles/lerp-utils) |
+| 按鈕被液體填滿 | `:active` 切換 transition + `scaleY`（hint 也提到可用 `clip-path`） | [Wipe Effects](/wham/advanced-interactions/wipe-effects) |
+| 超過上限的粒子立刻移除、淡出後清掉 | DOM cleanup，`animationend` 過濾 `animationName` | [Particle Cleanup](/wham/particles/cleanup)、[Ripple Button](/wham/advanced-interactions/ripple-button) |
+| 關掉動畫 | JS 用 `matchMedia` 擋掉生成；CSS 預設不動，`no-preference` 才開 | [Motion Accessibility](/wham/particles/motion-accessibility) |
+| 偵測「按住」 | `pointerdown` / `pointerup` 切 flag + 固定間隔的 `setInterval` | 沒有專門的筆記 |
+
+## Build order
+
+Josh 建議先把三塊機制做出來，細節之後再磨：
+
+1. 按住時生成往內吸的粉紅粒子。
+2. 放開時把吸進來的粒子全部炸開。
+3. 補上配件：按鈕裡的液體填充，還有 pop circle。
+
+<details>
+<summary>Hint 1 — 按住時生成粒子</summary>
+
+在按鈕上聽 `pointerdown` / `pointerup`，只負責切一個 boolean（例如 `isPressing`）。
+
+生成邏輯放在 handler 外面：一個每 50ms 跑一次的 `setInterval`，flag 是 true 就生一顆，否則什麼都不做。
+
+粒子本身沿用 Part 1 的 polar coordinates 發散寫法，只是方向相反，所以 keyframe 的 `from` / `to` 要對調。
+
+</details>
+
+<details>
+<summary>Hint 2 — 放開時炸開</summary>
+
+不必替每顆粒子重新抽 angle / distance。沿用原本那組就好看了：每顆粒子等於「回家」，飛回它出生的地方。
+
+做法是在爆炸時替粒子加一個 class，這個 class 套另一條 keyframe：這次是「飛到」angle / distance，而不是「從」那裡飛來。
+
+</details>
+
+<details>
+<summary>Hint 3 — 按鈕裡的液體</summary>
+
+在按鈕裡加一個 `<span>`。可以用 `clip-path`（Wipe Effects 那課），也可以用 `transform: scaleY()` 從 0 長到 1。
+
+預設狀態完全壓扁（或完全裁掉），按住時才顯示。兩個狀態之間用很長 duration 的 CSS transition 切換：按住時慢慢長，放開時快速縮回。`transform-origin` 要設在底部，才會從下往上長。
+
+</details>
+
+## Why one class flips the direction
+
+兩條 keyframe 讀的是同一組變數，差別只在寫了哪一端：
+
+```css
+@keyframes kirby-suckIn {
+  from {
+    transform: translate(
+      calc(cos(var(--angle)) * var(--distance)),
+      calc(sin(var(--angle)) * var(--distance))
+    );
+  }
+}
+@keyframes kirby-explode {
+  to {
+    transform: translate(
+      calc(cos(var(--angle)) * var(--distance)),
+      calc(sin(var(--angle)) * var(--distance))
+    );
+  }
+}
+```
+
+粒子用 `inset: 0; margin: auto` 疊在按鈕正中央，本身沒有 `transform`。
+
+- `suckIn` 缺 `to`，所以終點是元素自己的值 `none`，也就是中心。配 `forwards`，粒子吸完就停在中心。
+- `explode` 缺 `from`，所以起點是當下的值，也是中心。終點則是當初出生的位置。
+
+`.kirby-exploded` 重新宣告了整個 `animation` shorthand。新的 animation list 裡沒有 `kirby-suckIn`，瀏覽器就取消它、改跑 `kirby-explode`。JS 只要加 class、補幾個隨機變數：
+
+```ts
+particle.classList.add('kirby-exploded');
+particle.style.backgroundColor = 'white';
+particle.style.setProperty('--size', `${random(5, 20)}px`);
+particle.style.setProperty('--explode-duration', `${random(200, 600)}ms`);
+particle.style.setProperty('--explode-delay', `${random(0, 100)}ms`);
+particle.style.setProperty('--twinkle-duration', `${random(100, 300)}ms`);
+particle.style.setProperty('--fade-duration', `${random(800, 2500)}ms`);
+particle.style.setProperty('--fade-delay', `${random(500, 1200)}ms`);
+```
+
+`--angle` / `--distance` 完全沒動，這就是「同一批粒子、原路炸回去」的全部秘密。
+
+## Polar coordinates, resolved in CSS
+
+Part 1 的寫法是 JS 先 `convertPolarToCartesian(angle, distance)`，再把 `--x` / `--y` 丟給 CSS。這裡把最後一步搬進 CSS：
+
+```ts
+particle.style.setProperty('--angle', `${random(0, 360)}deg`);
+particle.style.setProperty('--distance', `${random(50, 200)}px`);
+```
+
+CSS 的 `cos()` / `sin()` 吃帶單位的角度（`deg`），回傳純數字，乘上 `--distance` 這個長度就得到 px。好處是 angle 跟 distance 保持「原始資料」的形狀，兩條 keyframe 都能直接讀；爆炸時不用重算任何東西。
+
+`random(0, 360)` 沒加 `true`，拿到的是整數，跟 Josh 一樣。對角度跟 px 來說整數就夠了。
+
+## Gathering with `:not(.exploded)`
+
+```ts
+const gatheredParticles = [...wrapper.querySelectorAll<HTMLElement>('.kirby-particle:not(.kirby-exploded)')];
+
+if (gatheredParticles.length < MIN_PARTICLES) {
+  return;
+}
+
+gatheredParticles.forEach((particle, index) => {
+  if (index > MAX_PARTICLES) {
+    particle.remove();
+    return;
+  }
+  // ...explode
+});
+```
+
+幾個細節：
+
+- **`:not(.kirby-exploded)` 很重要。** 連按兩次時，上一輪的白色粒子可能還在閃。沒有這個 selector，它們會被重新撿起來、再炸一次。
+- **粒子是 `prepend` 進去的**，所以 document order 是新的在前。`index > MAX_PARTICLES` 刪掉的是最早吸進來的那些。
+- **不到門檻時直接 `return`，粒子沒有被刪。** 它們繼續躲在按鈕後面，而且沒有 `.kirby-exploded`，下一次放開時會一起被撿起來。連續短按幾下，累積夠了還是會炸。
+
+## Why gathered particles vanish into the button
+
+吸到中心的粒子沒有任何淡出動畫，卻看起來「被吃掉」了。原因是繪製順序：
+
+- 粒子 `prepend` 到 wrapper，排在 `<button>` 前面。
+- 粒子是 `position: absolute`，按鈕是 `position: relative`，兩者都是 `z-index: auto`。
+- 同一個 stacking context 裡，positioned 元素照 DOM 順序畫，後面的蓋前面的。
+
+所以按鈕直接蓋住堆在中心的粉紅粒子。Pop circle 也是同樣的道理：它被 `prepend` 到 stage 最前面，畫在粒子跟按鈕底下。
+
+## Twinkle stacked under the fade
+
+```css
+.kirby-particle.kirby-exploded {
+  animation:
+    kirby-explode var(--explode-duration) var(--explode-delay) forwards cubic-bezier(0.22, 0.579, 0.061, 0.996),
+    kirby-sparkle var(--twinkle-duration) ease-in-out infinite alternate,
+    kirby-fadeToTransparent var(--fade-duration) var(--fade-delay) forwards;
+}
+```
+
+- `kirby-sparkle` 在 0.25 到 1 之間來回，週期只有 100 到 300ms，看起來是快速閃爍。
+- `kirby-fadeToTransparent` 只寫 `to { opacity: 0 }`，而且排在 list 最後。它缺的起點會讀到底下 `sparkle` 正在跑的值，所以是「帶著閃爍一起淡出」，不會先跳回 1。
+- `--fade-delay` 是 500 到 1200ms：粒子先閃一陣子才開始淡。每顆的 duration / delay 都不同，整片看起來才不像同一層在動。
+
+`explode` 的曲線 `cubic-bezier(0.22, 0.579, 0.061, 0.996)` 前段極陡、後段幾乎平，粒子一瞬間衝出去再急停。`suckIn` 的 `cubic-bezier(0.726, 0.1, 0.855, 0.526)` 則是開頭慢、越接近中心越快，像被吸塵器拉進去。
+
+## Fill indicator: two transitions, one element
+
+```css
+.kirby-fillIndicator {
+  position: absolute;
+  inset: 0;
+  background: var(--pink);
+  opacity: 0;
+  transition: opacity 500ms;
+}
+.kirby-trigger:active .kirby-fillIndicator {
+  opacity: 1;
+  transition: opacity 3000ms;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .kirby-fillIndicator {
+    opacity: 1;
+    transform: scaleY(0);
+    transform-origin: bottom center;
+    transition: transform 500ms cubic-bezier(0.419, 0.823, 0.431, 1.003);
+  }
+  .kirby-trigger:active .kirby-fillIndicator {
+    transform: scaleY(1);
+    transition: transform 3000ms 500ms cubic-bezier(0.419, 0.823, 0.431, 1.003);
+  }
+}
+```
+
+- **Transition 用的是「要進入的那個狀態」上的設定。** 進入 `:active` 時套 `3000ms 500ms`，慢慢填滿；離開 `:active` 時套 base 的 `500ms`，很快排空。一個元素、兩種速度。
+- **500ms delay 對應粒子的飛行時間。** `suckIn` 是 800ms，第一顆粒子還沒到，液體不該先漲。
+- **Motion-free by default。** Base 規則只做 opacity crossfade；只有 `no-preference` 時才換成 `scaleY`。所以 reduced-motion 的使用者按住按鈕仍然有回饋，只是沒有位移。
+- 按鈕有 `overflow: clip`，液體不會超出圓角。`.kirby-text` 是 `position: relative`，DOM 順序又在液體後面，所以字永遠在液體上面。
+
+## Pop circle scaled by the charge
+
+```ts
+const allPopCircles = [...stage.querySelectorAll('.kirby-popCircle')];
+allPopCircles.forEach((elem) => elem.remove());
+
+const popCircle = document.createElement('div');
+popCircle.classList.add('kirby-popCircle');
+popCircle.style.setProperty(
+  '--size',
+  `${clampedNormalize(gatheredParticles.length, 0, MAX_PARTICLES, 0, 400)}px`,
+);
+stage.prepend(popCircle);
+```
+
+10 顆粒子是 20px，100 顆是 200px，200 顆以上都是 400px。`clampedNormalize` 保證按再久也不會超過 400px。每次爆炸前先刪掉舊的 pop circle，避免連按時一層層疊上去。
+
+## Gotchas
+
+- **門檻跟 spec 差一。** Spec 寫「10 顆或更少不爆」，Josh 的程式是 `length < 10`，剛好 10 顆會爆。Spec 寫「只炸 200 顆」，程式是 `index > 200`，index 0 到 200 共 201 顆會炸。我保留 Josh 的比較式，只把數字抽成 `MIN_PARTICLES` / `MAX_PARTICLES`，常數旁邊的註解有寫實際行為。
+- **放開瞬間還在半路的粒子會瞬移到中心。** `.kirby-exploded` 換掉 animation list，`suckIn` 被取消，`transform` 立刻回到 `none`，然後 `explode` 才從中心出發。最後 800ms 內生成的粒子都是這樣，但爆炸夠快，肉眼很難注意到。
+- **Reduced motion 每次 `pointerdown` 都重新檢查**，所以使用者中途切系統設定也會立刻生效。JS 端擋的是粒子生成；液體的 crossfade 由 CSS 處理。
+- **偏離：用 imperative DOM，不用 React state。** Josh 的解法是直接 `createElement`、`querySelectorAll`、`classList.add`。這個 component 從不 re-render，React 不會 reconcile wrapper，所以在 `useEffect` 裡操作 DOM 是安全的，而且能一行一行對照 Josh 的 control flow。
+- **偏離：`pointerdown` 時 `setPointerCapture`，並且把 `pointercancel` 當成放開。** 原版在滑鼠按住、拖出按鈕外才放開時，`pointerup` 不會發到按鈕上，`isRunning` 卡在 true，粒子無限生成。Capture 之後 `pointerup` 一定回到按鈕。
+- **偏離：按鈕加了 `touch-action: none`、`user-select: none`、`-webkit-touch-callout: none`。** 這個 demo 嵌在可捲動的筆記頁裡；手機上長按容易觸發捲動、選字或長按選單，把按住手勢取消掉。
+- **偏離：爆炸後的粒子會被清掉。** Josh 的解法把淡出的粒子留在 DOM 裡，而 `kirby-sparkle` 是 `infinite`，每按一次就多 200 個永遠在跑的動畫。我在 `animationend` 裡過濾 `animationName === 'kirby-fadeToTransparent'` 才 `remove()`。一定要過濾：`kirby-explode` 比較早結束，也會觸發 `animationend`。
+- **偏離：範圍縮到 demo 內。** Pop circle `prepend` 到 stage，不是 `<body>`；`querySelectorAll` 從 wrapper / stage 開始找；class 跟 keyframe 名稱都加上 `kirby-` 前綴。Josh 原本的 CSS nesting（`.trigger:active &`）攤平成一般 selector。
+- **`checkPrefersReducedMotion` 定義在 `kirby.tsx` 裡。** Josh 的 `utils.js` 有它，`~/utils/canvas` 沒有。`clampedNormalize` 則直接用共用的那支。
+- **CSS `cos()` / `sin()` 需要支援 CSS 三角函數的瀏覽器。** Chrome、Firefox、Safari 從 2023 年起都支援；更舊的瀏覽器要退回 Part 1 的寫法，在 JS 算好 `--x` / `--y`。
+
+## Extensions
+
+- 再多亂數化一些屬性，例如每顆粒子不同顏色或不同形狀。
+- 把 Kirby 這個主題玩得更徹底，讓按鈕更像那顆會吸東西的粉紅球。
+- 做成跟著游標的版本：在頁面任何地方按住，粒子被吸向游標，而不是吸進按鈕。
+- 改用 Canvas 實作，粒子數量可以多十倍。

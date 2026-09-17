@@ -21,6 +21,10 @@ export const topics: Record<string, TopicMeta> = {
     name: 'Motion + React',
     description: 'motion/react library, layout & exit animations',
   },
+  'animation-challenges': {
+    name: 'Animation Challenges',
+    description: 'capstone challenges mixing particles, SVG, interactions & canvas',
+  },
   fundamentals: {
     name: 'Fundamentals',
     description: 'NodeMaterial, TSL nodes, uniforms & attributes, math, textures, node functions',
