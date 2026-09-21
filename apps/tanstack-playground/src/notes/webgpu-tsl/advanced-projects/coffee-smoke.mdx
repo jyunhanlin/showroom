@@ -1,0 +1,404 @@
+---
+title: Coffee Smoke
+sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/coffee-smoke
+lessonNumber: 'coffee-smoke'
+order: 10
+summary: '把 Shaders 章的咖啡煙用 TSL 重做：一片平面，vertex 讓它扭、讓它飄，fragment 讓它淡出。positionNode 從 positionLocal 開始原地改，因為它在 vertex shader 裡本來就是一個變數；positionGeometry 是 attribute，改它會編譯失敗。扭轉、風、煙的花紋都是座標減 time，所以全部往上走。風力乘上 uv().y，杯口不動，愈高飄愈遠。透明度是 noise 乘上四邊用 min() 做的淡出，最後 clamp()；負的 alpha 在 opacityNode 會被 three 擋掉，寫在 outputNode 就不會。'
+tags: [webgpu, tsl, positionNode, opacityNode, positionLocal, positionGeometry, rotate, mx_noise_vec3, mx_noise_float, min, oneMinus, clamp]
+---
+
+import { CoffeeSmokeDemo } from './coffee-smoke';
+
+## TL;DR
+
+- 這一課用 TSL 重做 Three.js Journey 舊的 Coffee Smoke。一片細分過的平面放在杯口，vertex 讓它扭、讓它飄，fragment 決定哪裡看得到。
+- 動頂點就掛 `positionNode`，內容包在 `Fn()` 裡。`Fn(() => …)()` 最後那對括號是呼叫，少了它煙就不見了。
+- `const newPosition = positionLocal` 不是複製。`positionLocal` 在 vertex shader 裡本來就是一個變數，`assign()` / `addAssign()` 直接改它。
+- 換成 `positionGeometry` 會編譯失敗。它是 attribute，也就是 `main()` 的參數，WGSL 不讓你寫。要用它就先 `.toVar()`。
+- Twist：`rotate(newPosition.xz, angle)` 繞 y 軸轉。角度跟著高度和時間變，再過 `sin()` 讓它來回擺。
+- Wind：`mx_noise_vec3()` 一次給三個 noise，剛好當一個方向。乘上 `uv().y.mul(5)`，杯口不動，愈高飄愈遠。
+- 扭轉、風、煙的花紋都是「座標減 `time`」，所以全部往上走。寫成 `add(time)` 就往下。
+- 透明度掛在 `opacityNode`，不包 `Fn()`，因為沒有要 assign 的東西。
+- 煙的濃淡是 `mx_noise_float(uv)`，輪廓是四個邊各一條斜坡、`min()` 取最小。兩張灰階相乘。
+- `min()`、`max()`、`add()`、`mul()` 可以一次吃兩個以上的參數。
+- `clamp(0, 1)` 在 `opacityNode` 上只是保險：three 0.186 輸出前會先 `max(0)`。改寫在 `outputNode` 就沒這層保護，負的 alpha 會把畫面往煙的反色推。
+
+## 一張圖
+
+{/* Keep every <text> on one line: oxfmt splits them across lines and MDX then wraps the content in <p>, which SVG cannot render. The ribbon outlines are computed from the lesson's twist and wind formulas, not traced. */}
+
+<svg viewBox="0 0 880 580" className="mx-auto block w-full max-w-3xl" role="img" aria-label="咖啡煙的資料流：平面的 positionLocal、uv 和 time 進到 GPU；vertex stage 先依高度用 rotate 把頂點繞 y 軸扭轉，再加上 mx_noise_vec3 乘 uv().y 乘 5 的風力位移，得到 positionNode；uv 內插到 fragment stage，mx_noise_float 做出往上流的濃淡，四邊用 min 做淡出，兩者相乘再 clamp 後交給 opacityNode；最後畫出杯口冒出的咖啡色煙。下方說明黃框的 5：uv().y 在杯口是 0、頂端是 1，乘 5 後杯口不動、愈高被推得愈遠">
+  <defs>
+    <marker id="cs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    </marker>
+    <radialGradient id="cs-blob">
+      <stop offset="0" stopColor="#fff" stopOpacity="0.95" />
+      <stop offset="1" stopColor="#fff" stopOpacity="0" />
+    </radialGradient>
+    <linearGradient id="cs-fadeV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stopColor="#0f172a" stopOpacity="1" />
+      <stop offset="0.9" stopColor="#0f172a" stopOpacity="0.1" />
+      <stop offset="1" stopColor="#0f172a" stopOpacity="1" />
+    </linearGradient>
+    <linearGradient id="cs-fadeH" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stopColor="#0f172a" stopOpacity="1" />
+      <stop offset="0.2" stopColor="#0f172a" stopOpacity="0" />
+      <stop offset="0.8" stopColor="#0f172a" stopOpacity="0" />
+      <stop offset="1" stopColor="#0f172a" stopOpacity="1" />
+    </linearGradient>
+    <linearGradient id="cs-smoke" gradientUnits="userSpaceOnUse" x1="0" y1="340" x2="0" y2="160">
+      <stop offset="0" stopColor="#7e583a" stopOpacity="0" />
+      <stop offset="0.1" stopColor="#7e583a" stopOpacity="0.6" />
+      <stop offset="1" stopColor="#7e583a" stopOpacity="0" />
+    </linearGradient>
+    <linearGradient id="cs-gauge" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stopColor="#fffbeb" />
+      <stop offset="1" stopColor="#f59e0b" />
+    </linearGradient>
+  </defs>
+
+  {/* ① what enters the GPU */}
+  <rect x="12" y="12" width="856" height="62" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="24" y="38" fontSize="12" fontWeight="600" fill="#334155">① 輸入</text>
+  <text x="24" y="54" fontSize="9" fill="#64748b">進 GPU 的</text>
+  <rect x="110" y="20" width="190" height="44" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="205" y="37" textAnchor="middle" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">positionLocal</text>
+  <text x="205" y="54" textAnchor="middle" fontSize="8.5" fill="#64748b">每個頂點一份，共 17 × 65 個頂點</text>
+  <rect x="310" y="20" width="160" height="44" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="390" y="37" textAnchor="middle" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">uv()</text>
+  <text x="390" y="54" textAnchor="middle" fontSize="8.5" fill="#64748b">每個頂點一份，0 到 1</text>
+  <rect x="480" y="20" width="156" height="44" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="558" y="37" textAnchor="middle" fontSize="9.5" fontFamily="ui-monospace, monospace" fill="#0f172a">time</text>
+  <text x="558" y="54" textAnchor="middle" fontSize="8.5" fill="#64748b">每幀一個值，整片共用</text>
+  <text x="660" y="38" fontSize="9.5" fill="#334155">一片 PlaneGeometry(1, 1, 16, 64)</text>
+  <text x="660" y="54" fontSize="9" fill="#64748b">底邊貼在杯口，往上高 6</text>
+
+  {/* ② vertex stage */}
+  <text x="12" y="98" fontSize="12" fontWeight="600" fill="#334155">② vertex stage</text>
+  <text x="112" y="98" fontSize="9" fill="#64748b">每個頂點跑一次，決定它移到哪</text>
+  <text x="660" y="98" fontSize="12" fontWeight="600" fill="#334155">④ 畫出來</text>
+  <rect x="12" y="106" width="624" height="146" rx="8" fill="#eff6ff" stroke="#93c5fd" />
+
+  {/* inputs bus, drawn after the lane so its fill does not hide the arrowhead */}
+  <line x1="205" y1="64" x2="205" y2="82" stroke="#64748b" strokeWidth="1.5" />
+  <line x1="390" y1="64" x2="390" y2="82" stroke="#64748b" strokeWidth="1.5" />
+  <line x1="558" y1="64" x2="558" y2="82" stroke="#64748b" strokeWidth="1.5" />
+  <line x1="205" y1="82" x2="558" y2="82" stroke="#64748b" strokeWidth="1.5" />
+  <line x1="258" y1="82" x2="258" y2="114" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#cs-arrow)" />
+
+  <rect x="24" y="116" width="250" height="126" rx="6" fill="#fff" stroke="#93c5fd" />
+  <text x="34" y="132" fontSize="10.5" fontWeight="700" fill="#1e3a8a">Twist</text>
+  <text x="74" y="132" fontSize="8.5" fill="#1d4ed8">繞 y 軸轉，每個高度角度不同</text>
+  <text x="34" y="150" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">const angle = positionLocal.y</text>
+  <text x="46" y="162" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.mul(0.3).sub(time.mul(0.2))</text>
+  <text x="46" y="174" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.sin().mul(3)</text>
+  <text x="34" y="192" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">newPosition.xz.assign(</text>
+  <text x="46" y="204" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">rotate(newPosition.xz, angle))</text>
+  <text x="34" y="224" fontSize="8.5" fill="#64748b">sin()：角度來回擺，不會轉成一根螺絲</text>
+  <text x="34" y="236" fontSize="8.5" fill="#64748b">sub(time)：扭的形狀一路往上爬</text>
+  <line x1="274" y1="179" x2="288" y2="179" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#cs-arrow)" />
+
+  <rect x="290" y="116" width="262" height="126" rx="6" fill="#fff" stroke="#93c5fd" />
+  <text x="300" y="132" fontSize="10.5" fontWeight="700" fill="#1e3a8a">Wind</text>
+  <text x="334" y="132" fontSize="8.5" fill="#1d4ed8">noise 推一把，愈高推愈遠</text>
+  <text x="300" y="150" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">const windCoordinates = newPosition</text>
+  <text x="312" y="162" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.sub(vec3(0, time.mul(0.3), 0)).mul(0.4)</text>
+  <text x="300" y="180" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">const windStrength = uv().y.mul(</text>
+  <rect x="463" y="169" width="18" height="16" rx="3" fill="#fffbeb" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="472" y="181" textAnchor="middle" fontSize="10" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">5</text>
+  <text x="484" y="180" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">)</text>
+  <text x="300" y="198" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">const wind = mx_noise_vec3(windCoordinates)</text>
+  <text x="312" y="210" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.mul(windStrength)</text>
+  <text x="300" y="224" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">newPosition.addAssign(wind)</text>
+  <text x="300" y="237" fontSize="8.5" fontWeight="700" fill="#92400e">黃框：demo 的 slider 改這一個</text>
+  <line x1="552" y1="179" x2="564" y2="179" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#cs-arrow)" />
+
+  <path d="M590.6 214.0 L588.6 210.3 L587.3 206.5 L586.8 202.8 L587.1 199.0 L588.2 195.3 L590.1 191.5 L592.7 187.8 L595.8 184.0 L599.4 180.3 L603.1 176.5 L606.8 172.8 L610.2 169.0 L611.8 165.3 L610.1 161.5 L608.0 157.8 L605.5 154.0 L602.6 150.3 L599.3 146.5 L595.5 142.8 L591.3 139.0 L586.6 135.3 L581.4 131.5 L575.9 127.8 L569.9 124.0 L592.1 124.0 L597.8 127.8 L603.0 131.5 L607.5 135.3 L611.4 139.0 L614.4 142.8 L616.5 146.5 L617.6 150.3 L617.9 154.0 L617.1 157.8 L615.6 161.5 L613.2 165.3 L613.2 169.0 L614.2 172.8 L614.7 176.5 L614.8 180.3 L614.5 184.0 L613.6 187.8 L612.3 191.5 L610.6 195.3 L608.6 199.0 L606.3 202.8 L603.9 206.5 L601.6 210.3 L599.4 214.0 Z" fill="#bfdbfe" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="round" />
+  <line x1="580" y1="215" x2="610" y2="215" stroke="#3b2416" strokeWidth="3" strokeLinecap="round" />
+  <text x="595" y="232" textAnchor="middle" fontSize="8.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#1e3a8a">positionNode</text>
+  <line x1="630" y1="179" x2="658" y2="179" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#cs-arrow)" />
+
+  {/* uv travels from vertex to fragment as a varying */}
+  <line x1="604" y1="252" x2="604" y2="282" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#cs-arrow)" />
+  <text x="596" y="272" textAnchor="end" fontSize="8.5" fill="#64748b">uv() 從頂點內插到每個像素</text>
+
+  {/* ③ fragment stage */}
+  <text x="12" y="276" fontSize="12" fontWeight="600" fill="#334155">③ fragment stage</text>
+  <text x="124" y="276" fontSize="9" fill="#64748b">每個像素跑一次，決定它多不透明</text>
+  <text x="270" y="276" fontSize="9" fill="#94a3b8">（灰階圖：白 = 看得到）</text>
+  <rect x="12" y="284" width="624" height="146" rx="8" fill="#fdf2f8" stroke="#f9a8d4" />
+
+  <rect x="24" y="294" width="186" height="126" rx="6" fill="#fff" stroke="#f9a8d4" />
+  <text x="34" y="310" fontSize="10.5" fontWeight="700" fill="#9d174d">smoke</text>
+  <text x="76" y="310" fontSize="8.5" fill="#be185d">濃淡，往上流</text>
+  <text x="34" y="328" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">const smoke = mx_noise_float(</text>
+  <text x="46" y="340" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">uv()</text>
+  <text x="46" y="352" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.mul(vec2(3, 2))</text>
+  <text x="46" y="364" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.sub(vec2(0, time.mul(0.1))))</text>
+  <text x="34" y="392" fontSize="8.5" fill="#64748b">範圍 -1 到 1</text>
+  <text x="34" y="405" fontSize="8.5" fill="#64748b">負的那一半等於透明</text>
+  <rect x="158" y="374" width="44" height="40" fill="#0f172a" />
+  <ellipse cx="170" cy="386" rx="10" ry="14" fill="url(#cs-blob)" />
+  <ellipse cx="191" cy="401" rx="9" ry="12" fill="url(#cs-blob)" />
+  <ellipse cx="189" cy="380" rx="6" ry="8" fill="url(#cs-blob)" />
+  <ellipse cx="166" cy="407" rx="6" ry="7" fill="url(#cs-blob)" />
+
+  <text x="219" y="362" textAnchor="middle" fontSize="16" fontWeight="700" fill="#9d174d">×</text>
+
+  <rect x="228" y="294" width="238" height="126" rx="6" fill="#fff" stroke="#f9a8d4" />
+  <text x="238" y="310" fontSize="10.5" fontWeight="700" fill="#9d174d">edgeFade</text>
+  <text x="296" y="310" fontSize="8.5" fill="#be185d">四個邊各一條斜坡，取最小</text>
+  <text x="238" y="328" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">const edgeFade = min(</text>
+  <text x="250" y="340" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">uv().y.mul(10),</text>
+  <text x="250" y="352" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">uv().y.oneMinus(),</text>
+  <text x="250" y="364" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">uv().x.mul(5),</text>
+  <text x="250" y="376" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">uv().x.oneMinus().mul(5)</text>
+  <text x="238" y="388" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">)</text>
+  <text x="238" y="404" fontSize="8.5" fill="#64748b">乘的數愈大，淡出帶愈窄：</text>
+  <text x="238" y="416" fontSize="8.5" fill="#64748b">底 1/10、左右各 1/5、頂端整段慢慢淡</text>
+  <rect x="412" y="318" width="44" height="54" fill="#fff" stroke="#f9a8d4" />
+  <rect x="412" y="318" width="44" height="54" fill="url(#cs-fadeV)" />
+  <rect x="412" y="318" width="44" height="54" fill="url(#cs-fadeH)" />
+  <line x1="466" y1="357" x2="478" y2="357" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#cs-arrow)" />
+
+  <rect x="480" y="294" width="146" height="126" rx="6" fill="#fff" stroke="#f9a8d4" />
+  <text x="490" y="310" fontSize="10.5" fontWeight="700" fill="#9d174d">相乘，再夾住</text>
+  <text x="490" y="328" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">mul(smoke, edgeFade)</text>
+  <text x="502" y="340" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">.clamp(0, 1)</text>
+  <rect x="531" y="348" width="44" height="46" fill="#0f172a" />
+  <ellipse cx="543" cy="361" rx="10" ry="14" fill="url(#cs-blob)" />
+  <ellipse cx="564" cy="379" rx="9" ry="12" fill="url(#cs-blob)" />
+  <ellipse cx="562" cy="355" rx="6" ry="8" fill="url(#cs-blob)" />
+  <ellipse cx="539" cy="386" rx="6" ry="7" fill="url(#cs-blob)" />
+  <rect x="531" y="348" width="44" height="46" fill="url(#cs-fadeV)" />
+  <rect x="531" y="348" width="44" height="46" fill="url(#cs-fadeH)" />
+  <text x="553" y="410" textAnchor="middle" fontSize="9" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#9d174d">= opacityNode</text>
+  <line x1="626" y1="357" x2="658" y2="357" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#cs-arrow)" />
+
+  {/* ④ the smoke over the mug */}
+  <rect x="660" y="106" width="208" height="324" rx="8" fill="#faf7f2" stroke="#d6c3ae" />
+  <text x="672" y="124" fontSize="9" fill="#6b4f36">② 定形狀：positionNode</text>
+  <text x="672" y="138" fontSize="9" fill="#6b4f36">③ 定哪裡看得到：opacityNode</text>
+  <text x="672" y="152" fontSize="9" fill="#6b4f36">顏色只是 material 的 color</text>
+  <path d="M755.2 340.0 L751.2 332.5 L748.6 325.0 L747.6 317.5 L748.1 310.0 L750.4 302.5 L754.2 295.0 L759.4 287.5 L765.7 280.0 L772.7 272.5 L780.2 265.0 L787.6 257.5 L794.4 250.0 L797.7 242.5 L794.2 235.0 L790.0 227.5 L785.0 220.0 L779.2 212.5 L772.6 205.0 L765.1 197.5 L756.6 190.0 L747.2 182.5 L736.9 175.0 L725.7 167.5 L713.9 160.0 L758.1 160.0 L769.5 167.5 L780.0 175.0 L789.1 182.5 L796.8 190.0 L802.8 197.5 L807.0 205.0 L809.3 212.5 L809.7 220.0 L808.3 227.5 L805.1 235.0 L800.4 242.5 L800.4 250.0 L802.3 257.5 L803.4 265.0 L803.6 272.5 L802.9 280.0 L801.2 287.5 L798.7 295.0 L795.2 302.5 L791.1 310.0 L786.6 317.5 L781.8 325.0 L777.1 332.5 L772.8 340.0 Z" fill="url(#cs-smoke)" />
+  <path d="M734 342 L738 398 Q764 404 790 398 L794 342 Z" fill="#f4efe8" stroke="#a8a29e" />
+  <path d="M793 356 C814 356, 814 388, 790 388" fill="none" stroke="#d6cfc6" strokeWidth="6" />
+  <ellipse cx="764" cy="342" rx="30" ry="6" fill="#3b2416" stroke="#a8a29e" />
+  <line x1="672" y1="401" x2="856" y2="401" stroke="#8a6a4f" strokeWidth="3" />
+  <text x="764" y="420" textAnchor="middle" fontSize="9" fill="#6b4f36">一片平面，扭、飄、淡出，就是煙</text>
+
+  {/* what the marked 5 does, front view */}
+  <rect x="12" y="446" width="856" height="124" rx="8" fill="#fffbeb" stroke="#f59e0b" />
+  <text x="24" y="468" fontSize="11.5" fontWeight="700" fill="#92400e">黃框的 5 在做什麼（正面看）</text>
+  <text x="24" y="488" fontSize="9.5" fill="#92400e">windStrength = uv().y × 5：杯口那一排是 0，頂端是 5</text>
+  <text x="24" y="506" fontSize="9" fill="#b45309">noise 給每個頂點一個方向，再乘上它：杯口完全不動，愈高被推得愈遠</text>
+  <text x="24" y="522" fontSize="9" fill="#b45309">改成 0 只剩扭轉，是一條在原地轉的緞帶；改大，頂端甩得更開</text>
+  <text x="24" y="542" fontSize="9" fill="#b45309">用 uv().y 不用 positionLocal.y：平面拉多高都是 0 到 1，5 永遠是頂端的倍數</text>
+  <rect x="516" y="462" width="12" height="96" rx="2" fill="url(#cs-gauge)" stroke="#f59e0b" />
+  <text x="534" y="470" fontSize="9" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">× 5</text>
+  <text x="534" y="482" fontSize="8" fontFamily="ui-monospace, monospace" fill="#b45309">uv().y = 1</text>
+  <text x="534" y="548" fontSize="9" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">× 0</text>
+  <text x="534" y="560" fontSize="8" fontFamily="ui-monospace, monospace" fill="#b45309">uv().y = 0</text>
+  <path d="M631.3 558.0 L629.1 554.0 L627.2 550.0 L625.6 546.0 L624.5 542.0 L624.0 538.0 L624.1 534.0 L624.8 530.0 L626.1 526.0 L627.8 522.0 L629.8 518.0 L632.1 514.0 L634.4 510.0 L635.3 506.0 L633.1 502.0 L631.1 498.0 L629.4 494.0 L628.0 490.0 L626.8 486.0 L625.9 482.0 L625.3 478.0 L624.8 474.0 L624.5 470.0 L624.3 466.0 L624.2 462.0 L647.8 462.0 L647.7 466.0 L647.5 470.0 L647.2 474.0 L646.7 478.0 L646.1 482.0 L645.2 486.0 L644.0 490.0 L642.6 494.0 L640.9 498.0 L638.9 502.0 L636.7 506.0 L637.6 510.0 L639.9 514.0 L642.2 518.0 L644.2 522.0 L645.9 526.0 L647.2 530.0 L647.9 534.0 L648.0 538.0 L647.5 542.0 L646.4 546.0 L644.8 550.0 L642.9 554.0 L640.7 558.0 Z" fill="#e7d8c9" stroke="#7e583a" strokeWidth="1" strokeLinejoin="round" />
+  <line x1="620" y1="559" x2="652" y2="559" stroke="#3b2416" strokeWidth="3" strokeLinecap="round" />
+  <text x="660" y="500" fontSize="9" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">mul(0)</text>
+  <text x="660" y="514" fontSize="8.5" fill="#b45309">只剩扭轉</text>
+  <path d="M775.3 558.0 L773.2 554.0 L771.8 550.0 L771.2 546.0 L771.5 542.0 L772.7 538.0 L774.8 534.0 L777.5 530.0 L780.9 526.0 L784.7 522.0 L788.6 518.0 L792.6 514.0 L796.2 510.0 L798.0 506.0 L796.1 502.0 L793.9 498.0 L791.2 494.0 L788.1 490.0 L784.6 486.0 L780.6 482.0 L776.1 478.0 L771.0 474.0 L765.5 470.0 L759.6 466.0 L753.3 462.0 L776.9 462.0 L783.0 466.0 L788.5 470.0 L793.4 474.0 L797.5 478.0 L800.7 482.0 L802.9 486.0 L804.2 490.0 L804.4 494.0 L803.6 498.0 L801.9 502.0 L799.4 506.0 L799.4 510.0 L800.4 514.0 L801.0 518.0 L801.1 522.0 L800.7 526.0 L799.9 530.0 L798.5 534.0 L796.7 538.0 L794.5 542.0 L792.0 546.0 L789.5 550.0 L787.0 554.0 L784.7 558.0 Z" fill="#e7d8c9" stroke="#7e583a" strokeWidth="1" strokeLinejoin="round" />
+  <line x1="764" y1="559" x2="796" y2="559" stroke="#3b2416" strokeWidth="3" strokeLinecap="round" />
+  <text x="814" y="500" fontSize="9" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">mul(5)</text>
+  <text x="814" y="514" fontSize="8.5" fill="#b45309">頂端被推開</text>
+</svg>
+
+平面的每個頂點帶著 `positionLocal` 和 `uv()` 進 GPU，`time` 整片共用一個值。vertex stage 先依高度把頂點繞 y 軸轉一個角度，再加上一段 noise 算出來的位移，形狀就定了。fragment stage 拿內插過來的 `uv()` 算兩張灰階圖，一張是往上流的 noise，一張是四邊淡出的框，相乘後交給 `opacityNode`。咖啡色只是 material 的 `color`，煙的樣子全靠形狀和透明度。黃框的 `5` 是從杯口到頂端的風力倍數，demo 把它做成 slider。
+
+<DemoFrame title="拉黃框那個 5：0 是一條只會原地轉的緞帶，愈大頂端甩得愈開，杯口始終不動">
+  <CoffeeSmokeDemo />
+</DemoFrame>
+
+## 為什麼 positionLocal 可以直接改
+
+課程第一步是確認 `positionNode` 接得上：
+
+```js
+material.positionNode = Fn(() => {
+  const newPosition = positionLocal;
+  newPosition.x.addAssign(2);
+  return newPosition;
+})();
+```
+
+這裡有個矛盾。Node Functions 那課說，要被 `addAssign()` 改的東西得先 `.toVar()`，這裡卻沒有，照樣能動。換成 `positionGeometry` 反而壞掉。
+
+答案在生成的 shader 裡。這是 demo 用 `renderer.debug.getShaderAsync()` 撈出來的 vertex shader 開頭（節錄）：
+
+```wgsl
+fn main( @location( 0 ) position : vec3<f32>,
+	@location( 1 ) uv : vec2<f32> ) -> VaryingsStruct {
+	positionLocal = position;
+	nodeVar0 = ( sin( ( ( positionLocal.y * 0.3 ) - ( render.nodeUniform0 * 0.2 ) ) ) * 3.0 );
+	// …
+	positionLocal.x = nodeVar3[ 0 ];
+	positionLocal.z = nodeVar3[ 1 ];
+	positionLocal = ( positionLocal + ( … mx_perlin_noise_vec3_1( … ) … ) );
+	positionLocal = positionLocal;
+```
+
+- `position` 是 attribute，在 WGSL 裡是 `main()` 的參數。參數不能寫，所以對 `positionGeometry` 做 assign 會編譯失敗。
+- `positionLocal` 是 three 另外宣告的變數，第一行就把 `position` 抄進去。three 自己的 displacement map 也是對它 `addAssign()`（`NodeMaterial.js` 第 788 行）。它本來就是拿來改的。
+- 所以 `const newPosition = positionLocal` 只是替同一個變數多取一個 JavaScript 名字。twist 那一步直接寫進 `positionLocal.x` 和 `positionLocal.z`。
+- 最後那行 `positionLocal = positionLocal;` 是 NodeMaterial 自己加的 `positionLocal.assign(positionNode)`（第 806 行）。`positionNode` 回傳的就是 `positionLocal` 本身，所以自己指派給自己。
+
+改成 `positionGeometry.toVar()`，shader 會多一行 `nodeVar0 = position;`。改的是複本，最後才 `positionLocal = nodeVar0`。兩個版本畫面一樣。
+
+Node Functions 那課沒有說錯。那一課的 `line` 是一條算式，要 `.toVar()` 才變成變數；`positionLocal` 一開始就是變數。
+
+`xz.assign()` 被拆成兩行，是因為 WGSL 不能對 `.xz` 這種多個分量一起賦值。TSL 會自己拆，你不用管。
+
+## 為什麼要包 Fn()，而且要呼叫它
+
+`assign()` 和 `addAssign()` 要掛在 `Fn()` 的 stack 上，這在 Node Functions 講過。這一課多說了一個好處：`Fn()` 的 body 是一個 JavaScript scope，`angle`、`wind` 這些名字不會跟外面撞。
+
+`Fn(() => { … })` 只是宣告，後面那對 `()` 才是呼叫，呼叫完才得到可以掛上去的 node。demo 拿掉那對括號試過：煙整片消失，Console 印出 `THREE.TSL: "Fn()" was declared but not invoked. Try calling it like "Fn()( ...params )".`
+
+透明度那一段沒有包 `Fn()`，因為它沒有要 assign 的東西，只是把 node 串起來。代價是少了那層 scope，變數名得自己顧好，別叫 `color`、`time` 這種 TSL 已經用掉的名字。
+
+## 為什麼扭轉要過 sin()
+
+```js
+const angle = positionLocal.y
+  .mul(0.3)
+  .sub(time.mul(0.2))
+  .sin()
+  .mul(3);
+newPosition.xz.assign(rotate(newPosition.xz, angle));
+```
+
+繞 y 軸轉，動到的只有 x 和 z。`rotate()` 收 vec2 就是 2D 旋轉，`xz.assign()` 直接寫回那兩格，y 不動。Math 那課用 `vec3(newXZ.x, positionLocal.y, newXZ.y)` 手動重組，這裡省掉了。
+
+角度一步步加上去：
+
+- 只有 `positionLocal.y`：愈高轉愈多，整條煙是一根規規矩矩的螺絲。
+- 減掉 `time`：螺絲開始動，下一節講為什麼是減。
+- 過 `sin()`：角度在 -1 到 1 之間來回。煙一段往這邊扭、一段往那邊扭，不再像螺絲。
+- `mul(3)`：擺幅放大到正負 3 弧度，快轉半圈。
+- `mul(0.3)`：平面高 6，`0.3 × 6 = 1.8`，整條煙只走不到三分之一個 sin 週期。這個數愈大，扭來扭去的段數愈多。
+
+串太長不好讀就斷行。這還是 JavaScript，斷在哪都行。
+
+## 為什麼三個地方都減 time
+
+```js
+positionLocal.y.mul(0.3).sub(time.mul(0.2));              // Twist
+newPosition.sub(vec3(0, time.mul(0.3), 0)).mul(0.4);      // Wind
+uv().mul(vec2(3, 2)).sub(vec2(0, time.mul(0.1)));         // Smoke
+```
+
+三個花紋都是「拿座標去查一個函式」。把查的位置改成 `y - t`：t 秒後，原本在 `y` 的樣子出現在 `y + t`。所以座標減 `time`，花紋往上走；加 `time`，往下走。
+
+課程第一次寫的是 `add(time)`，一跑發現煙往下扭，才改成 `sub()`，原因就是這個。煙是往上冒的，三個地方都減。
+
+減在哪一軸，就往哪一軸走。風和煙都用 `vec3(0, t, 0)` / `vec2(0, t)` 只減 y，花紋只會上升，不會橫著漂。
+
+速度要把兩個係數一起看。扭轉是 `0.3y − 0.2t`，花紋每秒爬 0.2 ÷ 0.3，約 0.67。風是先減再乘 0.4，每秒爬 0.3。煙的濃淡在 uv 裡每秒爬 0.1 ÷ 2 = 0.05，平面高 6，換算也是每秒 0.3。風和濃淡一樣快，扭轉快一倍多。
+
+## 為什麼風力要乘 uv().y
+
+```js
+const windCoordinates = newPosition.sub(vec3(0, time.mul(0.3), 0)).mul(0.4);
+const windStrength = uv().y.mul(5);
+const wind = mx_noise_vec3(windCoordinates).mul(windStrength);
+newPosition.addAssign(wind);
+```
+
+`mx_noise_vec3()` 回傳 vec3，三個分量各是一個 Perlin noise，湊起來就是一個方向。相鄰的頂點拿到相近的方向，所以整條煙是順順地彎，不會碎掉。
+
+`mul(0.4)` 把座標縮小。同一段高度裡 noise 變得比較慢，煙彎的次數變少，每一彎拉得比較長。推多遠不歸它管，那是下一行的事。課程習慣用乘的，`div(2.5)` 效果一樣。
+
+`windStrength` 決定每個頂點被推多遠。平面的 `uv().y` 在杯口是 0、頂端是 1，乘 5 之後杯口不動，頂端被推最遠。所以煙像從杯子裡冒出來，不是整條飄在空中。
+
+改用 `positionLocal.y` 也能做到，但它在這裡是 0 到 6，跟著 geometry 的尺寸走。平面拉高，風力也跟著變。`uv().y` 不管平面多高都是 0 到 1，`5` 永遠就是頂端的倍數。
+
+`windCoordinates` 讀的是已經扭過的 `newPosition`。上一節說過它們是同一個變數，twist 寫進去的結果，wind 這裡讀得到。
+
+## 為什麼透明度是兩張圖相乘
+
+```js
+const smoke = mx_noise_float(
+  uv()
+    .mul(vec2(3, 2))
+    .sub(vec2(0, time.mul(0.1)))
+);
+const edgeFade = min(
+  uv().y.mul(10),           // Bottom
+  uv().y.oneMinus(),        // Top
+  uv().x.mul(5),            // Left
+  uv().x.oneMinus().mul(5)  // Right
+);
+material.opacityNode = mul(smoke, edgeFade).clamp(0, 1);
+```
+
+`smoke` 管煙裡面的濃淡。平面寬 1.5、高 6，uv 卻都是 0 到 1。`vec2(3, 2)` 放到平面上，橫向每單位 2 格、縱向每單位 1/3 格，花紋被拉成一條條直的，像往上飄的煙絲。
+
+`edgeFade` 管煙的輪廓。每個邊一條斜坡，從邊上的 0 爬到 1：
+
+- `uv().y.mul(10)`：底邊。高度走到 1/10 就爬到 1，所以底部淡出得很快。
+- `uv().y.oneMinus()`：頂邊。沒乘東西，一路從底淡到頂。`oneMinus()` 就是 `float(1).sub(x)`，但少打一個 `float()`。
+- `uv().x.mul(5)` 和 `uv().x.oneMinus().mul(5)`：左右各 1/5 寬。
+
+`min()` 取四條裡最小的，意思是「離哪個邊最近，就聽那個邊的」。四條斜坡在角落交會，會留下一道斜的接縫，像畫框的斜角。單獨看 `edgeFade` 很明顯，乘上 `smoke` 就看不出來。
+
+`mul(smoke, edgeFade)` 是兩張灰階相乘，兩邊都亮的地方才看得到煙。
+
+`opacityNode` 在 NodeMaterial 裡是 `diffuseColor.a.mul(opacityNode)`（第 866 行），乘在 material 原本的 `opacity` 上，所以一定要開 `transparent`。給 `0.5` 這種純數字也行，three 會先包一層 `float()`（第 865 行）。
+
+## 為什麼 clamp(0, 1) 在這裡看起來沒差
+
+`mx_noise_float()` 的範圍是 -1 到 1，相乘之後大約一半是負的。課程加 `clamp(0, 1)` 當保險。
+
+但在 three 0.186 拿掉它，畫面一模一樣。原因在 `NodeMaterial.js` 第 537 行：
+
+```js
+// force unsigned floats - useful for RenderTargets
+const basicOutput = vec4( outgoingLightNode, diffuseColor.a ).max( 0 );
+```
+
+輸出前 three 把顏色和 alpha 一起 `max(0)`，負的 alpha 被壓成 0。demo 撈出來的 fragment shader 最後就是 `max( vec4<f32>( outgoingLight, DiffuseColor.w ), vec4<f32>( 0.0 ) )`。
+
+這層保護只在正常流程裡。課程提過 alpha 也能寫在 `outputNode` 的第四格，但 `outputNode` 會整個取代這個結果。demo 換成白煙、中灰背景試過：
+
+```js
+material.outputNode = vec4(1, 1, 1, mul(smoke, edgeFade));
+```
+
+煙裡出現一條條黑色的折痕。加回 `.clamp(0, 1)` 就乾淨了。
+
+負的 alpha 為什麼是黑的：混合公式是 `src × a + dst × (1 − a)`。`a` 是負的，就是把背景放大，再減掉一點煙的顏色，畫面被往煙的反方向推。白煙的反方向就是暗。輸出要轉 sRGB 時（預設就是），WebGPURenderer 先畫進 half float 的 buffer，負數不會被硬體擋掉，最後就留在畫面上。
+
+## 用例
+
+- **從某處冒出來的東西**（煙、蒸氣、火焰、水草）：位移乘上 `uv().y`，根部固定，尾巴自由。
+- **整條在原地扭**：`newPosition.xz.assign(rotate(newPosition.xz, angle))`，角度跟著高度變。
+- **自然的擺動**：角度或位移過 `sin()` 或 noise，不要線性一路加上去。
+- **花紋往某個方向流**：座標減 `time`，減哪一軸就往哪一軸的正方向走。
+- **每個頂點一個隨機方向**：`mx_noise_vec3(position)`，相鄰的頂點方向相近。
+- **四邊淡出的平面**（煙、光束、雲、光暈）：`min()` 四條斜坡，乘的數決定淡出帶多寬。
+- **兩個條件都成立才顯示**：兩張灰階 `mul()`。
+- **只想改透明度**：用 `opacityNode`，比塞進 `outputNode` 的第四格好讀，負數也有人擋。
+- **看頂點怎麼動**：material 先開 `wireframe`，形狀對了再關掉調透明度。課程就是這樣做的。
+
+## Gotchas
+
+- **`positionGeometry` 不能直接 assign**。WGSL 回 `cannot assign to value of type 'f32'`，還附一句 `parameters are immutable`。煙整片消失，杯子照畫。要用它就 `.toVar()`。這是在 demo 裡實際換過看到的。
+- **`const newPosition = positionLocal` 不是複本**。assign 之後再讀 `positionLocal`，拿到的是改過的值。要原始位置就讀 `positionGeometry`，attribute 不會被改。
+- **`Fn(() => …)` 要呼叫**。少了結尾的 `()`，Console 印 `THREE.TSL: "Fn()" was declared but not invoked.`，煙消失。
+- **`add(time)` 是往下**。要往上就 `sub()`。
+- **`opacityNode` 要配 `transparent`**。R3F 寫成 `<meshBasicNodeMaterial transparent />`。
+- **扭過去會露出背面**。demo 的 material 設了 `side={DoubleSide}`，不然轉到背面那段會不見。
+- **`depthWrite={false}`**。原版 Coffee Smoke 課程說，從某些角度看，平面會寫進深度、擋住自己後面的部分。demo 照做。在 demo 的角度拿掉它看不出差別，所以這條的依據是課程，不是實測。
+- **`clamp()` 在 `opacityNode` 上是保險，在 `outputNode` 上是必要**。three 0.186 只在正常流程 `max(0)`。拿掉 clamp 又改用 `outputNode`，白煙在中灰背景上出現黑色折痕，是實際跑過的。
+- **`min()` 會在角落留下斜接縫**。單獨預覽 `edgeFade` 時不是 bug，乘上 `smoke` 就不見了。
+- **noise 很貴**。vertex 這邊只有 17 × 65 個頂點，fragment 那邊是每個像素一次 Perlin noise。課程建議之後改用 noise 貼圖。
+- **R3F 寫法**：整張 graph 在 module scope 建一次，課程的 `5` 換成 `uniform()`，拉 slider 只改數字，不重編 shader。
+- **R3F 的 `<Canvas>` 預設開 ACES tone mapping**，`0x7e583a` 會被洗淡。demo 加了 `flat`，關掉 tone mapping。
+- **改 demo 存檔（HMR）之後 slider 可能沒反應**，重新整理就好。推測是 module 重跑建了新的 uniform，material 卻還拿著舊的 graph（原因未查證）。只影響開發時。
