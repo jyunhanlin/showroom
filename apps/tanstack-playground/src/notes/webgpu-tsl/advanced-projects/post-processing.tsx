@@ -27,14 +27,22 @@ import {
   viewportUV,
 } from 'three/tsl';
 import {
+  ACESFilmicToneMapping,
+  AgXToneMapping,
   CineonToneMapping,
+  LinearToneMapping,
+  NeutralToneMapping,
+  NoToneMapping,
+  ReinhardToneMapping,
   RenderPipeline,
   TempNode,
   type Node,
   type TextureNode,
+  type ToneMapping,
   type WebGPURenderer,
 } from 'three/webgpu';
 import { WebGPUCanvas } from '~/components/webgpu-canvas';
+import { attachInspector } from '~/components/webgpu-inspector';
 
 // ── voronoi(): stand-in for the lesson's voronoi.js ─────────────────────────
 // The lesson ships its own voronoi.js as a download; this is a separate implementation with the
@@ -147,11 +155,25 @@ const _color = uniform(color(0xff824d));
 const colorStrength = uniform(3);
 const offsetStrength = uniform(0.05);
 
+// The lesson's tone mapping picker. It settles on Cineon at 1.5.
+const toneMappingList: Record<string, ToneMapping> = {
+  None: NoToneMapping,
+  Linear: LinearToneMapping,
+  Reinhard: ReinhardToneMapping,
+  Cineon: CineonToneMapping,
+  ACESFilmic: ACESFilmicToneMapping,
+  AgX: AgXToneMapping,
+  Neutral: NeutralToneMapping,
+};
+const toneMapping = { value: 'Cineon' };
+
 /**
  * Replaces R3F's render call with the lesson's RenderPipeline.
  * useFrame with priority 1 tells R3F to stop calling gl.render() itself.
+ * Also attaches the Inspector with the lesson's Renderer and Post-processing parameters; it lives
+ * in this effect because the bloom tweaks need bloomPass.
  */
-function ShatterPipeline() {
+function ShatterPipeline({ onProgress }: { onProgress: (value: number) => void }) {
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
   const camera = useThree((state) => state.camera);
@@ -197,10 +219,44 @@ function ShatterPipeline() {
     renderPipeline.outputNode = fxaa(renderPipeline.outputNode);
 
     pipelineRef.current = renderPipeline;
+
+    const detachInspector = attachInspector(renderer, (inspector) => {
+      // Renderer. RenderPipeline compares renderer.toneMapping on every render and rebuilds its
+      // output when it changes, so onChange only has to set it.
+      const rendererGui = inspector.createParameters('Renderer');
+      rendererGui
+        .add(toneMapping, 'value', Object.keys(toneMappingList))
+        .name('toneMapping')
+        .onChange((value: string) => (renderer.toneMapping = toneMappingList[value]!));
+      rendererGui.add(renderer, 'toneMappingExposure', 1, 10, 0.01);
+
+      // Post-processing
+      const postProcessingGui = inspector.createParameters('Post-processing');
+
+      const bloomGui = postProcessingGui.addFolder('bloom');
+      bloomGui.add(bloomPass.threshold, 'value', 0, 2, 0.01).name('threshold');
+      bloomGui.add(bloomPass.strength, 'value', 0, 2, 0.01).name('strength');
+
+      const shatterGui = postProcessingGui.addFolder('shatter');
+      shatterGui.add(subdivision, 'value', 1, 10, 1).name('subdivision');
+      shatterGui.add(seed, 'value', 0, 100, 1).name('seed');
+      shatterGui
+        .add(progress, 'value', 0, 1, 0.001)
+        .name('progress')
+        .onChange((value: number) => onProgress(value));
+      shatterGui.add(thickness, 'value', 0, 0.05, 0.0001).name('thickness');
+      shatterGui.addColor(_color, 'value').name('color');
+      shatterGui.add(colorStrength, 'value', 1, 10, 0.01).name('colorStrength');
+      shatterGui.add(offsetStrength, 'value', 0, 0.2, 0.0001).name('offsetStrength');
+    });
+
     return () => {
+      detachInspector();
       pipelineRef.current = null;
       renderPipeline.dispose();
     };
+    // onProgress is a React state setter, stable across renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gl, scene, camera]);
 
   useFrame(() => pipelineRef.current?.render(), 1);
@@ -232,17 +288,19 @@ function Props() {
 }
 
 export function PostProcessingDemo() {
-  const [progressValue, setProgressValue] = useState(0.5);
+  const [progressValue, setProgressValue] = useState(progress.value);
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-3">
-      <div className="h-80 w-full overflow-hidden rounded-md">
+      {/* Tall: the Inspector's full panel is 350px and sits at the bottom of this box. The box is
+          taller than wide, so the camera sits further back to keep the props in frame. */}
+      <div className="h-[40rem] w-full overflow-hidden rounded-md">
         {/* The lesson settles on Cineon at 1.5. R3F sets ACES only on first configure, so this
             sticks, and RenderPipeline picks the change up on its next render. */}
         <WebGPUCanvas
-          camera={{ position: [0, 1.6, 6], fov: 45 }}
+          camera={{ position: [0, 2.4, 9.5], fov: 45 }}
           onCreated={({ gl }) => {
-            gl.toneMapping = CineonToneMapping;
+            gl.toneMapping = toneMappingList[toneMapping.value]!;
             gl.toneMappingExposure = 1.5;
           }}
         >
@@ -250,7 +308,7 @@ export function PostProcessingDemo() {
           <ambientLight intensity={0.25} />
           <directionalLight position={[3, 5, 4]} intensity={1.1} />
           <Props />
-          <ShatterPipeline />
+          <ShatterPipeline onProgress={setProgressValue} />
         </WebGPUCanvas>
       </div>
       <pre className="w-full overflow-x-auto rounded bg-slate-100 p-2 font-mono text-xs">
@@ -260,24 +318,10 @@ const cracks = voronoiColor.g.step(
 // Offset UV: each piece slides further
 const offset = vec2(angle.cos(), angle.sin()).mul(progress)`}
       </pre>
-      <label className="flex items-center gap-2 font-mono text-sm">
-        <span className="w-40 whitespace-nowrap font-bold">progress = {progressValue.toFixed(2)}</span>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={progressValue}
-          onChange={(e) => {
-            const next = Number(e.target.value);
-            setProgressValue(next);
-            progress.value = next;
-          }}
-        />
-      </label>
       <p className="text-center text-xs text-slate-500">
-        0 是原本的畫面。往右拉，橘色的裂縫從 noise 低的地方先長出來，每一片也往自己的方向偏移。裂縫亮度超過 1，後面的
-        bloom 讓它發光。
+        右上角 Inspector 的 Parameters 有課程的兩組參數：Renderer 換 tone mapping，Post-processing 調 bloom 和
+        shatter。progress 0 是原本的畫面。往右拉，橘色的裂縫從 noise
+        低的地方先長出來，每一片也往自己的方向偏移。裂縫亮度超過 1，後面的 bloom 讓它發光。
       </p>
     </div>
   );

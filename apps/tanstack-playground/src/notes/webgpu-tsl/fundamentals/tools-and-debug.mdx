@@ -277,7 +277,7 @@ renderer.inspector = new Inspector();
 const fade = uv().sub(0.5).length().smoothstep(0.5, 0.2).toVar('fade').debug().toInspector('FloorFade');
 ```
 
-r185 的 `toInspector()` 有點脾氣：它會被鏈上其他 node 影響，把前面的 `toVar()` 和 `debug()` 拿掉，預覽有時就消失了。跟 `debug()` 一樣，node 沒被用到（例如把 `material.opacityNode = fade` 註解掉）預覽也會不見。
+`toInspector()` 前面的 `toVar()` 不能拿掉，拿掉預覽就消失了。原因在 three 0.186 的原始碼裡查得到：`smoothstep()` 這類 math node 回傳 intent 變數，它 build 時會跳過登記 `toInspector()` 的那一段，所以 Viewer 什麼都收不到，也不會警告。`toVar()` 造出真正的變數，就會照正常流程登記。細節和實測在 Patterns 那課。跟 `debug()` 一樣，node 沒被用到（例如把 `material.opacityNode = fade` 註解掉）預覽也會不見。
 
 預覽可以放大，但要縮放自如還是老方法快：把 material 貼到一顆 box 上，配 `OrbitControls` 自己轉。
 
@@ -327,9 +327,9 @@ gui.add(material, 'wireframe');
 - **`Unable to inspect node outside of frame scope` 不是錯誤**。前面補一個 `await renderer.init()` 就沒了；別為了消警告把它塞進 animation loop，那會每幀印一次。
 - **`getShaderAsync()` 綁 scene + camera + object 三者**。換 camera、加一盞燈，編出來的 program 就不一樣，要重撈。
 - **`.debug()` 和 `.toInspector()` 的 node 沒被用到就完全沒有輸出**。沒編譯的東西不存在。看不到先檢查它有沒有真的掛在某個 material 上。
-- **`toInspector()` 在 r185 會被鄰居影響**。拿掉 `toVar()` / `debug()` 預覽可能就不見了。這是版本問題，不是你寫錯。
+- **`toInspector()` 直接接在 math node 後面會被吞掉**。math node 回傳 intent 變數，build 時跳過 `toInspector()` 的登記。先 `toVar('名字')` 再 `toInspector()`。（three 0.186 原始碼 + Patterns demo 實測）
 - **Inspector 和 TSLGraphEditor 都很新**。API 每個版本都在動，跟著 three.js 版本走。
 - **Inspector 有些功能只有 WebGPU backend 有**。要比較就用 Settings 的 Force WebGL 切，不要為了它改 renderer 的 `forceWebGL` 再重載。
 - **`forceWebGL: true` 只是換語言看**。debug 完記得改回 `false`，否則整個專案都在跑 WebGL。
 - **R3F 寫法**：renderer 從 `useThree((state) => state.gl)` 拿，型別是 `WebGLRenderer`，要 cast 成 `WebGPURenderer` 才看得到 `.debug.getShaderAsync`。撈 program 的元件必須放在 `<Canvas>` 裡面。換 node 鏈時 material 要 `key` remount（不同 node 鏈 = 不同 shader），撈 program 的元件也給同一個 `key`，讓 effect 重新跑一次，否則拿到的還是舊 program。
-- **R3F 頁面裡不建議直接掛 Inspector**。它會把面板 append 到 `renderer.domElement.parentElement`，在 R3F 就是 `<Canvas>` 外層那個 div，整片蓋在 demo 上；沒有 parent 時它還會 observe `document.body` 等著掛。要用就開獨立頁面。
+- **R3F 頁面可以掛 Inspector，但要照幾個規矩**。three 0.186 的 Inspector 根節點是 `position: absolute` + `overflow: hidden`，append 到 `renderer.domElement.parentElement`，所以只蓋住 `<Canvas>` 那一格，不蓋整頁。完整面板高 350px，demo 框要夠高。Inspector 要在 `useEffect` 裡動態 `import()`，否則 SSR 讀 `localStorage` 會讓整站 500；卸載時換回 `new InspectorBase()`。實作見 Patterns 那課的 demo。

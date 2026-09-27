@@ -4,7 +4,7 @@ sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/post-processing
 lessonNumber: 'post-processing'
 order: 11
 summary: 'WebGPURenderer 的後製改由 RenderPipeline 負責：pass() 把場景畫進貼圖，之後每一步都是「吃上一個 outputNode，吐出新的」。內建的 bloom、chromatic aberration、sobel、FXAA 都是一個 node。MRT 讓一次 render 同時寫出顏色和法線。FXAA 要吃 tone mapping 之後的顏色，所以關掉 outputColorTransform，自己在前面放 renderOutput()。最後寫一個 TempNode 子類別 ShatterNode：voronoi 切片、step() 畫裂縫、cell ID 乘黃金角決定每片的偏移方向，progress 一個值同時推動兩件事。要讀別的像素才需要 convertToTexture()。'
-tags: [webgpu, tsl, RenderPipeline, pass, mrt, bloom, fxaa, renderOutput, convertToTexture, TempNode, voronoi, post-processing]
+tags: [webgpu, tsl, RenderPipeline, pass, mrt, bloom, fxaa, renderOutput, convertToTexture, TempNode, voronoi, post-processing, inspector]
 ---
 
 import { PostProcessingDemo } from './post-processing';
@@ -262,9 +262,9 @@ import { PostProcessingDemo } from './post-processing';
 </svg>
 
 
-`pass()` 先把場景畫進一張貼圖，之後的每一格都拿上一格的 `outputNode` 當輸入，吐出新的 `outputNode`。Shatter 在每個像素上做四件事：找出自己在哪一片、離邊多近、這片往哪偏，最後在橘色和偏移後的畫面之間二選一。Bloom 放在 shatter 後面，亮度超過 1 的裂縫才會發光。Tone mapping 和 sRGB 手動放在 FXAA 前面，讓 FXAA 看到的是最後上螢幕的顏色。黃框的 `progress` 同時決定裂縫多粗、碎片滑多遠，demo 把它做成 slider。
+`pass()` 先把場景畫進一張貼圖，之後的每一格都拿上一格的 `outputNode` 當輸入，吐出新的 `outputNode`。Shatter 在每個像素上做四件事：找出自己在哪一片、離邊多近、這片往哪偏，最後在橘色和偏移後的畫面之間二選一。Bloom 放在 shatter 後面，亮度超過 1 的裂縫才會發光。Tone mapping 和 sRGB 手動放在 FXAA 前面，讓 FXAA 看到的是最後上螢幕的顏色。黃框的 `progress` 同時決定裂縫多粗、碎片滑多遠。demo 跟課程一樣把參數放進 Inspector：Renderer 換 tone mapping 和曝光，Post-processing 調 bloom 和 shatter 的全部參數，progress 就在 shatter 那一組。
 
-<DemoFrame title="拉黃框的 progress：0 是原圖，往右裂縫變粗、每片沿自己的方向滑開，裂縫被 bloom 暈開">
+<DemoFrame title="右上角 Inspector 拉 shatter 的 progress：0 是原圖，往右裂縫變粗、每片沿自己的方向滑開，裂縫被 bloom 暈開">
   <PostProcessingDemo />
 </DemoFrame>
 
@@ -519,7 +519,8 @@ export const shatter = (
 - **用顏色 debug 會被 tone mapping 騙**。課程把 cell ID 直接輸出成顏色，ID 大於 1 的片理應全白，卻還分得出深淺，因為 tone mapping 把超過 1 的值壓回來了。要看真實數值，先關 tone mapping。
 - **`_color` 不叫 `color`**。`color` 是 TSL 的 node，同一個 scope 會撞名。課程用底線，demo 照用，所以加了一行 oxlint 例外。
 - **R3F 寫法**：`useFrame(() => renderPipeline.render(), 1)`。priority 大於 0，R3F 就不再自己呼叫 `gl.render()`，由 pipeline 接手。
-- **R3F 的 tone mapping 設在 `onCreated`**。R3F 只在第一次 configure 設 ACES，之後改成 Cineon 不會被蓋回去。`RenderPipeline` 每一幀比對 renderer 的 `toneMapping`，變了就重建輸出。
+- **R3F 的 tone mapping 設在 `onCreated`**。R3F 只在第一次 configure 設 ACES，之後改成 Cineon 不會被蓋回去。`RenderPipeline` 每一幀比對 renderer 的 `toneMapping`，變了就重建輸出，所以 Inspector 的 `toneMapping` 選單在 `onChange` 裡直接改 `renderer.toneMapping` 就生效（demo 切成 None 實測過）。
+- **Inspector 掛在建 pipeline 的同一個 effect 裡**。bloom 的兩個參數要 `bloomPass`，而 `bloomPass` 只在這個 effect 裡。掛載用 `attachInspector()`，它處理動態 import、SSR 和卸載，細節在 Patterns 那課的 Gotchas。
 - **Demo 沒關 MSAA**。課程為了展示 FXAA，把 `antialias` 設成 `false`。Demo 用 R3F 的預設 `antialias: true`，`pass()` 的 render target 沿用 renderer 的 samples（`PassNode.js` 第 800 行），所以 MSAA 和 FXAA 都在。
 - **Demo 的場景換掉了**。課程是一個鐵砧加天空，demo 換成幾個簡單的幾何體，燈光調暗，讓 bloom 主要打在裂縫上。Pipeline 只接課程最後的組合：`pass` → shatter → bloom → `renderOutput` → `fxaa`，MRT 和 sobel 沒接。
-- **Pipeline 在同一個 `useEffect` 裡建立、也在它的 cleanup 裡 `dispose()`**，存進 ref 給 `useFrame` 用。分成 `useMemo` 建、另一個 effect 丟，StrictMode 跑「掛上、卸下、再掛上」時，`useFrame` 會拿到已經丟掉的 pipeline。拉 slider 只改 uniform 的 `.value`，不重建。
+- **Pipeline 在同一個 `useEffect` 裡建立、也在它的 cleanup 裡 `dispose()`**，存進 ref 給 `useFrame` 用。分成 `useMemo` 建、另一個 effect 丟，StrictMode 跑「掛上、卸下、再掛上」時，`useFrame` 會拿到已經丟掉的 pipeline。在 Inspector 拉參數只改 uniform 的 `.value`，不重建。

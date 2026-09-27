@@ -4,7 +4,7 @@ sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/patterns
 lessonNumber: 'patterns'
 order: 9
 summary: '十個 pattern 全部只寫 fragment、全部從 uv() 起頭，練的是把 node 串成一條鏈。fract() 讓值重複，floor() 切出格子；hash() 只吃一個數，丟 vec2 進去只會用到 x。noise 多給一維 time 就會變形，mx_noise_float() 的範圍是 -1 到 1。最後的水池用三條鏈分別做出水底、泡沫、睡蓮，再照 mask 用兩次 mix() 疊起來；只有水底過 parallaxUV()，所以平面看起來有深度。parallaxUV() 回傳的是 vec3，要當 vec2 用得自己取 .xy。'
-tags: [webgpu, tsl, uv, fract, floor, checker, remap, hash, rand, mx_noise_float, mx_worley_noise_float, parallaxUV, mix]
+tags: [webgpu, tsl, uv, fract, floor, checker, remap, hash, rand, mx_noise_float, mx_worley_noise_float, parallaxUV, mix, inspector, toInspector]
 ---
 
 import { PatternsDemo } from './patterns';
@@ -29,6 +29,8 @@ import { PatternsDemo } from './patterns';
 - mask 的套路：noise → `abs()` / `step()` → `oneMinus()` 讓要的地方是 1 → `mix(底, 上層, mask)`。
 - `parallaxUV(uv(), 0.5)` 讓平面上的圖看起來在更深的地方。它回傳 vec3，要當 vec2 用就接 `.xy`。
 - `let final` 重新指派只是讓 JavaScript 變數指到更大的 graph，跟上一課的 `assign()` 無關。
+- 課程的 starter 本來就開著 Inspector。demo 也一樣：Parameters 分頁切十個 pattern，Viewer 分頁並排看水池的四層。
+- `toInspector()` 前面要先 `toVar('名字')`。`mix()`、`step()` 這類 math node 回傳的變數會跳過 `toInspector()`，Viewer 就一片空白。
 
 ## 一張圖
 
@@ -80,7 +82,7 @@ import { PatternsDemo } from './patterns';
   <text x="34" y="150" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">depthUv = parallaxUV(uv(),</text>
   <rect x="34" y="155" width="200" height="30" rx="4" fill="#fffbeb" stroke="#f59e0b" />
   <text x="134" y="167" textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill="#92400e">parallaxDepth（課程寫 0.5）</text>
-  <text x="134" y="180" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="#92400e">demo 的 slider 改這一個</text>
+  <text x="134" y="180" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="#92400e">Inspector 的 slider 改這一個</text>
   <text x="34" y="197" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">).xy</text>
   <text x="34" y="209" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">causticsInput = vec3(</text>
   <text x="46" y="220" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">depthUv.mul(6), time.mul(0.3))</text>
@@ -200,9 +202,9 @@ import { PatternsDemo } from './patterns';
   <text x="838" y="512" textAnchor="end" fontSize="8.5" fontWeight="700" fill="#92400e">parallaxDepth</text>
 </svg>
 
-平面上每個像素拿到自己的 `uv()`，三條 node 鏈各自把它變成一樣東西：水底的顏色、泡沫的 mask、睡蓮的 mask 和顏色。mask 只有 0 和 1，兩次 `mix()` 照著它決定每個像素最後露出哪一層。三條鏈裡只有水底先過 `parallaxUV()`，所以鏡頭一動，caustics 會在泡沫和睡蓮底下滑動。黃框的 `parallaxDepth` 決定它滑多少，demo 把它做成 slider。
+平面上每個像素拿到自己的 `uv()`，三條 node 鏈各自把它變成一樣東西：水底的顏色、泡沫的 mask、睡蓮的 mask 和顏色。mask 只有 0 和 1，兩次 `mix()` 照著它決定每個像素最後露出哪一層。三條鏈裡只有水底先過 `parallaxUV()`，所以鏡頭一動，caustics 會在泡沫和睡蓮底下滑動。黃框的 `parallaxDepth` 決定它滑多少，demo 把它放進 Inspector 當 slider。
 
-<DemoFrame title="鏡頭會自己左右晃；拉 parallaxDepth 看水底跟水面分開，按鈕一次只看一層">
+<DemoFrame title="右上角 Inspector 的 Parameters 切 Pattern 1–10；選 Pattern 10 再開 Viewer，四層並排">
   <PatternsDemo />
 </DemoFrame>
 
@@ -496,6 +498,28 @@ material.colorNode = final;
 
 這裡用 `let` 重新指派完全沒問題。上一課說 `=` 不能取代 `assign()`，那是在 `Fn()` 裡想改 shader 變數的時候。這裡只是讓 JavaScript 變數 `final` 指到一個更大的 graph，最後交給 `colorNode` 的是整個 graph。寫成 `mix(mix(…), …)` 也對，只是難讀。
 
+## 為什麼 toInspector() 前面要先 toVar()
+
+課程一層一層看水池的做法，是把每一層輪流接到 `colorNode`。Inspector 的 Viewer 可以一次看完：每一層接上 `toInspector()`，畫面上照樣是 `final`，Viewer 裡則多出四張小預覽。
+
+```js
+const depthColor = mix(color(0x1b3956), color(0x11eeff), causticsNoise)
+  .toVar('depthColor')
+  .toInspector('depthColor');
+const foamMask = foamNoise.abs().step(0.05).oneMinus()
+  .toVar('foamMask')
+  .toInspector('foamMask');
+```
+
+`toVar()` 拿掉，Viewer 就是空的，而且不會有任何警告。原因藏在 three 0.186 的原始碼裡：
+
+- `toInspector()` 不包住 node。它把一個 `InspectorNode` 掛在原 node 的 before 清單上，build 時才登記成「每幀回報一次」。
+- `mix()`、`step()`、`oneMinus()` 這些 math node 回傳的是 intent 變數，意思是「需要時才宣告成變數」。
+- intent 變數沒被 `assign()` 過，build 時就直接交給裡面的 node，跳過處理 before 清單的那一段。`InspectorNode` 從來沒被登記，Viewer 當然收不到。
+- `toVar('depthColor')` 造出一個真正的變數。它照正常流程 build，before 清單會被處理。附帶的好處是 WGSL 裡多了一個叫 `depthColor` 的變數，撈 shader 時搜得到。
+
+Tools & Debug 那課提到的「拿掉 `toVar()` 預覽就不見」，應該就是這件事。機制是在 0.186 查到的，r185 沒有實測。
+
 ## 用例
 
 - **畫面要重複 N 次**：`uv().mul(N).fract()`。
@@ -530,6 +554,10 @@ material.colorNode = final;
 - **Transpiler 的輸出會隨 three.js 版本變**，以你那一版的輸出為準。別人的演算法記得註明作者。
 - **`parallaxDepth` 愈大，花紋愈小**。視線方向在水面上各處不同，推的量也不同，uv 被拉開。這不是 bug，是深度錯覺的一部分；但調 `mul(6)` 的時候要記得它也在影響格子大小。
 - **`@types/three` 把 `parallaxUV()` 的回傳型別寫成沒有型別參數的 `Node`**，直接接 `.xy` 會被 `tsc` 擋下來（`Property 'xy' does not exist on type 'Node'`）。demo 用 `as Node<'vec3'>` 寫出它實際回傳的型別。
-- **R3F 寫法**：水池整張 graph 在 module scope 建一次，`parallaxDepth` 是 `uniform()`，拉 slider 只換數字不重編。按鈕換的是 `colorNode`，等於換一支 shader，所以 material 用 `key` 重新掛載。
+- **`toInspector()` 直接接在 math node 後面會被吞掉**。Viewer 空白、沒有警告。先 `toVar('名字')` 再 `toInspector()`。demo 加了 `toVar()` 之前，實測 program 的 update 清單裡找不到任何 `InspectorNode`；加了之後四層都出現。
+- **R3F 寫法**：水池整張 graph 在 module scope 建一次，`parallaxDepth` 是 `uniform()`，拉 slider 只換數字不重編。Parameters 的下拉選單換的是 `colorNode`，等於換一支 shader，所以 material 用 `key` 重新掛載。
+- **R3F 掛 Inspector**：`gl.inspector = new Inspector()` 放在 `<Canvas>` 裡的元件的 `useEffect`。專案裡包成 `attachInspector()`（`src/components/webgpu-inspector.ts`），Post-processing 那課也用它。Inspector 要用動態 `import()`，因為它的 Settings 分頁在 module 載入時就讀 `localStorage`，SSR 那一輪會讓整站 500。光這樣只修好 dev：`pnpm build` 時 nitro 把整個 three 打成一個 server chunk，Inspector 還是被提早執行。所以 `import()` 前面再加 `if (import.meta.env.SSR) return`，讓它從 server bundle 裡被刪掉。卸載時換回 `new InspectorBase()`，不要設 `null`，three 的 loop 每幀還會呼叫它。
+- **R3F 不用 `setAnimationLoop()` Inspector 也收得到 frame**。`renderer.init()` 就啟動了 three 自己的 loop，Inspector 的 frame 開關在那裡；R3F 的 render 剛好落在兩次開關之間。
+- **完整的 Inspector 面板高 350px**，會蓋住 demo 框的下半部。所以這個 demo 的框比其他篇高，Pattern 1–9 的鏡頭也往上抬，讓平面躲開右上角的 Parameters。
 - **R3F 的 `<Canvas>` 預設開 ACES tone mapping**，課程指定的 hex 色會被洗淡。這個 demo 加了 `flat`，關掉 tone mapping 才是課程裡的顏色。
 - **鏡頭晃動用 `useFrame`**，因為動的是 camera，不是 shader。水面的動畫全部是 TSL 的 `time`，JavaScript 不用管。
