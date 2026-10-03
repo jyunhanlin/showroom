@@ -23,7 +23,7 @@
     "react-dom": "^19.2.5",
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1",
-    "remark-mdx-frontmatter": "^5.2.0",
+    "remark-mdx-frontmatter": "^6.0.0",
     "simplex-noise": "^4.0.3",
     "three": "^0.186.0",
     "zod": "^4.3.6"
