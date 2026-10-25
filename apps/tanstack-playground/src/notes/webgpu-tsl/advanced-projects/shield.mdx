@@ -1,0 +1,570 @@
+---
+title: Shield
+sourceUrl: https://threejs-journey.com/lessons/webgpu-tsl/shield
+lessonNumber: 'shield'
+order: 12
+summary: '一顆能量護盾：表面的六角形一直在呼吸，點一下，附近的六角形撐滿、變亮。六角形不是算出來的，是一張貼圖，r、g、b 各存一種資料。五張灰階用 mul() 乘起來就是花紋。impact 放在 uniformArray 的 vec4 裡，shader 用 Loop() 加 max() 算出 finalImpact，再用 max() 塞進三個地方。點擊用 ray.intersectSphere() 打數學球，worldToLocal() 讓 impact 黏在護盾上。顏色是黑底加 AdditiveBlending，emissiveNode 乘上 strength 再 mix 兩個顏色。最後的 junction node 給別的 material 用，讓護盾和地板的交界發光。'
+tags: [webgpu, tsl, emissiveNode, texture, step, remap, remapClamp, uniformArray, Loop, max, positionViewDirection, normalView, AdditiveBlending, intersectSphere, worldToLocal, objectPosition, materialEmissive]
+---
+
+import { ShieldDemo } from './shield';
+
+## TL;DR
+
+- 這一課做一顆能量護盾。表面的六角形一直在變大變小，點一下，附近的六角形撐滿、變亮。整個效果包成 `Shield` class，加進 scene、debug UI、載貼圖都交給用的人。
+- 六角形來自一張會無縫重複的貼圖。三個 channel 各存一種資料：`.r` 是到格子邊緣的距離，`.g` 是每格一個亂數，`.b` 分出格子和縫。
+- `hexagonsStep.step(hexagonsColor.r)`：`r` 小於等於 `hexagonsStep` 的地方是 1。`hexagonsStep` 從 0 長到 1，六角形就從中心長滿。
+- `hexagonsStep` 是 `sin(time + g × 2π)` 再 `remap()` 到 0–1。每格的 `g` 不同，所以每格不同步。
+- 花紋是五張灰階 `mul()` 起來：大小、縫、兩極淡出、fresnel、fill。
+- impact 存在 `uniformArray(data, 'vec4')`，xyz 是位置，w 是半徑。直接改 JS 那邊的 `Vector4`，每次 render 都會重新上傳。
+- shader 用 `Loop()` 走過全部 impact，`max()` 留最強的，得到 `finalImpact`。它再用 `max()` 塞進 `hexagonsStep`、fresnel mask、fill 三個地方。
+- 點擊不測三角形，`raycaster.ray.intersectSphere()` 打一顆數學球。拿到的是世界座標，`mesh.worldToLocal()` 轉成 local 之後，impact 才會黏在護盾上。
+- 材質是黑色的 `MeshBasicNodeMaterial`，加 `AdditiveBlending`，花紋寫在 `emissiveNode`。`emissiveStrength` 乘上 `strength`（7）之後拿去 `mix()` 兩個顏色，超過 1 的地方被外插到 `colorB` 之外。
+- Junction 是給別的 material 用的 node：到護盾中心的距離減掉 `radius` 就是 SDF，交界附近發光。護盾的位置用 `objectPosition(mesh)`，不是 `modelPosition`。
+
+## 一張圖
+
+{/* Keep every <text> on one line: oxfmt splits them across lines and MDX then wraps the content in <p>, which SVG cannot render. Text with { or } goes in as a JS string. The ball's hexagon layout is drawn by a script, not traced from the lesson. */}
+
+<svg viewBox="0 0 880 640" className="mx-auto block w-full max-w-3xl" role="img" aria-label="Shield 的資料流：hexagons 貼圖的三個 channel（r 到邊的距離、g 每格一個亂數、b 格子和縫）、impacts 的 uniformArray（五個 vec4，xyz 是位置、w 是半徑）、time 和 fresnel 需要的向量進到 GPU；vertex stage 只把半徑 1 的球乘上 radius；fragment stage 先用 Loop 和 max 算出 finalImpact，再把 hexagonsMask、b、兩極淡出、fresnel mask、fill 五張灰階相乘成 hexagons，其中三張用 max 被 finalImpact 撐上去；hexagons 加上 fresnel 五次方和細橫線，乘 strength，再 mix 兩個顏色交給 emissiveNode；最後用黑色底色加 AdditiveBlending 疊到畫面上，畫出側邊發亮、點擊處六角形撐滿的護盾。黃框的 w 是 impact 的半徑，demo 的 slider 改這一個">
+  <defs>
+    <marker id="sh-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+    </marker>
+    <marker id="sh-arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c" />
+    </marker>
+    <radialGradient id="sh-edge">
+      <stop offset="0" stopColor="#000" />
+      <stop offset="1" stopColor="#fff" />
+    </radialGradient>
+    <radialGradient id="sh-rim">
+      <stop offset="0.55" stopColor="#1a5bff" stopOpacity="0" />
+      <stop offset="0.9" stopColor="#ff2e43" stopOpacity="0.55" />
+      <stop offset="1" stopColor="#ffe4e6" stopOpacity="1" />
+    </radialGradient>
+    <radialGradient id="sh-glow">
+      <stop offset="0.75" stopColor="#ff2e43" stopOpacity="0.45" />
+      <stop offset="1" stopColor="#ff2e43" stopOpacity="0" />
+    </radialGradient>
+    <linearGradient id="sh-polar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stopColor="#000" />
+      <stop offset="0.25" stopColor="#000" />
+      <stop offset="0.4" stopColor="#fff" />
+      <stop offset="0.6" stopColor="#fff" />
+      <stop offset="0.75" stopColor="#000" />
+      <stop offset="1" stopColor="#000" />
+    </linearGradient>
+    <linearGradient id="sh-ramp" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stopColor="#000" />
+      <stop offset="0.25" stopColor="#1a3a9e" />
+      <stop offset="0.5" stopColor="#ff2e43" />
+      <stop offset="1" stopColor="#ffd0e0" />
+    </linearGradient>
+    <clipPath id="sh-ball">
+      <circle cx="560" cy="556" r="62" />
+    </clipPath>
+  </defs>
+
+  {/* ① what enters the GPU */}
+  <rect x="12" y="12" width="856" height="118" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="24" y="38" fontSize="12" fontWeight="600" fill="#334155">① 輸入</text>
+  <text x="24" y="54" fontSize="9" fill="#64748b">進 GPU 的</text>
+  <rect x="110" y="20" width="262" height="102" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="120" y="35" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">texture(hexagonsTexture, uv().mul(vec2(6, 4)))</text>
+  <polygon points="155.0,45.0 169.7,53.5 169.7,70.5 155.0,79.0 140.3,70.5 140.3,53.5" fill="url(#sh-edge)" stroke="#94a3b8" strokeWidth="1" />
+  <polygon points="231.0,42.5 241.0,48.2 241.0,59.8 231.0,65.5 221.0,59.8 221.0,48.2" fill="#3f3f46" />
+  <polygon points="251.0,42.5 261.0,48.2 261.0,59.8 251.0,65.5 241.0,59.8 241.0,48.2" fill="#d4d4d8" />
+  <polygon points="241.0,59.8 251.0,65.5 251.0,77.0 241.0,82.8 231.0,77.0 231.0,65.5" fill="#8a8a93" />
+  <rect x="300" y="43" width="56" height="38" fill="#000" />
+  <polygon points="318.0,44.5 326.2,49.2 326.2,58.8 318.0,63.5 309.8,58.8 309.8,49.2" fill="#fff" />
+  <polygon points="338.0,44.5 346.2,49.2 346.2,58.8 338.0,63.5 329.8,58.8 329.8,49.2" fill="#fff" />
+  <polygon points="328.0,61.8 336.2,66.5 336.2,76.0 328.0,80.8 319.8,76.0 319.8,66.5" fill="#fff" />
+  <polygon points="308.0,61.8 316.2,66.5 316.2,76.0 308.0,80.8 299.8,76.0 299.8,66.5" fill="#fff" />
+  <polygon points="348.0,61.8 356.2,66.5 356.2,76.0 348.0,80.8 339.8,76.0 339.8,66.5" fill="#fff" />
+  <rect x="300" y="43" width="56" height="38" fill="none" stroke="#94a3b8" />
+  <text x="155" y="99" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="#b91c1c">.r 到邊的距離</text>
+  <text x="155" y="112" textAnchor="middle" fontSize="8" fill="#64748b">中心 0、邊上 1</text>
+  <text x="241" y="99" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="#15803d">.g 每格一個亂數</text>
+  <text x="241" y="112" textAnchor="middle" fontSize="8" fill="#64748b">整格同一個值</text>
+  <text x="328" y="99" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="#1d4ed8">.b 格子和縫</text>
+  <text x="328" y="112" textAnchor="middle" fontSize="8" fill="#64748b">格子 1、縫 0</text>
+  <rect x="382" y="20" width="268" height="102" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="392" y="35" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">impacts.uniforms = uniformArray(data, 'vec4')</text>
+  <rect x="392" y="44" width="30" height="24" rx="2" fill="#f1f5f9" stroke="#94a3b8" />
+  <text x="407" y="59.5" textAnchor="middle" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">xyz</text>
+  <rect x="422" y="44" width="16" height="24" rx="2" fill="#fffbeb" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="430" y="60" textAnchor="middle" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">w</text>
+  <rect x="443" y="44" width="30" height="24" rx="2" fill="#f1f5f9" stroke="#94a3b8" />
+  <text x="458" y="59.5" textAnchor="middle" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">xyz</text>
+  <rect x="473" y="44" width="16" height="24" rx="2" fill="#fffbeb" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="481" y="60" textAnchor="middle" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">w</text>
+  <rect x="494" y="44" width="30" height="24" rx="2" fill="#f1f5f9" stroke="#94a3b8" />
+  <text x="509" y="59.5" textAnchor="middle" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">xyz</text>
+  <rect x="524" y="44" width="16" height="24" rx="2" fill="#fffbeb" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="532" y="60" textAnchor="middle" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">w</text>
+  <rect x="545" y="44" width="30" height="24" rx="2" fill="#f1f5f9" stroke="#94a3b8" />
+  <text x="560" y="59.5" textAnchor="middle" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">xyz</text>
+  <rect x="575" y="44" width="16" height="24" rx="2" fill="#fffbeb" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="583" y="60" textAnchor="middle" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">w</text>
+  <rect x="596" y="44" width="30" height="24" rx="2" fill="#f1f5f9" stroke="#94a3b8" />
+  <text x="611" y="59.5" textAnchor="middle" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">xyz</text>
+  <rect x="626" y="44" width="16" height="24" rx="2" fill="#fffbeb" stroke="#f59e0b" strokeWidth="1.5" />
+  <text x="634" y="60" textAnchor="middle" fontSize="9.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">w</text>
+  <text x="392" y="84" fontSize="8" fill="#64748b">xyz：impact 中心（local）　w：impact 半徑</text>
+  <text x="392" y="99" fontSize="8" fill="#64748b">點擊 → intersectSphere() → worldToLocal() → data[index]</text>
+  <text x="392" y="114" fontSize="8.5" fontWeight="700" fill="#92400e">黃框 w：demo 的 impact radius 改這一個</text>
+  <rect x="660" y="20" width="208" height="102" rx="6" fill="#fff" stroke="#94a3b8" />
+  <text x="670" y="36" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">time · uv()</text>
+  <text x="760" y="36" fontSize="8" fill="#64748b">花紋怎麼動、貼在哪</text>
+  <text x="670" y="54" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">positionLocal</text>
+  <text x="760" y="54" fontSize="8" fill="#64748b">跟 impact 算距離</text>
+  <text x="670" y="72" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">positionViewDirection</text>
+  <text x="670" y="86" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">normalView</text>
+  <text x="760" y="86" fontSize="8" fill="#64748b">算 fresnel</text>
+  <text x="670" y="104" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">colorA · colorB · strength</text>
+  <text x="670" y="116" fontSize="8" fill="#64748b">uniform：Inspector 能調</text>
+
+  {/* vertex stage: only the scale */}
+  <rect x="12" y="140" width="856" height="26" rx="6" fill="#eff6ff" stroke="#93c5fd" />
+  <text x="24" y="157" fontSize="10" fontWeight="600" fill="#334155">② vertex stage</text>
+  <text x="120" y="157" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">positionNode = positionLocal.mul(radius)</text>
+  <text x="360" y="157" fontSize="8.5" fill="#1d4ed8">幾何體半徑是 1，shader 裡放大成 2。點擊判定用數學球，半徑跟著 radius</text>
+
+  {/* fragment stage */}
+  <text x="12" y="188" fontSize="12" fontWeight="600" fill="#334155">③ fragment stage · emissiveNode</text>
+  <text x="220" y="188" fontSize="9" fill="#64748b">每個像素跑一次，決定它發多少光（灰階：白 = 亮）</text>
+  <rect x="12" y="196" width="856" height="270" rx="8" fill="#fdf2f8" stroke="#f9a8d4" />
+  <rect x="24" y="206" width="232" height="250" rx="6" fill="#fff" stroke="#fdba74" strokeWidth="1.5" />
+  <text x="34" y="222" fontSize="10.5" fontWeight="700" fill="#c2410c">finalImpact</text>
+  <text x="100" y="222" fontSize="8.5" fill="#ea580c">離最近的 impact 多近</text>
+  <text x="34" y="240" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">const finalImpact = float(0)</text>
+  <text x="34" y="253" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">{"Loop(this.impacts.count, ({ i }) => {"}</text>
+  <text x="46" y="266" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">const impact = impactData.xyz</text>
+  <text x="58" y="278" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">.distance(positionLocal)</text>
+  <rect x="81" y="281" width="61" height="12" rx="2" fill="#fffbeb" stroke="#f59e0b" strokeWidth="1.2" />
+  <text x="58" y="290" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">.div(impactData.w)</text>
+  <text x="58" y="302" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">.oneMinus().max(0)</text>
+  <text x="46" y="315" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">finalImpact.assign(</text>
+  <text x="58" y="327" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">max(finalImpact, impact))</text>
+  <text x="34" y="340" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">{"})"}</text>
+  <text x="34" y="353" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">finalImpact.assign(</text>
+  <text x="46" y="365" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">finalImpact.remap(0.4, 0, 1, 0))</text>
+  <polygon points="48,389 140.4,420 48,420" fill="#ffedd5" />
+  <line x1="48" y1="440" x2="240" y2="440" stroke="#64748b" strokeWidth="1" />
+  <line x1="48" y1="380" x2="48" y2="440" stroke="#64748b" strokeWidth="1" />
+  <line x1="48" y1="420" x2="236" y2="420" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
+  <line x1="48" y1="389" x2="200" y2="440" stroke="#ea580c" strokeWidth="2" />
+  <text x="43" y="423" textAnchor="end" fontSize="8" fill="#64748b">1</text>
+  <text x="43" y="392" textAnchor="end" fontSize="8" fill="#64748b">2.5</text>
+  <text x="144" y="400" fontSize="8" fill="#c2410c">≥ 1：整格撐滿</text>
+  <rect x="193" y="443" width="14" height="11" rx="2" fill="#fffbeb" stroke="#f59e0b" strokeWidth="1.2" />
+  <text x="200" y="452" textAnchor="middle" fontSize="8.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#92400e">w</text>
+  <text x="236" y="434" textAnchor="end" fontSize="8" fill="#64748b">距離</text>
+  <rect x="272" y="206" width="400" height="250" rx="6" fill="#fff" stroke="#f9a8d4" />
+  <text x="282" y="222" fontSize="10.5" fontWeight="700" fontFamily="ui-monospace, monospace" fill="#9d174d">hexagons = mul(…)</text>
+  <text x="400" y="222" fontSize="8.5" fill="#be185d">五張灰階相乘，五張都亮才看得到</text>
+  <rect x="282" y="228" width="380" height="38" rx="4" fill="#fff" stroke="#fdba74" />
+  <text x="290" y="243" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">hexagonsMask = hexagonsStep.step(hexagonsColor.r)</text>
+  <text x="290" y="258" fontSize="8" fill="#64748b">r ≤ hexagonsStep 處是 1，hexagonsStep 跟著 sin(time + g × 2π) 呼吸</text>
+  <line x1="256" y1="247" x2="280" y2="247" stroke="#ea580c" strokeWidth="1.8" markerEnd="url(#sh-arrow-orange)" />
+  <rect x="625" y="231" width="32" height="32" fill="#000" />
+  <polygon points="641.0,238.0 648.8,242.5 648.8,251.5 641.0,256.0 633.2,251.5 633.2,242.5" fill="#fff" />
+  <polygon points="641.0,232.0 654.0,239.5 654.0,254.5 641.0,262.0 628.0,254.5 628.0,239.5" fill="none" stroke="#52525b" strokeWidth="1" />
+  <rect x="625" y="231" width="32" height="32" fill="none" stroke="#94a3b8" />
+  <rect x="282" y="271" width="380" height="38" rx="4" fill="#fff" stroke="#fbcfe8" />
+  <text x="290" y="286" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">hexagonsColor.b</text>
+  <text x="290" y="301" fontSize="8" fill="#64748b">格子 1、縫 0：蓋掉縫上取樣混到的怪值</text>
+  <rect x="625" y="274" width="32" height="32" fill="#000" />
+  <polygon points="641.0,276.5 652.7,283.2 652.7,296.8 641.0,303.5 629.3,296.8 629.3,283.2" fill="#fff" />
+  <rect x="625" y="274" width="32" height="32" fill="none" stroke="#94a3b8" />
+  <rect x="282" y="314" width="380" height="38" rx="4" fill="#fff" stroke="#fbcfe8" />
+  <text x="290" y="329" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">hexagonsPolarMask = uv().y.sub(0.5).abs().remapClamp(0.35, 0.2)</text>
+  <text x="290" y="344" fontSize="8" fill="#64748b">兩極拉伸最嚴重，乾脆藏起來</text>
+  <rect x="625" y="317" width="32" height="32" fill="url(#sh-polar)" />
+  <rect x="625" y="317" width="32" height="32" fill="none" stroke="#94a3b8" />
+  <rect x="282" y="357" width="380" height="38" rx="4" fill="#fff" stroke="#fdba74" />
+  <text x="290" y="372" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">hexagonsFresnelMask = max(fresnel.pow(2), finalImpact)</text>
+  <text x="290" y="387" fontSize="8" fill="#64748b">側邊亮、正面暗；impact 附近不管角度都亮</text>
+  <line x1="256" y1="376" x2="280" y2="376" stroke="#ea580c" strokeWidth="1.8" markerEnd="url(#sh-arrow-orange)" />
+  <rect x="625" y="360" width="32" height="32" fill="#000" />
+  <circle cx="641" cy="376" r="15" fill="url(#sh-edge)" />
+  <rect x="625" y="360" width="32" height="32" fill="none" stroke="#94a3b8" />
+  <rect x="282" y="400" width="380" height="38" rx="4" fill="#fff" stroke="#fdba74" />
+  <text x="290" y="415" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">hexagonsFill = max(hexagonsColor.r, finalImpact)</text>
+  <text x="290" y="430" fontSize="8" fill="#64748b">格子裡愈靠邊愈亮；impact 附近整格填滿</text>
+  <line x1="256" y1="419" x2="280" y2="419" stroke="#ea580c" strokeWidth="1.8" markerEnd="url(#sh-arrow-orange)" />
+  <rect x="625" y="403" width="32" height="32" fill="#000" />
+  <polygon points="641.0,404.0 654.0,411.5 654.0,426.5 641.0,434.0 628.0,426.5 628.0,411.5" fill="url(#sh-edge)" />
+  <rect x="625" y="403" width="32" height="32" fill="none" stroke="#94a3b8" />
+  <text x="400" y="451" fontSize="8" fontWeight="700" fill="#c2410c">橘框三張：用 max() 被 finalImpact 撐上去</text>
+  <line x1="672" y1="331" x2="684" y2="331" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#sh-arrow)" />
+  <rect x="686" y="206" width="172" height="250" rx="6" fill="#fff" stroke="#f9a8d4" />
+  <text x="696" y="222" fontSize="10.5" fontWeight="700" fill="#9d174d">emissive</text>
+  <text x="696" y="240" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">const emissiveStrength = add(</text>
+  <text x="708" y="252" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">hexagons,</text>
+  <text x="708" y="264" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">fresnel.pow(5),</text>
+  <text x="708" y="276" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">lines</text>
+  <text x="696" y="288" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">).mul(strength)</text>
+  <text x="696" y="304" fontSize="8" fill="#64748b">fresnel⁵：邊緣一圈亮</text>
+  <text x="696" y="316" fontSize="8" fill="#64748b">lines：positionWorld.y 的細橫線</text>
+  <text x="696" y="336" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">mix(colorA, colorB,</text>
+  <text x="708" y="348" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">emissiveStrength)</text>
+  <text x="696" y="360" fontSize="8" fontFamily="ui-monospace, monospace" fill="#0f172a">.mul(emissiveStrength)</text>
+  <rect x="696" y="372" width="152" height="12" fill="url(#sh-ramp)" />
+  <text x="696" y="395" fontSize="8" fill="#64748b">0</text>
+  <text x="772" y="395" textAnchor="middle" fontSize="8" fill="#64748b">1</text>
+  <text x="848" y="395" textAnchor="end" fontSize="8" fill="#64748b">{"> 1"}</text>
+  <text x="696" y="412" fontSize="8" fill="#64748b">strength 7 把值推過 1，</text>
+  <text x="696" y="424" fontSize="8" fill="#64748b">mix() 外插，衝過 colorB</text>
+  <text x="696" y="446" fontSize="9" fontFamily="ui-monospace, monospace" fill="#0f172a">→ emissiveNode</text>
+
+  {/* what comes out */}
+  <line x1="440" y1="466" x2="440" y2="490" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#sh-arrow)" />
+  <rect x="12" y="492" width="856" height="136" rx="8" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="24" y="514" fontSize="12" fontWeight="600" fill="#334155">④ 畫出來</text>
+  <text x="24" y="536" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">color: 0x000000</text>
+  <text x="180" y="536" fontSize="8.5" fill="#64748b">底色是黑的</text>
+  <text x="24" y="554" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">blending: AdditiveBlending</text>
+  <text x="180" y="554" fontSize="8.5" fill="#64748b">黑 + 加法 = 只剩 emissive</text>
+  <text x="24" y="572" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">transparent: true</text>
+  <text x="180" y="572" fontSize="8.5" fill="#64748b">背後的東西透得過來</text>
+  <text x="24" y="590" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">side: DoubleSide</text>
+  <text x="180" y="590" fontSize="8.5" fill="#64748b">背面的六角形也畫</text>
+  <text x="24" y="608" fontSize="8.5" fontFamily="ui-monospace, monospace" fill="#0f172a">bloom（threshold 0）</text>
+  <text x="180" y="608" fontSize="8.5" fill="#64748b">亮的地方暈開</text>
+  <line x1="330" y1="556" x2="470" y2="556" stroke="#64748b" strokeWidth="1.5" markerEnd="url(#sh-arrow)" />
+  <circle cx="560" cy="556" r="76" fill="url(#sh-glow)" />
+  <circle cx="560" cy="556" r="62" fill="#0b1020" />
+  <g clipPath="url(#sh-ball)">
+    <polygon points="522.4,506.6 524.9,508.0 524.9,511.0 522.4,512.4 519.9,511.0 519.9,508.0" fill="#ff5a6e" fillOpacity="0.90" />
+    <polygon points="533.2,507.2 535.2,508.3 535.2,510.7 533.2,511.8 531.1,510.7 531.1,508.3" fill="#ff5a6e" fillOpacity="0.73" />
+    <polygon points="543.9,505.6 547.3,507.5 547.3,511.5 543.9,513.4 540.5,511.5 540.5,507.5" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="554.6,507.4 556.4,508.5 556.4,510.5 554.6,511.6 552.8,510.5 552.8,508.5" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="565.4,505.9 568.5,507.7 568.5,511.3 565.4,513.1 562.3,511.3 562.3,507.7" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="576.1,506.5 578.7,508.0 578.7,511.0 576.1,512.5 573.5,511.0 573.5,508.0" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="586.8,507.4 588.6,508.5 588.6,510.5 586.8,511.6 585.1,510.5 585.1,508.5" fill="#ff5a6e" fillOpacity="0.73" />
+    <polygon points="597.6,506.0 600.6,507.8 600.6,511.2 597.6,513.0 594.6,511.2 594.6,507.8" fill="#ff5a6e" fillOpacity="0.90" />
+    <polygon points="517.0,516.8 518.8,517.8 518.8,519.8 517.0,520.8 515.3,519.8 515.3,517.8" fill="#ff5a6e" fillOpacity="0.83" />
+    <polygon points="527.8,515.5 530.6,517.2 530.6,520.4 527.8,522.1 525.0,520.4 525.0,517.2" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="538.5,516.7 540.3,517.8 540.3,519.8 538.5,520.9 536.7,519.8 536.7,517.8" fill="#ff5a6e" fillOpacity="0.39" />
+    <polygon points="549.3,516.6 551.1,517.7 551.1,519.9 549.3,521.0 547.4,519.9 547.4,517.7" fill="#ff5a6e" fillOpacity="0.25" />
+    <polygon points="560.0,515.6 562.8,517.2 562.8,520.4 560.0,522.0 557.2,520.4 557.2,517.2" fill="#ff5a6e" fillOpacity="0.20" />
+    <polygon points="570.7,513.5 575.4,516.1 575.4,521.5 570.7,524.1 566.1,521.5 566.1,516.1" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="581.5,513.5 586.1,516.1 586.1,521.5 581.5,524.1 576.9,521.5 576.9,516.1" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="592.2,513.5 596.8,516.1 596.8,521.5 592.2,524.1 587.6,521.5 587.6,516.1" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="603.0,514.3 606.9,516.5 606.9,521.1 603.0,523.3 599.0,521.1 599.0,516.5" fill="#ff5a6e" fillOpacity="0.83" />
+    <polygon points="511.7,525.8 513.6,527.0 513.6,529.2 511.7,530.4 509.7,529.2 509.7,527.0" fill="#ff5a6e" fillOpacity="0.80" />
+    <polygon points="522.4,525.5 524.6,526.8 524.6,529.4 522.4,530.7 520.2,529.4 520.2,526.8" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="533.2,524.2 536.5,526.2 536.5,530.0 533.2,532.0 529.8,530.0 529.8,526.2" fill="#ff5a6e" fillOpacity="0.25" />
+    <polygon points="565.4,522.8 570.0,525.4 570.0,530.8 565.4,533.4 560.8,530.8 560.8,525.4" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="576.1,522.8 580.7,525.4 580.7,530.8 576.1,533.4 571.5,530.8 571.5,525.4" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="586.8,522.8 591.5,525.4 591.5,530.8 586.8,533.4 582.2,530.8 582.2,525.4" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="597.6,522.8 602.2,525.4 602.2,530.8 597.6,533.4 593.0,530.8 593.0,525.4" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="608.3,525.0 611.0,526.5 611.0,529.7 608.3,531.2 605.6,529.7 605.6,526.5" fill="#ff5a6e" fillOpacity="0.80" />
+    <polygon points="506.3,532.4 510.6,534.9 510.6,539.9 506.3,542.4 502.0,539.9 502.0,534.9" fill="#ff5a6e" fillOpacity="0.83" />
+    <polygon points="517.0,535.4 518.8,536.4 518.8,538.4 517.0,539.4 515.3,538.4 515.3,536.4" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="527.8,532.8 531.8,535.1 531.8,539.7 527.8,542.0 523.8,539.7 523.8,535.1" fill="#ff5a6e" fillOpacity="0.20" />
+    <polygon points="570.7,532.1 575.4,534.7 575.4,540.1 570.7,542.7 566.1,540.1 566.1,534.7" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="581.5,532.1 586.1,534.7 586.1,540.1 581.5,542.7 576.9,540.1 576.9,534.7" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="592.2,532.1 596.8,534.7 596.8,540.1 592.2,542.7 587.6,540.1 587.6,534.7" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="603.0,534.5 605.4,536.0 605.4,538.8 603.0,540.3 600.5,538.8 600.5,536.0" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="613.7,532.9 617.6,535.2 617.6,539.6 613.7,541.9 609.8,539.6 609.8,535.2" fill="#ff5a6e" fillOpacity="0.83" />
+    <polygon points="500.9,544.3 503.1,545.5 503.1,547.9 500.9,549.1 498.8,547.9 498.8,545.5" fill="#ff5a6e" fillOpacity="0.90" />
+    <polygon points="511.7,543.0 514.9,544.8 514.9,548.6 511.7,550.4 508.4,548.6 508.4,544.8" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="522.4,542.8 525.8,544.7 525.8,548.7 522.4,550.6 519.0,548.7 519.0,544.7" fill="#ff5a6e" fillOpacity="0.25" />
+    <polygon points="576.1,541.4 580.7,544.0 580.7,549.4 576.1,552.0 571.5,549.4 571.5,544.0" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="586.8,541.4 591.5,544.0 591.5,549.4 586.8,552.0 582.2,549.4 582.2,544.0" fill="#fff1f2" stroke="#ff2e43" strokeWidth="0.8" />
+    <polygon points="597.6,544.2 599.8,545.4 599.8,548.0 597.6,549.2 595.4,548.0 595.4,545.4" fill="#ff5a6e" fillOpacity="0.25" />
+    <polygon points="608.3,542.7 611.8,544.7 611.8,548.7 608.3,550.7 604.8,548.7 604.8,544.7" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="619.1,543.5 621.9,545.1 621.9,548.3 619.1,549.9 616.3,548.3 616.3,545.1" fill="#ff5a6e" fillOpacity="0.90" />
+    <polygon points="495.6,553.1 498.1,554.6 498.1,557.4 495.6,558.9 493.1,557.4 493.1,554.6" fill="#ff5a6e" fillOpacity="0.90" />
+    <polygon points="506.3,552.3 509.5,554.1 509.5,557.9 506.3,559.7 503.1,557.9 503.1,554.1" fill="#ff5a6e" fillOpacity="0.73" />
+    <polygon points="517.0,552.7 519.9,554.3 519.9,557.7 517.0,559.3 514.2,557.7 514.2,554.3" fill="#ff5a6e" fillOpacity="0.39" />
+    <polygon points="603.0,551.8 606.6,553.9 606.6,558.1 603.0,560.2 599.3,558.1 599.3,553.9" fill="#ff5a6e" fillOpacity="0.39" />
+    <polygon points="613.7,553.2 616.1,554.6 616.1,557.4 613.7,558.8 611.3,557.4 611.3,554.6" fill="#ff5a6e" fillOpacity="0.73" />
+    <polygon points="624.4,551.0 628.8,553.5 628.8,558.5 624.4,561.0 620.1,558.5 620.1,553.5" fill="#ff5a6e" fillOpacity="0.90" />
+    <polygon points="500.9,563.1 502.9,564.2 502.9,566.4 500.9,567.5 499.0,566.4 499.0,564.2" fill="#ff5a6e" fillOpacity="0.90" />
+    <polygon points="511.7,562.1 514.5,563.7 514.5,566.9 511.7,568.5 508.9,566.9 508.9,563.7" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="522.4,561.0 526.1,563.2 526.1,567.4 522.4,569.6 518.7,567.4 518.7,563.2" fill="#ff5a6e" fillOpacity="0.25" />
+    <polygon points="597.6,560.6 601.6,563.0 601.6,567.6 597.6,570.0 593.5,567.6 593.5,563.0" fill="#ff5a6e" fillOpacity="0.25" />
+    <polygon points="608.3,562.4 610.8,563.9 610.8,566.7 608.3,568.2 605.8,566.7 605.8,563.9" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="619.1,561.2 622.6,563.3 622.6,567.3 619.1,569.4 615.5,567.3 615.5,563.3" fill="#ff5a6e" fillOpacity="0.90" />
+    <polygon points="506.3,570.8 509.6,572.7 509.6,576.5 506.3,578.4 503.0,576.5 503.0,572.7" fill="#ff5a6e" fillOpacity="0.83" />
+    <polygon points="517.0,570.9 520.3,572.7 520.3,576.5 517.0,578.3 513.8,576.5 513.8,572.7" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="527.8,571.3 530.7,572.9 530.7,576.3 527.8,577.9 524.9,576.3 524.9,572.9" fill="#ff5a6e" fillOpacity="0.20" />
+    <polygon points="592.2,570.5 595.8,572.5 595.8,576.7 592.2,578.7 588.7,576.7 588.7,572.5" fill="#ff5a6e" fillOpacity="0.20" />
+    <polygon points="603.0,570.7 606.4,572.6 606.4,576.6 603.0,578.5 599.5,576.6 599.5,572.6" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="613.7,569.6 618.1,572.1 618.1,577.1 613.7,579.6 609.3,577.1 609.3,572.1" fill="#ff5a6e" fillOpacity="0.83" />
+    <polygon points="511.7,579.4 515.6,581.7 515.6,586.1 511.7,588.4 507.8,586.1 507.8,581.7" fill="#ff5a6e" fillOpacity="0.80" />
+    <polygon points="522.4,581.1 524.8,582.5 524.8,585.3 522.4,586.7 520.0,585.3 520.0,582.5" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="533.2,580.8 535.8,582.3 535.8,585.5 533.2,587.0 530.5,585.5 530.5,582.3" fill="#ff5a6e" fillOpacity="0.25" />
+    <polygon points="586.8,581.7 588.8,582.8 588.8,585.0 586.8,586.1 584.9,585.0 584.9,582.8" fill="#ff5a6e" fillOpacity="0.25" />
+    <polygon points="597.6,581.8 599.4,582.9 599.4,584.9 597.6,586.0 595.8,584.9 595.8,582.9" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="608.3,579.6 612.1,581.7 612.1,586.1 608.3,588.2 604.6,586.1 604.6,581.7" fill="#ff5a6e" fillOpacity="0.80" />
+    <polygon points="517.0,590.9 519.0,592.1 519.0,594.3 517.0,595.5 515.1,594.3 515.1,592.1" fill="#ff5a6e" fillOpacity="0.83" />
+    <polygon points="527.8,590.5 530.1,591.9 530.1,594.5 527.8,595.9 525.5,594.5 525.5,591.9" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="538.5,590.1 541.2,591.6 541.2,594.8 538.5,596.3 535.8,594.8 535.8,591.6" fill="#ff5a6e" fillOpacity="0.39" />
+    <polygon points="549.3,588.5 553.3,590.9 553.3,595.5 549.3,597.9 545.2,595.5 545.2,590.9" fill="#ff5a6e" fillOpacity="0.25" />
+    <polygon points="560.0,591.1 561.8,592.1 561.8,594.3 560.0,595.3 558.2,594.3 558.2,592.1" fill="#ff5a6e" fillOpacity="0.20" />
+    <polygon points="570.7,589.9 573.6,591.5 573.6,594.9 570.7,596.5 567.9,594.9 567.9,591.5" fill="#ff5a6e" fillOpacity="0.25" />
+    <polygon points="581.5,589.6 584.6,591.4 584.6,595.0 581.5,596.8 578.3,595.0 578.3,591.4" fill="#ff5a6e" fillOpacity="0.39" />
+    <polygon points="592.2,588.5 596.3,590.9 596.3,595.5 592.2,597.9 588.2,595.5 588.2,590.9" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="603.0,588.7 606.8,591.0 606.8,595.4 603.0,597.7 599.1,595.4 599.1,591.0" fill="#ff5a6e" fillOpacity="0.83" />
+    <polygon points="522.4,597.9 526.4,600.2 526.4,604.8 522.4,607.1 518.4,604.8 518.4,600.2" fill="#ff5a6e" fillOpacity="0.90" />
+    <polygon points="533.2,599.7 535.5,601.1 535.5,603.9 533.2,605.3 530.8,603.9 530.8,601.1" fill="#ff5a6e" fillOpacity="0.73" />
+    <polygon points="543.9,599.3 546.7,600.9 546.7,604.1 543.9,605.7 541.1,604.1 541.1,600.9" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="554.6,599.5 557.2,601.0 557.2,604.0 554.6,605.5 552.0,604.0 552.0,601.0" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="565.4,597.8 569.4,600.2 569.4,604.8 565.4,607.2 561.3,604.8 561.3,600.2" fill="#ff5a6e" fillOpacity="0.51" />
+    <polygon points="576.1,597.6 580.4,600.0 580.4,605.0 576.1,607.4 571.8,605.0 571.8,600.0" fill="#ff5a6e" fillOpacity="0.59" />
+    <polygon points="586.8,600.2 588.9,601.3 588.9,603.7 586.8,604.8 584.8,603.7 584.8,601.3" fill="#ff5a6e" fillOpacity="0.73" />
+    <polygon points="597.6,600.1 599.7,601.3 599.7,603.7 597.6,604.9 595.5,603.7 595.5,601.3" fill="#ff5a6e" fillOpacity="0.90" />
+  </g>
+  <circle cx="560" cy="556" r="62" fill="url(#sh-rim)" />
+  <line x1="616" y1="580" x2="660" y2="598" stroke="#94a3b8" strokeWidth="1" />
+  <text x="664" y="601" fontSize="8.5" fill="#334155">側邊：fresnel 亮，六角形一直在呼吸</text>
+  <line x1="596" y1="526" x2="660" y2="514" stroke="#94a3b8" strokeWidth="1" />
+  <text x="664" y="517" fontSize="8.5" fill="#334155">impact：附近的六角形撐滿、變白</text>
+  <line x1="548" y1="560" x2="660" y2="558" stroke="#94a3b8" strokeWidth="1" />
+  <text x="664" y="561" fontSize="8.5" fill="#334155">正面中間：幾乎透明</text>
+</svg>
+
+左上那張貼圖存的不是顏色，是三種資料，shader 把它們當數字用。impact 先在 JS 這邊寫進 `uniformArray`，fragment stage 用 `Loop()` 算出 `finalImpact`，再用 `max()` 塞進三張灰階。黃框的 `w` 是 impact 的半徑，就是 demo 的 impact radius。`w` 愈大，`finalImpact` 超過 1 的範圍愈大，那一片六角形整格撐滿。最後乘上 `strength`、`mix()` 兩個顏色，用加法疊到畫面上。
+
+<DemoFrame title="點球面打一個 impact；在 Inspector 拉 impact radius（黃框的 w），下一個 impact 亮起來的那一片跟著變大">
+  <ShieldDemo />
+</DemoFrame>
+
+## 為什麼六角形用一張貼圖
+
+```js
+const hexagonsColor = texture(this.texture, uv().mul(vec2(6, 4)));
+```
+
+課程的貼圖用 Substance Designer 做，三個 channel 各放一種資料：
+
+- `.r`：到格子邊緣的距離。中心 0，邊上 1。它同時決定六角形的大小（下一節）和格子裡的漸層（fill）。
+- `.g`：每格一個 0 到 1 的亂數，整格同一個值。拿來錯開每格的時間。
+- `.b`：格子裡是 1，縫是 0。它在 shader 裡當 alpha 用，放哪個 channel 都沒差。
+
+用貼圖是為了快。課程最後也說，對 GPU 來說取樣一張貼圖很便宜。一次取樣拿到三種資料，比在 shader 裡算六角形格子省事得多。
+
+貼圖可以無縫重複，所以 `wrapS` / `wrapT` 設成 `RepeatWrapping`，`uv().mul(vec2(6, 4))` 繞球一圈貼 6 次、上下貼 4 次。
+
+demo 沒有用課程的 PNG。`createHexagonsTexture()` 用 JavaScript 自己算一張，channel 的意思照上面。一張貼圖裡有 4 × 4 格，每隔一列錯開半格，列數是偶數，所以邊界接得起來。
+
+貼圖載入放在 `script.js`，用 `loadAsync()` 載好再當參數傳進 `new Shield(hexagonsTexture)`。課程的理由是：你不知道別人怎麼管理素材，就讓他自己載。constructor 的參數叫 `_texture`，避開 TSL 的 `texture()`；它排第一個：貼圖非給不可，`radius` 放後面才能有預設值。
+
+## 為什麼 step() 要反過來寫
+
+```js
+const hexagonsStep = max(time.add(hexagonsColor.g.mul(TWO_PI)).sin().remap(-1, 1, 0, 1), finalImpact);
+const hexagonsMask = hexagonsStep.step(hexagonsColor.r);
+```
+
+TSL 的鏈式寫法 `x.step(edge)` 等於 `step(edge, x)`（three 0.186 `MathNode.js` 的 `stepElement`）。所以：
+
+- `hexagonsColor.r.step(hexagonsStep)`：`r ≥ step` 的地方是 1。白的是格子外圍那一圈。
+- `hexagonsStep.step(hexagonsColor.r)`：`r ≤ step` 的地方是 1。白的是從中心長出來的六角形，step 愈大，六角形愈大。
+
+課程先寫前一種，再改成後一種，因為 mask 應該是「要留的地方是白的」。改成 `oneMinus()` 也行。
+
+順序一換，`hexagonsStep` 變成點號左邊那個。寫成 `const hexagonsStep = 0.5` 會出錯，JavaScript 的數字沒有 `.step()`，要寫 `float(0.5)`。換成 `time.sin()` 之後它本來就是 node，問題消失。
+
+step 一路加工：
+
+- `time.sin()`：-1 到 1。負的那一半什麼都看不到，六角形會消失一陣子。
+- `.remap(-1, 1, 0, 1)`：映到 0 到 1。後兩個參數預設就是 0 和 1，可以省。
+- `time.add(hexagonsColor.g)`：每格錯開一點。但 `g` 只有 0 到 1，sin 一個週期是 2π，所以每格還是差不多同步。
+- `hexagonsColor.g.mul(TWO_PI)`：錯開整整一個週期，才真的亂。
+
+## 為什麼是五張灰階相乘
+
+```js
+const hexagonsPolarMask = uv().y.sub(0.5).abs().remapClamp(0.35, 0.2);
+const hexagonsFresnelMask = max(fresnel.pow(2), finalImpact);
+const hexagonsFill = max(hexagonsColor.r, finalImpact);
+const hexagons = mul(
+  hexagonsMask,
+  hexagonsColor.b,
+  hexagonsPolarMask,
+  hexagonsFresnelMask,
+  hexagonsFill
+);
+```
+
+每一張只管一件事，五張都亮的地方才看得到六角形。`mul()` 一次吃五個參數。
+
+- `hexagonsColor.b`：取樣剛好落在兩格之間時，會混到兩格的 `g`，縫上出現細細的怪線。課程說這是貼圖精度造成的，乘上縫的 mask 把它蓋掉。
+- `hexagonsPolarMask`：球的 uv 在兩極擠成一點，六角形拉得很難看。`uv().y.sub(0.5).abs()` 是離赤道多遠，`remapClamp(0.35, 0.2)` 讓它在 0.2 以內維持 1、到 0.35 降到 0。課程提到 triplanar mapping 可以真的解決，但會帶來別的問題，也比較慢。
+- `hexagonsFresnelMask`：只在側邊顯示，不管球怎麼轉、鏡頭在哪。`pow(2)` 把中間壓得更暗。
+- `hexagonsFill`：格子裡不要一片平，要愈靠邊愈亮，`.r` 剛好就是這個漸層。
+
+fresnel 寫在 `hexagons` 那段之前，因為最後發光那段還要用它一次：
+
+```js
+const fresnel = dot(positionViewDirection, normalView).abs().oneMinus();
+```
+
+`positionViewDirection` 是 fragment 到鏡頭的方向，`normalView` 是法線，兩個都在 view space，dot 的結果跟 world space 一樣。
+
+`abs()` 不能省。背面的 dot 是負的，`oneMinus()` 之後變成 `1 - (-1) = 2`。課程說，材質一開透明加 `DoubleSide`，背面就會過亮。
+
+## 為什麼 impacts 是 uniformArray + Loop() + max()
+
+```js
+// setImpacts()
+const data = [];
+for (let i = 0; i < this.impacts.count; i++) data.push(new THREE.Vector4(0, 0, 0, 0));
+this.impacts.uniforms = uniformArray(data, 'vec4');
+
+// colorNode / emissiveNode
+const finalImpact = float(0);
+Loop(this.impacts.count, ({ i }) => {
+  const impactData = this.impacts.uniforms.element(i);
+  const impactDistance = impactData.xyz.distance(positionLocal);
+  const impact = impactDistance.div(impactData.w).oneMinus().max(0);
+  finalImpact.assign(max(finalImpact, impact));
+});
+finalImpact.assign(finalImpact.remap(0.4, 0, 1, 0));
+```
+
+一個 impact 亮一兩秒，點得快就會同時有好幾個，所以要一整組。`count` 是 5，`index` 指向下一個要寫的位置，寫完加一，到底就回 0。最舊的那個被蓋掉。
+
+一個 `vec4` 塞兩種資料：xyz 是中心，w 是半徑。`uniformArray()` 每次 render 都把 JS 陣列重新上傳，所以 `add()` 只要改 `data[index]` 的四個數字，不用碰 `.value`。
+
+shader 這邊每個 impact 算一個強度：
+
+- `distance(positionLocal)`：中心是 0，往外變大。
+- `.div(impactData.w)`：中心 0，走到半徑剛好 1。
+- `.oneMinus()`：反過來，中心 1，半徑 0。
+- `.max(0)`：半徑外面變負的，壓回 0。
+
+好幾個 impact 重疊時，留最強的。課程先寫 `If(impact.greaterThan(finalImpact), …)`，再改成 `max()`，意思一樣，短很多。
+
+最後的 `remap(0.4, 0, 1, 0)` 就是 `x / 0.4`，沒有 clamp，中心到 2.5。課程說這是故意的，比較亮。`d < 0.6w` 的地方都 ≥ 1，三個 `max()` 碰到就整格撐滿。
+
+`finalImpact` 用 `max()` 塞進三個地方：
+
+- `hexagonsStep`：≥ 1 時 `r ≤ hexagonsStep` 處處成立，六角形長滿。
+- fresnel mask：正面中間本來是暗的，impact 附近也亮起來。
+- fill：不再只有邊緣亮，整格填滿。
+
+`const finalImpact = float(0)` 再 `assign()`，沒有先 `.toVar()`。three 0.186 照跑，demo 就是這樣寫的，畫面和 Console 都正常。為什麼不用 `.toVar()` 也行，原因沒查。
+
+課程用 GSAP 做半徑的動畫：0.1 秒 `power2.out` 漲到 `radius`，`onComplete` 再用 1 秒 `power2.in` 收回 0。demo 改在 `useFrame` 裡算同樣兩段。GSAP 的 power2 是三次方。
+
+## 為什麼點擊要 intersectSphere() 和 worldToLocal()
+
+```js
+raycaster.setFromCamera(mouse, camera);
+const sphere = new THREE.Sphere(shield.mesh.position, shield.radius.value);
+let intersect = new THREE.Vector3();
+intersect = raycaster.ray.intersectSphere(sphere, intersect);
+if (intersect) shield.impacts.add(intersect);
+```
+
+課程說 `intersectObject()` 一個一個三角形測，比較貴。目標是一顆球，就對數學上的 `Sphere` 測，便宜很多。
+
+`intersectSphere()` 要先給一個 `Vector3` 讓它填，打不到時回傳 `null`，打到就回傳你給的那個。所以兩件事都要做：傳進去，再用回傳值重新指派。不重新指派，沒打到時 `intersect` 留在 `(0, 0, 0)`，等於在護盾中心打了一下。
+
+這裡還有一個課程沒特別提的好處。幾何體半徑是 1，畫出來的半徑 2 是 `positionNode` 在 shader 裡乘的。`intersectObject()` 只認得 CPU 上那顆半徑 1 的三角形。用 `radius.value` 做的 `Sphere` 才跟畫面一致。依據是讀程式，三角形版本沒實測。demo 點球的外緣，impact 亮在游標下，這點實測過。
+
+`intersect` 是世界座標，shader 卻拿 `positionLocal` 比距離。護盾一移動，兩邊就對不上。兩個解法：
+
+- shader 改用 `positionWorld`：能動，但護盾移動時 impact 會停在原地，像掛在空中。
+- `this.mesh.worldToLocal(position)` 先轉成 local：impact 跟著護盾走。
+
+課程選後者。demo 讓護盾慢慢自轉，impact 照樣黏在表面上轉，就是這個效果。
+
+## 為什麼是黑色 + AdditiveBlending + emissiveNode
+
+```js
+this.material = new THREE.MeshBasicNodeMaterial({
+  transparent: true,
+  blending: THREE.AdditiveBlending,
+  color: 0x000000,
+  side: THREE.DoubleSide,
+});
+```
+
+護盾應該是能量，自己發光。用 `emissiveNode` 而不是 `colorNode`，之後想用 MRT 單獨抓出 emissive 做 bloom 也方便。
+
+`MeshBasicNodeMaterial` 預設是白的，加了 emissive 還是一片白。底色改成黑，再用加法混合，黑色加上去等於沒加，畫面上只剩 emissive。`DoubleSide` 讓背面的六角形也畫出來。
+
+```js
+const emissiveStrength = add(hexagons, fresnel.pow(5), lines).mul(this.strength);
+const emissive = mix(this.colorA, this.colorB, emissiveStrength).mul(emissiveStrength);
+```
+
+- `fresnel.pow(5)`：只剩最外緣一圈，讓整顆球有輪廓。
+- `lines`：`positionWorld.y.mul(20).add(time).fract().pow(3)` 是往下流的細橫線，再乘上一個慢慢變化、最大 0.05 的強度。
+- `.mul(this.strength)`：放大 7 倍。超過 1 的部分，下一行的 `mix()` 會外插，顏色衝過 `colorB`，bloom 也更明顯。
+- `mix(colorA, colorB, emissiveStrength)`：弱的地方偏 `colorA`，強的地方偏 `colorB`。
+- `.mul(emissiveStrength)`：弱的地方壓向黑色，加法混合下就是透明。
+
+課程說這個效果很吃 bloom，只給了 threshold 0、強度低。demo 的 strength 0.1 是自己挑的。
+
+## 為什麼 junction 寫在別的 material 上
+
+demo 沒有做這一段，只有文字。
+
+護盾穿過地板時，交界只是硬生生切過去。課程讓交界發光，做法是在 `Shield` 裡準備一個 node，給別的 material 加到自己的 emissive 上：
+
+```js
+setJunctionNode() {
+  const center = objectPosition(this.mesh);
+  this.junctionNode = Fn(() => {
+    const sdf = positionWorld.distance(center).sub(this.radius);
+    const mask = sdf.negate().step(0);
+    const strength = sdf.remapClamp(0, -0.2, 1, 0).mul(mask).pow(3).mul(this.strength);
+    const _color = mix(this.colorA, this.colorB, strength).mul(strength);
+    return _color;
+  })();
+}
+
+// script.js
+mesh.material.emissiveNode = materialEmissive.add(shield.junctionNode);
+```
+
+- `sdf`：到護盾中心的距離減掉半徑。交界上是 0，外面是正的，裡面是負的。
+- `remapClamp(0, -0.2, 1, 0)`：交界是 1，往裡走 0.2 降到 0。不 clamp 的話，更裡面會一路變負。
+- `mask`：外面原本也是 1，要切成 0。`sdf.negate().step(0)` 只留裡面。
+- 顏色照護盾的做法：`mix()` 再乘回強度。
+
+護盾中心不能用 `modelPosition`。這個 node 掛在地板上，`modelPosition` 會是地板的位置。`objectPosition(this.mesh)` 指定要護盾那一個 object，而且是世界座標，護盾放在別的 group 裡也對。
+
+`materialEmissive.add(…)` 保留 material 原本的 emissive，不會整個蓋掉。哪個物件要有交界效果，就自己加這一行，所以可以挑。
+
+課程也列了別的做法：後製用 MRT，或之後才會教的 backdrop。
+
+## 用例
+
+- **能量護盾、力場、全息介面**：一張存資料的貼圖加上幾張 mask 相乘，比在 shader 裡算格子便宜。
+- **一張貼圖存好幾種資料**：距離、ID、alpha 分開放在 r、g、b。
+- **大量物件不同步地動**：`sin(time + id × 2π)`，`id` 從貼圖或 attribute 拿。
+- **形狀從中心長大**：`threshold.step(distance)`，threshold 從 0 拉到 1。
+- **受擊、點擊、腳印這類短暫效果**：`uniformArray` 當 ring buffer，shader 用 `Loop()` 取 `max()`。
+- **事件要黏在會動的物件上**：存 local 座標，`worldToLocal()` 轉過去。
+- **球形物件的點擊判定**：`ray.intersectSphere()`，不測三角形。
+- **發光又透明的東西**：黑底色 + `AdditiveBlending` + `emissiveNode`。
+- **兩個物件的交界發光**：SDF 加 `remapClamp()`，做成 node 讓別的 material 加上去。
+
+## Gotchas
+
+- **`x.step(edge)` 是 `step(edge, x)`**。順序寫反，mask 剛好黑白顛倒。
+- **`const hexagonsStep = 0.5` 不能 `.step()`**。JavaScript 數字沒有這個方法，要 `float(0.5)`。
+- **`sin()` 是 -1 到 1**。直接當 step，六角形有一半的時間不見，要先 `remap()`。
+- **`g` 只有 0 到 1，要乘 `TWO_PI`**，不然每格還是幾乎同步。
+- **縫上的細線**是取樣混到兩格的值，乘上 `.b` 蓋掉。
+- **fresnel 要先 `abs()` 再 `oneMinus()`**。不然背面是 2，開了 `DoubleSide` 會過亮。
+- **impact 是世界座標，shader 比的是 local**。要先 `worldToLocal()`。它會直接改傳進去的 `Vector3`。
+- **`intersectSphere()` 要傳 `Vector3`，也要接回傳值**。沒打到是 `null`，不接的話 `(0, 0, 0)` 會被當成一個 impact。
+- **`remap()` 不 clamp**。`finalImpact` 中心是 2.5。要限制範圍就用 `remapClamp()`。
+- **`modelPosition` 是「被畫的那個物件」**。junction node 掛在地板上，要護盾的位置得用 `objectPosition(mesh)`。
+- **`strength` 7 加上 R3F 預設的 ACES tone mapping，整顆球偏粉紅**。demo 實測：strength 拉到 1–2 才看得到 `colorA` 的藍。課程 starter 用哪種 tone mapping 沒對照。
+- **DataTexture 預設是 `NearestFilter`、沒有 mipmap**。`TextureLoader` 載的 PNG 預設是 linear 加 mipmap，demo 自己做的貼圖手動設成一樣。
+- **R3F 寫法**：`@types/three` 0.186 只在 `MeshStandardNodeMaterial` 宣告了 `emissiveNode`，three 本身的 `NodeMaterial` 對所有 material 都會讀。demo 用 spread 傳進 `<meshBasicNodeMaterial>`，繞過 JSX 的型別檢查。
+- **R3F 寫法**：`uniformArray<'vec4'>(…)` 的型別參數只給 TypeScript 看。不寫的話，`element(i)` 上沒有 `.xyz` 和 `.w`。
+- **R3F 寫法**：課程的 canvas 佔滿視窗，NDC 用 `sizes.width`。demo 的 canvas 只是頁面的一塊，要用 `getBoundingClientRect()` 扣掉位置。
+- **R3F 寫法**：pointerdown 掛在 `gl.domElement` 上自己做 raycast，跟課程一樣，不用 R3F 的 `onPointerDown`。R3F 的事件測的是 mesh 的三角形，也就是半徑 1 的那顆（從程式推的，沒實測）。
