@@ -1,0 +1,2 @@
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/Inspector-CgS3VIb7.js","assets/preload-helper-Buhgaeiz.js","assets/three.tsl-BCQlUORe.js","assets/rolldown-runtime-hePW80VL.js"])))=>i.map(i=>d[i]);
+import{t as e}from"./preload-helper-Buhgaeiz.js";import{bt as t}from"./three.tsl-BCQlUORe.js";function n(n,r){let i=null,a=!1;return e(()=>import(`./Inspector-CgS3VIb7.js`).then(e=>{a||(i=new e.Inspector,n.inspector=i,r(i))}),__vite__mapDeps([0,1,2,3])),()=>{a=!0,i!==null&&(i.dispose(),n.inspector=new t)}}export{n as t};
