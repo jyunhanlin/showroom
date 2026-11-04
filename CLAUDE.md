@@ -9,7 +9,7 @@ unless I ask. (`gh pr create` is hook-enforced here.)
 
 ### Issue tracker
 
-Issues live as local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues live as local markdown files under `.scratch/<feature>/` (local only, gitignored). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
