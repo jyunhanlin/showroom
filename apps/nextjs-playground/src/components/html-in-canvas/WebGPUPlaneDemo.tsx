@@ -3,24 +3,17 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { CARD_HEIGHT, CARD_WIDTH, DemoCard } from './DemoCard';
+import { createDrawableTexture } from './drawable-texture';
 import { Fallback } from './Fallback';
 import { supportsWebGPU, type Support } from './support';
 
 const PLANE_WIDTH = 2.4;
 const PLANE_HEIGHT = (PLANE_WIDTH * CARD_HEIGHT) / CARD_WIDTH;
 
-// GPUTextureUsage bits (WebGPU spec): TEXTURE_BINDING | COPY_DST | RENDER_ATTACHMENT
-const TEXTURE_USAGE = 0x04 | 0x02 | 0x10;
-
 /**
  * The card is captured into a GPUTexture every paint event, three/webgpu samples it on a
  * tilting plane, and the card's element geometry is re-synced each frame so the button
  * inside stays clickable in 3D.
- *
- * Why not THREE.HTMLTexture: three 0.186 / 0.187 still target the pre-Chrome-157 API
- * (`layoutsubtree`, `GPUQueue.copyElementImageToTexture`), which Chrome 157 removed, so its
- * upload path returns early and the texture stays empty. Delete this bridge once three
- * switches to `content="drawable"` + `drawElementImageToTexture`.
  */
 export function WebGPUPlaneDemo({ support }: { support: Support }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -61,49 +54,6 @@ export function WebGPUPlaneDemo({ support }: { support: Support }) {
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setClearColor(0x000000, 0);
 
-      // --- DOM → GPUTexture bridge ---
-      // The texture is created inside the paint event, not here, for two reasons:
-      // getElementImageDefaultSize throws "No cached paint record" until the element has
-      // been painted once, and its result is in grid px, so the grid must already be sized
-      // (measuring at the default 300×150 grid gave a quarter-size, cropped texture).
-      // three initialises an ExternalTexture once and refuses a later sourceTexture swap
-      // ("Texture already initialized"), so a size change gets a new ExternalTexture, and
-      // the mesh stays hidden until the first texture exists.
-      let gpuTexture: HicGpuTexture | null = null;
-      let map: InstanceType<typeof THREE.ExternalTexture> | null = null;
-      const textureForCurrentSize = (): HicGpuTexture => {
-        const size = canvas.getElementImageDefaultSize(card);
-        const width = Math.ceil(size.width);
-        const height = Math.ceil(size.height);
-        if (gpuTexture && gpuTexture.width === width && gpuTexture.height === height) return gpuTexture;
-
-        const previousTexture = gpuTexture;
-        const previousMap = map;
-        const texture = device.createTexture({
-          size: { width, height },
-          // -srgb format: the sampler decodes to linear, three re-encodes on output.
-          format: 'rgba8unorm-srgb',
-          usage: TEXTURE_USAGE,
-        });
-        gpuTexture = texture;
-        map = new THREE.ExternalTexture(texture);
-        material.map = map;
-        material.needsUpdate = true;
-        mesh.visible = true;
-        fitElementToPlane();
-        previousMap?.dispose();
-        previousTexture?.destroy();
-        return texture;
-      };
-      canvas.onpaint = () => {
-        // An exception here reaches window.onerror, not the promise's catch below.
-        try {
-          device.queue.drawElementImageToTexture({ source: card }, { texture: textureForCurrentSize() });
-        } catch (err) {
-          fail(err);
-        }
-      };
-
       // --- scene ---
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 20);
@@ -120,6 +70,27 @@ export function WebGPUPlaneDemo({ support }: { support: Support }) {
       const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.MeshBasicMaterial({ color: 0x1e293b }));
       backdrop.position.z = -1.5;
       scene.add(backdrop);
+
+      // --- DOM → GPUTexture bridge: the mesh stays hidden until the first texture exists ---
+      const cardTexture = createDrawableTexture({
+        canvas,
+        element: card,
+        device,
+        material,
+        ExternalTextureClass: THREE.ExternalTexture,
+      });
+      canvas.onpaint = () => {
+        // An exception here reaches window.onerror, not the promise's catch below.
+        try {
+          if (cardTexture.prepare()) {
+            mesh.visible = true;
+            fitElementToPlane();
+          }
+          cardTexture.capture();
+        } catch (err) {
+          fail(err);
+        }
+      };
 
       // --- sizing: three owns the WebGPU canvas grid via setSize ---
       let cssWidth = canvas.clientWidth;
@@ -180,8 +151,7 @@ export function WebGPUPlaneDemo({ support }: { support: Support }) {
         observer.disconnect();
         canvas.onpaint = null;
         canvas.clearElementGeometry(card);
-        map?.dispose();
-        gpuTexture?.destroy();
+        cardTexture.dispose();
         geometry.dispose();
         material.dispose();
         renderer.dispose();

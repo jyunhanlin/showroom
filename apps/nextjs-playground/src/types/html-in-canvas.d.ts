@@ -94,6 +94,7 @@ declare global {
   }
 
   interface HicGpuQueue {
+    onSubmittedWorkDone(): Promise<void>;
     drawElementImageToTexture(
       source: { source: Element },
       destination: {

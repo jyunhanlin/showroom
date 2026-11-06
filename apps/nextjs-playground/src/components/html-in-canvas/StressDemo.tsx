@@ -4,6 +4,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Fallback } from './Fallback';
 import {
+  dropPercent,
+  MEASURE_LIMIT_MS,
+  nextFrame,
+  REFRESH_SAMPLES,
+  sampleFrameIntervals,
+  summarize,
+  watchDisturbances,
+  type Summary,
+} from './frame-sampling';
+import {
   createSeatLayout,
   RENDERING_MODE_IDS,
   RENDERING_MODES,
@@ -19,12 +29,6 @@ const WARMUP_FRAMES = 5;
 const TARGET_FRAMES = 300;
 const MIN_FRAMES = 20;
 const TARGET_MS = 6_000;
-// A huge frame may take seconds: stop anyway, and the row shows how few samples it got.
-const LIMIT_MS = 30_000;
-const REFRESH_SAMPLES = 30;
-// A frame is dropped once it takes noticeably longer than one display interval. Half an
-// interval of slack keeps ordinary timer jitter from counting.
-const DROPPED_FRAME_FACTOR = 1.5;
 
 type TestId = 'pan' | 'simulatedHover' | 'realHover';
 const TEST_LABELS: Record<TestId, string> = {
@@ -32,8 +36,6 @@ const TEST_LABELS: Record<TestId, string> = {
   simulatedHover: '模擬 hover',
   realHover: '真實 hover 延遲',
 };
-
-type Summary = { samples: number; median: number; p95: number; max: number };
 
 type Row = {
   id: string;
@@ -48,77 +50,6 @@ type Row = {
 };
 
 type BenchmarkRun = { id: number; modeId: RenderingModeId; count: number; refreshMs: number; refreshHidden: boolean };
-
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
-}
-
-function summarize(values: number[]): Summary {
-  const sorted = values.toSorted((a, b) => a - b);
-  return {
-    samples: sorted.length,
-    median: percentile(sorted, 0.5),
-    p95: percentile(sorted, 0.95),
-    max: sorted.at(-1) ?? 0,
-  };
-}
-
-/** The next frame's timestamp, or the current time if frames stop, as they do in a hidden tab. */
-function nextFrame(): Promise<number> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      cancelAnimationFrame(frame);
-      resolve(performance.now());
-    }, LIMIT_MS);
-    const frame = requestAnimationFrame((timestamp) => {
-      clearTimeout(timer);
-      resolve(timestamp);
-    });
-  });
-}
-
-async function sampleFrameIntervals(samples: number, shouldStop: () => boolean): Promise<number[]> {
-  const intervals: number[] = [];
-  const startedAt = performance.now();
-  let last = await nextFrame();
-  for (let i = 0; i < samples; i++) {
-    const now = await nextFrame();
-    if (shouldStop() || performance.now() - startedAt >= LIMIT_MS) return intervals;
-    intervals.push(now - last);
-    last = now;
-  }
-  return intervals;
-}
-
-/** Records anything that makes a measurement untrustworthy, from the last reset onward. */
-function watchDisturbances() {
-  let scrolled = false;
-  let hidden = document.visibilityState !== 'visible';
-  const onScroll = () => {
-    scrolled = true;
-  };
-  const onVisibility = () => {
-    if (document.visibilityState !== 'visible') hidden = true;
-  };
-  window.addEventListener('scroll', onScroll, { passive: true });
-  document.addEventListener('visibilitychange', onVisibility);
-  return {
-    reset() {
-      scrolled = false;
-      hidden = document.visibilityState !== 'visible';
-    },
-    wasHidden: () => hidden,
-    invalidNote() {
-      const problems = [hidden ? '頁面曾隱藏' : '', scrolled ? '量測中捲動' : ''].filter(Boolean);
-      return problems.length > 0 ? ` 數字無效：${problems.join('、')}` : '';
-    },
-    dispose() {
-      window.removeEventListener('scroll', onScroll);
-      document.removeEventListener('visibilitychange', onVisibility);
-    },
-  };
-}
 
 /**
  * One benchmark run. Every seat is redrawn on every draw, with no culling, in all modes.
@@ -149,11 +80,7 @@ function StressCanvas({
     const label = `${mode.label} ${run.count} 個`;
     const refresh = `螢幕更新間隔 ${run.refreshMs.toFixed(1)} ms`;
     const refreshNote = run.refreshHidden ? ' 掉幀 % 無效：量測螢幕更新間隔時頁面隱藏' : '';
-    const dropPct = (intervals: number[]) => {
-      if (intervals.length === 0) return null;
-      const dropped = intervals.filter((interval) => interval > run.refreshMs * DROPPED_FRAME_FACTOR).length;
-      return (dropped / intervals.length) * 100;
-    };
+    const dropPct = (intervals: number[]) => dropPercent(intervals, run.refreshMs);
     const rowBase = { runId: run.id, modeId: run.modeId, count: run.count };
 
     let drawSamples: number[] | null = null;
@@ -247,7 +174,13 @@ function StressCanvas({
         perFrame(frame);
         const elapsed = performance.now() - startedAt;
         const enoughSamples = intervals.length >= MIN_FRAMES;
-        if (intervals.length >= TARGET_FRAMES || (elapsed >= TARGET_MS && enoughSamples) || elapsed >= LIMIT_MS) break;
+        if (
+          intervals.length >= TARGET_FRAMES ||
+          (elapsed >= TARGET_MS && enoughSamples) ||
+          elapsed >= MEASURE_LIMIT_MS
+        ) {
+          break;
+        }
       }
       drawSamples = null;
       const noSamples = intervals.length === 0 ? ' 數字無效：沒有樣本' : '';
@@ -274,11 +207,11 @@ function StressCanvas({
       renderer.requestDraw();
       const drewInTime = await Promise.race([
         firstDraw.then(() => true),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), LIMIT_MS)),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), MEASURE_LIMIT_MS)),
       ]);
       if (cancelled) return;
       if (!drewInTime) {
-        onStatus(`${label}：${LIMIT_MS / 1000} 秒內沒有畫出第一幀，已停止。`);
+        onStatus(`${label}：${MEASURE_LIMIT_MS / 1000} 秒內沒有畫出第一幀，已停止。`);
         onFinished();
         return;
       }
@@ -367,8 +300,8 @@ function formatMs(row: Row, value: number) {
 }
 
 /**
- * Section 4. Nothing runs until a count is chosen, and `onActiveChange` unmounts the other
- * sections while it runs: their animation loops would otherwise be measured too.
+ * Section 4. Nothing runs until a count is chosen, and `onActiveChange` unmounts or pauses the
+ * other sections while it runs: their animation loops would otherwise be measured too.
  */
 export function StressDemo({
   support,
