@@ -5,7 +5,7 @@ Monorepo of small framework playgrounds. This glossary holds the vocabulary of t
 ## HTML-in-Canvas
 
 **Drawable**:
-A DOM element that opts in to being painted into a `<canvas>` as its own paint root. Marked with the `drawable` attribute; only laid out when the canvas has `content="drawable"`.
+A DOM element that opts in to being painted into a canvas as its own paint root.
 _Avoid_: layoutsubtree element, HTML texture source, overlay
 
 **Drawable subtree**:
@@ -13,9 +13,9 @@ A drawable plus all of its descendants, excluding any nested drawable and that d
 _Avoid_: paint root tree, layer
 
 **Paint event**:
-The browser's signal on a canvas that a drawable descendant changed visually and the canvas should redraw. Carries the list of changed drawables. Can also be requested explicitly for animation.
+The browser's signal to a canvas that a drawable changed visually or that a redraw was requested.
 _Avoid_: repaint callback, render event, frame event
 
 **Element geometry**:
-Where a drawn drawable sits on the canvas, in CSS pixels. The browser uses it to route clicks, answer layout queries, and report bounds to assistive technology. Set automatically by 2D drawing, set manually for WebGL and WebGPU.
+The position and shape of a drawn drawable on its canvas, as the browser knows it for input routing and assistive technology.
 _Avoid_: hit box, bounds, hit-test rect, transform (alone)

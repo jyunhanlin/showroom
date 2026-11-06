@@ -38,6 +38,12 @@ export function WebGPUPlaneDemo({ support }: { support: Support }) {
     let disposed = false;
     let cleanup = () => {};
 
+    const fail = (err: unknown) => {
+      console.error(err);
+      setError(err instanceof Error ? err.message : String(err));
+      cleanup();
+    };
+
     (async () => {
       // Dynamic import keeps three/webgpu out of Next's static prerender and the initial bundle.
       const THREE = await import('three/webgpu');
@@ -56,29 +62,46 @@ export function WebGPUPlaneDemo({ support }: { support: Support }) {
       renderer.setClearColor(0x000000, 0);
 
       // --- DOM → GPUTexture bridge ---
-      // The texture is created inside the first paint event, not here, for two reasons:
+      // The texture is created inside the paint event, not here, for two reasons:
       // getElementImageDefaultSize throws "No cached paint record" until the element has
       // been painted once, and its result is in grid px, so the grid must already be sized
       // (measuring at the default 300×150 grid gave a quarter-size, cropped texture).
       // three initialises an ExternalTexture once and refuses a later sourceTexture swap
-      // ("Texture already initialized"), so the mesh stays hidden until the texture exists.
+      // ("Texture already initialized"), so a size change gets a new ExternalTexture, and
+      // the mesh stays hidden until the first texture exists.
       let gpuTexture: HicGpuTexture | null = null;
       let map: InstanceType<typeof THREE.ExternalTexture> | null = null;
+      const textureForCurrentSize = (): HicGpuTexture => {
+        const size = canvas.getElementImageDefaultSize(card);
+        const width = Math.ceil(size.width);
+        const height = Math.ceil(size.height);
+        if (gpuTexture && gpuTexture.width === width && gpuTexture.height === height) return gpuTexture;
+
+        const previousTexture = gpuTexture;
+        const previousMap = map;
+        const texture = device.createTexture({
+          size: { width, height },
+          // -srgb format: the sampler decodes to linear, three re-encodes on output.
+          format: 'rgba8unorm-srgb',
+          usage: TEXTURE_USAGE,
+        });
+        gpuTexture = texture;
+        map = new THREE.ExternalTexture(texture);
+        material.map = map;
+        material.needsUpdate = true;
+        mesh.visible = true;
+        fitElementToPlane();
+        previousMap?.dispose();
+        previousTexture?.destroy();
+        return texture;
+      };
       canvas.onpaint = () => {
-        if (!gpuTexture) {
-          const size = canvas.getElementImageDefaultSize(card);
-          gpuTexture = device.createTexture({
-            size: { width: Math.ceil(size.width), height: Math.ceil(size.height) },
-            // -srgb format: the sampler decodes to linear, three re-encodes on output.
-            format: 'rgba8unorm-srgb',
-            usage: TEXTURE_USAGE,
-          });
-          map = new THREE.ExternalTexture(gpuTexture);
-          material.map = map;
-          material.needsUpdate = true;
-          mesh.visible = true;
+        // An exception here reaches window.onerror, not the promise's catch below.
+        try {
+          device.queue.drawElementImageToTexture({ source: card }, { texture: textureForCurrentSize() });
+        } catch (err) {
+          fail(err);
         }
-        device.queue.drawElementImageToTexture({ source: card }, { texture: gpuTexture });
       };
 
       // --- scene ---
@@ -116,9 +139,16 @@ export function WebGPUPlaneDemo({ support }: { support: Support }) {
 
       // --- element geometry: card px → plane local → world → clip → canvas CSS px ---
       // One 4×4 with the perspective row intact, so Chrome can hit-test the tilted plane.
-      const toLocal = new THREE.Matrix4()
-        .makeTranslation(-PLANE_WIDTH / 2, PLANE_HEIGHT / 2, 0)
-        .multiply(new THREE.Matrix4().makeScale(PLANE_WIDTH / CARD_WIDTH, -PLANE_HEIGHT / CARD_HEIGHT, 1));
+      const toLocal = new THREE.Matrix4();
+      // Re-measured with each new texture so clicks still map onto the plane after a resize.
+      const fitElementToPlane = () => {
+        toLocal
+          .makeTranslation(-PLANE_WIDTH / 2, PLANE_HEIGHT / 2, 0)
+          .multiply(
+            new THREE.Matrix4().makeScale(PLANE_WIDTH / card.offsetWidth, -PLANE_HEIGHT / card.offsetHeight, 1),
+          );
+      };
+      fitElementToPlane();
       const toScreen = new THREE.Matrix4();
       const m = new THREE.Matrix4();
       const syncGeometry = () => {
@@ -144,6 +174,8 @@ export function WebGPUPlaneDemo({ support }: { support: Support }) {
       canvas.requestPaint();
 
       cleanup = () => {
+        // Runs from fail() and again from the effect's own cleanup on unmount.
+        cleanup = () => {};
         renderer.setAnimationLoop(null);
         observer.disconnect();
         canvas.onpaint = null;
@@ -154,10 +186,7 @@ export function WebGPUPlaneDemo({ support }: { support: Support }) {
         material.dispose();
         renderer.dispose();
       };
-    })().catch((err: unknown) => {
-      console.error(err);
-      setError(err instanceof Error ? err.message : String(err));
-    });
+    })().catch(fail);
 
     return () => {
       disposed = true;

@@ -22,8 +22,8 @@ export function HtmlInCanvasPage() {
           </Link>
           <h1 className="text-2xl font-bold">HTML-in-Canvas</h1>
           <p className="text-sm leading-relaxed">
-            把活的 DOM 子樹畫進 <code>&lt;canvas&gt;</code>，畫進去之後還能點、還在無障礙樹裡。Chrome 157 起內建。
-            這頁每一段都用同一張 card 證明一件事。
+            把活的 DOM 子樹畫進 <code>&lt;canvas&gt;</code>，畫進去之後還能點、還在無障礙樹裡。Chrome 157 起內建。 第 1
+            段示範 2D 繪製、paint 事件和格線對齊，第 2 段示範 requestPaint 動畫，第 3 段示範 WebGPU 平面上的 hit-test。
           </p>
           <SupportBanner support={support} />
         </header>

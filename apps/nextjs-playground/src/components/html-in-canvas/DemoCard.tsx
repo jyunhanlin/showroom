@@ -19,8 +19,8 @@ export const CARD_WIDTH = 240;
 export const CARD_HEIGHT = 150;
 
 /**
- * The DOM that gets painted into a canvas. Fixed box so the texture size never changes
- * (border-box: drawElementImage draws the border box).
+ * The DOM that gets painted into a canvas. A fixed border-box, because drawElementImage
+ * draws the border box.
  */
 export function DemoCard({
   cardRef,
