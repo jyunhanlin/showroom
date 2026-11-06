@@ -1,17 +1,20 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 
 import { Container } from '@/components/layout/Container';
 import { DarkModeSwitch } from '@/components/layout/DarkModeSwitch';
 
 import { DrawableCardDemo } from './DrawableCardDemo';
 import { RequestPaintLoopDemo } from './RequestPaintLoopDemo';
+import { StressDemo } from './StressDemo';
 import { useHtmlInCanvasSupport, type Support } from './support';
 import { WebGPUPlaneDemo } from './WebGPUPlaneDemo';
 
 export function HtmlInCanvasPage() {
   const support = useHtmlInCanvasSupport();
+  const [stressActive, setStressActive] = useState(false);
 
   return (
     <Container className="min-h-full">
@@ -23,52 +26,75 @@ export function HtmlInCanvasPage() {
           <h1 className="text-2xl font-bold">HTML-in-Canvas</h1>
           <p className="text-sm leading-relaxed">
             把活的 DOM 子樹畫進 <code>&lt;canvas&gt;</code>，畫進去之後還能點、還在無障礙樹裡。Chrome 157 起內建。 第 1
-            段示範 2D 繪製、paint 事件和格線對齊，第 2 段示範 requestPaint 動畫，第 3 段示範 WebGPU 平面上的 hit-test。
+            段示範 2D 繪製、paint 事件和格線對齊，第 2 段示範 requestPaint 動畫，第 3 段示範 WebGPU 平面上的
+            hit-test，第 4 段是大量 drawable 的壓測。
           </p>
           <SupportBanner support={support} />
         </header>
 
-        <Section
-          title="1. 畫進去，然後聽 paint 事件"
-          body={
-            <>
-              <code>&lt;canvas content=&quot;drawable&quot;&gt;</code> 讓子元素參與排版；子元素加 <code>drawable</code>{' '}
-              就是獨立的 paint root。card 裡的按鈕也標了 <code>drawable</code>，所以它被排除在 card 的子樹之外，
-              由另一個 <code>drawElementImage</code> 畫到右邊並旋轉。 點它、或切換顏色，DOM 一變瀏覽器就送{' '}
-              <code>paint</code>，<code>changedElements</code> 只列出真的變了的 drawable。canvas 格線對齊裝置像素， 所以
-              Retina 上文字不糊。
-            </>
-          }
-        >
-          <DrawableCardDemo support={support} />
-        </Section>
+        {!stressActive && (
+          <>
+            <Section
+              title="1. 畫進去，然後聽 paint 事件"
+              body={
+                <>
+                  <code>&lt;canvas content=&quot;drawable&quot;&gt;</code> 讓子元素參與排版；子元素加{' '}
+                  <code>drawable</code> 就是獨立的 paint root。card 裡的按鈕也標了 <code>drawable</code>，所以它被排除在
+                  card 的子樹之外， 由另一個 <code>drawElementImage</code> 畫到右邊並旋轉。 點它、或切換顏色，DOM
+                  一變瀏覽器就送 <code>paint</code>，<code>changedElements</code> 只列出真的變了的 drawable。canvas
+                  格線對齊裝置像素， 所以 Retina 上文字不糊。
+                </>
+              }
+            >
+              <DrawableCardDemo support={support} />
+            </Section>
+
+            <Section
+              title="2. requestPaint() 當動畫迴圈"
+              body={
+                <>
+                  沒有 DOM 變化也想重畫，就在 handler 結尾呼叫 <code>requestPaint()</code>，下一個 frame 再送一次{' '}
+                  <code>paint</code>。每次 <code>drawElementImage</code> 都重設幾何，所以按鈕移到哪裡點擊就跟到哪裡。
+                  暫停後 paint/s 歸零；此時點按鈕仍會觸發一次 paint，因為 count 在 DOM 裡。
+                </>
+              }
+            >
+              <RequestPaintLoopDemo support={support} />
+            </Section>
+
+            <Section
+              title="3. WebGPU：貼到傾斜的平面上"
+              body={
+                <>
+                  2D 以外瀏覽器算不出元素在哪，所以每個 frame 把 screen × projection × view × model 乘成一顆帶透視的{' '}
+                  <code>DOMMatrix</code> 交給 <code>updateElementGeometry()</code>。 貼圖本身在 <code>paint</code>{' '}
+                  事件裡用 <code>drawElementImageToTexture</code> 寫進 <code>GPUTexture</code>，再包成 three 的{' '}
+                  <code>ExternalTexture</code>。three.js 內建的 <code>HTMLTexture</code> 還在用 Chrome 157 之前的 API
+                  名稱，所以這段自己橋。
+                </>
+              }
+            >
+              <WebGPUPlaneDemo support={support} />
+            </Section>
+          </>
+        )}
 
         <Section
-          title="2. requestPaint() 當動畫迴圈"
+          title="4. 壓測：座位圖情境"
           body={
             <>
-              沒有 DOM 變化也想重畫，就在 handler 結尾呼叫 <code>requestPaint()</code>，下一個 frame 再送一次{' '}
-              <code>paint</code>。每次 <code>drawElementImage</code> 都重設幾何，所以按鈕移到哪裡點擊就跟到哪裡。 暫停後
-              paint/s 歸零；此時點按鈕仍會觸發一次 paint，因為 count 在 DOM 裡。
+              比較三種畫 10×10 無文字座位的方式：每個座位一個 <code>drawable</code>、純 Canvas 2D，以及 WebGL2
+              instancing。每次繪製都重畫所有座位，程式不做裁切，但畫面外的座位會被 canvas 截掉，所以 1
+              萬個以上的像素工作量大致相同。 平移每個 frame 改位置；模擬 hover 每個 frame 做一次 hit test
+              並改一個座位的顏色。 幀時間取自 requestAnimationFrame
+              的間隔，最低就是螢幕更新間隔，低於上限時看不出還有多少餘裕，所以對照方式另外有 20 萬和 100 萬個。繪製 JS
+              時間不能跨方式比較：drawable 不含瀏覽器的樣式和排版，另外兩種不含點陣化和 GPU。真實 hover
+              延遲量到繪製後的下一個 frame，同樣看不到 GPU 時間。按下去才開始，5
+              萬個可能要跑一分鐘，執行時其他段會卸載，避免它們的動畫混進數字。結果只代表這台機器和這個瀏覽器。
             </>
           }
         >
-          <RequestPaintLoopDemo support={support} />
-        </Section>
-
-        <Section
-          title="3. WebGPU：貼到傾斜的平面上"
-          body={
-            <>
-              2D 以外瀏覽器算不出元素在哪，所以每個 frame 把 screen × projection × view × model 乘成一顆帶透視的{' '}
-              <code>DOMMatrix</code> 交給 <code>updateElementGeometry()</code>。 貼圖本身在 <code>paint</code> 事件裡用{' '}
-              <code>drawElementImageToTexture</code> 寫進 <code>GPUTexture</code>，再包成 three 的{' '}
-              <code>ExternalTexture</code>。three.js 內建的 <code>HTMLTexture</code> 還在用 Chrome 157 之前的 API
-              名稱，所以這段自己橋。
-            </>
-          }
-        >
-          <WebGPUPlaneDemo support={support} />
+          <StressDemo support={support} onActiveChange={setStressActive} />
         </Section>
 
         <footer className="text-xs text-slate-500">
@@ -100,7 +126,7 @@ function SupportBanner({ support }: { support: Support }) {
     >
       {ok
         ? '這個瀏覽器支援 HTML-in-Canvas（canvas.content === "drawable"）。'
-        : '這個瀏覽器不支援 HTML-in-Canvas，每一段會改顯示 canvas 外的同一組 DOM。'}
+        : '這個瀏覽器不支援 HTML-in-Canvas，第 1 到 3 段會改顯示 canvas 外的同一組 DOM，第 4 段只能跑不需要它的方式。'}
     </p>
   );
 }

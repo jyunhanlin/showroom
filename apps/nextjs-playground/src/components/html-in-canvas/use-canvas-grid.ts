@@ -44,7 +44,9 @@ export function useCanvasGrid(canvasRef: RefObject<HTMLCanvasElement | null>, en
       };
       // Setting width/height clears the bitmap; the paint event fires in the same frame
       // when the resize came from layout, but request one anyway to cover the first run.
-      canvas.requestPaint();
+      // Absent where HTML-in-Canvas is unsupported, which the stress section's comparison
+      // renderers still run on.
+      if ('requestPaint' in canvas) canvas.requestPaint();
     });
     observer.observe(canvas, supportsDpc ? { box: 'device-pixel-content-box' } : {});
     return () => observer.disconnect();
