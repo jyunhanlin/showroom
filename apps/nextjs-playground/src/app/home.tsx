@@ -95,6 +95,15 @@ const Index = () => (
             </Link>
           </li>
         </ul>
+        <h3 className="pt-8 text-lg font-semibold">Web platform playground</h3>
+        <ul className="list-disc space-y-1 pt-4 pl-5">
+          <li>
+            <Link className={linkCls} href="/html-in-canvas">
+              HTML in Canvas
+            </Link>{' '}
+            (Chrome 157+)
+          </li>
+        </ul>
       </div>
     </Main>
     <DarkModeSwitch />
