@@ -3,4 +3,4 @@
 :HL["/showroom/nextjs-playground/_next/static/media/95b1900a0a2aaf67-s.p.0y9-vok35vbxr.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/showroom/nextjs-playground/_next/static/media/ee6db54b00f87578-s.p.0x---2jmbr3lv.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 1:[["children",{"s":"__PAGE__","h":160}]]
-0:{"b":"Wopq-ZLaaKs17Oo0aHUXc","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
+0:{"b":"71jASMJUd-IFd6YX6SCku","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
